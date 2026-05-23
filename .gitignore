@@ -1,0 +1,16 @@
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+trained_models/*.pkl
+trained_models/*.pt
+trained_models/*.json
+logs/
+*.db
+*.log
+.DS_Store
+*.egg-info/
+dist/
+build/
+.pytest_cache/

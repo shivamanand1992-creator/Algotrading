@@ -1,0 +1,172 @@
+# =============================================================================
+# Nifty50 Intraday Options Trading System - Main Configuration
+# =============================================================================
+
+# --- Broker: Angel One SmartAPI ---
+broker:
+  name: "angel_one"
+  api_key: "${ANGEL_API_KEY}"          # Set in .env
+  client_code: "${ANGEL_CLIENT_CODE}"  # Set in .env
+  password: "${ANGEL_PASSWORD}"        # Set in .env
+  totp_secret: "${ANGEL_TOTP_SECRET}"  # Set in .env
+  base_url: "https://apiconnect.angelone.in"
+  websocket_feed_token: ""             # Auto-populated after login
+
+# --- Trading Universe ---
+trading:
+  underlying: "NIFTY"
+  exchange: "NFO"                      # NSE Futures & Options
+  spot_exchange: "NSE"
+  lot_size: 50                         # Nifty50 lot size
+  max_lots_per_trade: 2                # Max 2 lots = ₹X premium
+  max_simultaneous_positions: 3
+
+  # Session windows (IST)
+  market_open: "09:15"
+  market_close: "15:30"
+  trading_start: "09:20"              # Avoid first 5 min chaos
+  no_new_trades_after: "15:00"        # Stop entering after 3 PM
+  square_off_time: "15:20"            # Force exit all by 3:20 PM
+
+  # Expiry preference (WEEKLY for Nifty)
+  expiry_preference: "WEEKLY"         # WEEKLY or MONTHLY
+
+# --- Capital & Risk Management ---
+risk:
+  total_capital: 500000               # ₹5,00,000
+  daily_loss_limit_pct: 0.04          # 4% = ₹20,000/day max loss
+  daily_profit_target_pct: 0.02       # 2% = ₹10,000/day target (trail after this)
+  per_trade_risk_pct: 0.01            # 1% = ₹5,000 max risk per trade
+
+  # Options-specific SL/Target
+  option_buy_sl_pct: 0.30             # 30% SL on premium paid (buy side)
+  option_buy_target_pct: 0.60         # 60% target on premium paid
+  option_sell_sl_pct: 0.50            # 50% SL on premium received (sell side)
+
+  # Trailing stop loss
+  trailing_sl_trigger_pct: 0.20       # Activate trailing after 20% profit
+  trailing_sl_pct: 0.10               # Trail by 10% from peak
+
+  # Position sizing method: 'fixed_fraction' or 'kelly'
+  position_sizing: "fixed_fraction"
+  kelly_fraction: 0.25                # Quarter-Kelly for safety
+
+# --- AI/ML Configuration ---
+ml:
+  # Market Regime Classifier (XGBoost)
+  regime_model:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    retrain_frequency: "weekly"       # Retrain every week
+    regimes: ["trending_up", "trending_down", "ranging", "high_volatility"]
+
+  # Price Direction Predictor (LSTM + XGBoost Ensemble)
+  price_predictor:
+    lookback_window: 30               # 30 candles lookback
+    prediction_horizon: 5             # Predict next 5 candles
+    lstm_hidden_size: 128
+    lstm_layers: 2
+    dropout: 0.2
+    ensemble_weights:
+      lstm: 0.4
+      xgboost: 0.4
+      lightgbm: 0.2
+    min_confidence: 0.65              # Min confidence to act on signal
+
+  # Strategy Selector
+  strategy_selector:
+    update_frequency_minutes: 5      # Re-evaluate strategy every 5 min
+
+  # Training
+  training:
+    train_days: 252                   # 1 year of data
+    validation_split: 0.2
+    model_save_path: "trained_models/"
+
+# --- Strategies ---
+strategies:
+  # Trend Following (Buy CE/PE based on direction)
+  trend_following:
+    enabled: true
+    preferred_regime: ["trending_up", "trending_down"]
+    strike_selection: "ATM"          # ATM, OTM1, OTM2
+    entry_indicators:
+      ema_fast: 9
+      ema_slow: 21
+      rsi_period: 14
+      rsi_oversold: 40
+      rsi_overbought: 60
+      macd_fast: 12
+      macd_slow: 26
+      macd_signal: 9
+      vwap_deviation_pct: 0.3        # Trade when price deviates >0.3% from VWAP
+
+  # Options Premium Selling (Straddle/Strangle)
+  premium_selling:
+    enabled: true
+    preferred_regime: ["ranging"]
+    type: "short_strangle"           # short_straddle or short_strangle
+    strangle_width_pct: 1.0          # Sell strikes 1% OTM
+    min_iv_percentile: 60            # Only sell when IV > 60th percentile
+    max_iv_percentile: 90            # Don't sell if IV too high (event risk)
+
+  # OI/PCR Driven (Momentum from Open Interest)
+  oi_driven:
+    enabled: true
+    preferred_regime: ["trending_up", "trending_down", "high_volatility"]
+    pcr_bullish_threshold: 1.2       # PCR > 1.2 = bullish
+    pcr_bearish_threshold: 0.7       # PCR < 0.7 = bearish
+    oi_change_threshold: 0.10        # 10% OI change is significant
+
+  # Scalping (1-2 min quick trades)
+  scalping:
+    enabled: true
+    preferred_regime: ["trending_up", "trending_down"]
+    candle_interval: "1minute"
+    support_resistance_lookback: 20
+
+# --- Technical Indicators ---
+indicators:
+  # Timeframes to compute
+  primary_timeframe: "5minute"
+  secondary_timeframe: "15minute"
+  confirmation_timeframe: "1hour"
+
+  ema_periods: [9, 21, 50, 200]
+  rsi_period: 14
+  macd: {fast: 12, slow: 26, signal: 9}
+  bollinger: {period: 20, std_dev: 2}
+  atr_period: 14
+  supertrend: {period: 10, multiplier: 3}
+  vwap: true
+  pivot_points: true
+
+# --- Notifications ---
+notifications:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    sender: "${EMAIL_SENDER}"
+    password: "${EMAIL_PASSWORD}"
+    recipient: "${EMAIL_RECIPIENT}"
+
+  # Alert triggers
+  alert_on: ["trade_entry", "trade_exit", "sl_hit", "target_hit", "daily_loss_limit", "system_error"]
+
+# --- Database ---
+database:
+  url: "sqlite:///logs/trades.db"
+  log_every_tick: false              # Set true for detailed logging (large storage)
+
+# --- Logging ---
+logging:
+  level: "INFO"
+  file: "logs/trading.log"
+  rotation: "1 day"
+  retention: "30 days"

@@ -1,0 +1,546 @@
+"""
+model_trainer.py
+================
+Full training pipeline for the Nifty50 intraday options trading system.
+
+Orchestrates:
+  1. Fetching historical data from Angel One
+  2. Computing the full technical feature matrix
+  3. Training the MarketRegimeClassifier (XGBoost)
+  4. Training the PriceDirectionPredictor (LSTM + XGBoost + LightGBM ensemble)
+  5. Logging evaluation metrics (accuracy, confusion matrix)
+  6. Persisting all artefacts to trained_models/
+  7. Staleness checking + automatic retraining
+"""
+
+from __future__ import annotations
+
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import pytz
+from loguru import logger
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+)
+
+# Internal imports
+from data.angel_client import AngelOneClient
+from features.technical_indicators import TechnicalFeatureEngine
+from models.price_predictor import PriceDirectionPredictor
+from models.regime_classifier import MarketRegimeClassifier, REGIME_FEATURE_COLS
+
+IST = pytz.timezone("Asia/Kolkata")
+
+# ---------------------------------------------------------------------------
+# Nifty50 spot instrument token on NSE (Angel One)
+# ---------------------------------------------------------------------------
+_NIFTY_TOKEN = "26000"
+_NIFTY_SYMBOL = "Nifty 50"
+_NIFTY_EXCHANGE = "NSE"
+_CANDLE_INTERVAL = "FIVE_MINUTE"
+
+# ---------------------------------------------------------------------------
+# Feature columns used for price direction prediction
+# (superset; columns actually present in the built matrix are used)
+# ---------------------------------------------------------------------------
+_PRICE_FEATURE_CANDIDATES: List[str] = [
+    # EMA
+    "ema_9", "ema_21", "ema_50",
+    # RSI / Momentum
+    "rsi", "stoch_k", "stoch_d",
+    # MACD
+    "macd_line", "macd_signal", "macd_hist",
+    # Bollinger
+    "bb_upper", "bb_middle", "bb_lower", "bb_pct_b", "bb_width",
+    # ATR / Volatility
+    "atr", "atr_pct", "volatility_10", "volatility_20",
+    # VWAP
+    "vwap",
+    # SuperTrend
+    "supertrend", "supertrend_dir",
+    # ADX
+    "adx", "plus_di", "minus_di",
+    # OBV
+    "obv",
+    # Pivot points
+    "pp", "r1", "r2", "s1", "s2",
+    # Candlestick patterns
+    "pattern_doji", "pattern_hammer", "pattern_shooting_star",
+    "pattern_bull_engulfing", "pattern_bear_engulfing",
+    # Price action
+    "return_1", "return_5", "log_return_1",
+    "candle_range", "body_size", "body_to_range",
+    "upper_wick", "lower_wick",
+    # Support / Resistance
+    "dist_to_support", "dist_to_resistance",
+]
+
+
+class ModelTrainer:
+    """
+    Orchestrates data fetching, feature engineering, and model training.
+
+    Parameters
+    ----------
+    client : AngelOneClient
+        An already-connected Angel One API client.
+    config : dict
+        Full application config dict (from config/config.yaml).
+    """
+
+    def __init__(self, client: AngelOneClient, config: dict) -> None:
+        self.client = client
+        self.config = config
+
+        ml_cfg = config.get("ml", {})
+        training_cfg = ml_cfg.get("training", {})
+
+        self.train_days: int = int(training_cfg.get("train_days", 252))
+        self.save_dir = Path(
+            training_cfg.get("model_save_path", "trained_models")
+        )
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Sub-engines
+        self.feature_engine = TechnicalFeatureEngine()
+        self.regime_classifier = MarketRegimeClassifier(config)
+        self.price_predictor = PriceDirectionPredictor(
+            config.get("ml", {}).get("price_predictor", {})
+        )
+
+        # Will be set after fetch_training_data
+        self._raw_df: Optional[pd.DataFrame] = None
+        self._feature_df: Optional[pd.DataFrame] = None
+        self._feature_cols: Optional[List[str]] = None
+
+        logger.info(
+            f"ModelTrainer initialised. "
+            f"train_days={self.train_days}, save_dir={self.save_dir}"
+        )
+
+    # ------------------------------------------------------------------
+    # Data fetching
+    # ------------------------------------------------------------------
+
+    def fetch_training_data(self, days: int = 252) -> pd.DataFrame:
+        """
+        Fetch historical Nifty50 5-minute OHLCV data from Angel One.
+
+        Fetches `days` calendar days worth of 5-min candles.  Angel One
+        limits each API call to 30-day windows, so multiple calls are
+        batched automatically.
+
+        Parameters
+        ----------
+        days : int
+            Number of calendar days of history to fetch (default 252 ≈ 1 trading year).
+
+        Returns
+        -------
+        pd.DataFrame  — sorted OHLCV with DatetimeIndex (IST-aware)
+        """
+        logger.info(f"Fetching {days} days of Nifty50 5-min data from Angel One…")
+
+        end_dt = datetime.now(IST)
+        start_dt = end_dt - timedelta(days=days)
+
+        all_frames: List[pd.DataFrame] = []
+
+        # Angel One historical data API maximum window per request ~30 days
+        window_days = 30
+        cursor = start_dt
+
+        while cursor < end_dt:
+            chunk_end = min(cursor + timedelta(days=window_days), end_dt)
+            from_str = cursor.strftime("%Y-%m-%d %H:%M")
+            to_str = chunk_end.strftime("%Y-%m-%d %H:%M")
+
+            try:
+                chunk = self.client.get_historical_data(
+                    exchange=_NIFTY_EXCHANGE,
+                    symbol_token=_NIFTY_TOKEN,
+                    interval=_CANDLE_INTERVAL,
+                    from_date=from_str,
+                    to_date=to_str,
+                )
+                if chunk is not None and not chunk.empty:
+                    all_frames.append(chunk)
+                    logger.debug(
+                        f"Fetched [{from_str} → {to_str}]: {len(chunk)} candles"
+                    )
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to fetch [{from_str} → {to_str}]: {exc}. Skipping chunk."
+                )
+
+            cursor = chunk_end
+            # Polite delay to respect rate limits
+            time.sleep(0.25)
+
+        if not all_frames:
+            raise RuntimeError(
+                "fetch_training_data: No data could be retrieved from Angel One."
+            )
+
+        df = pd.concat(all_frames, ignore_index=True)
+        df = df.drop_duplicates(subset=["timestamp"])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+
+        # Set DatetimeIndex (IST-aware)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        if df["timestamp"].dt.tz is None:
+            df["timestamp"] = df["timestamp"].dt.tz_localize(IST)
+        else:
+            df["timestamp"] = df["timestamp"].dt.tz_convert(IST)
+        df = df.set_index("timestamp")
+
+        # Keep only market hours (09:15 – 15:30)
+        df = df.between_time("09:15", "15:30")
+
+        logger.info(
+            f"Training data fetched: {len(df)} candles "
+            f"({df.index[0]} → {df.index[-1]})"
+        )
+        self._raw_df = df
+        return df
+
+    # ------------------------------------------------------------------
+    # Feature engineering
+    # ------------------------------------------------------------------
+
+    def build_feature_matrix(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Run TechnicalFeatureEngine on raw OHLCV and return a clean feature DataFrame.
+
+        Steps
+        -----
+        1. Compute all technical indicators via TechnicalFeatureEngine.compute_all()
+        2. (Optionally) add any options-derived features if available.
+        3. Drop rows with all-NaN feature values (warm-up period).
+        4. Forward-fill remaining NaN values (indicator warm-up artefacts).
+        5. Clip extreme outliers (±10 std from rolling mean) per feature.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Raw OHLCV DataFrame (columns: open, high, low, close, volume).
+
+        Returns
+        -------
+        pd.DataFrame  — enriched DataFrame with all feature columns.
+        """
+        logger.info("Building feature matrix…")
+
+        # 1. Technical indicators
+        feat_df = self.feature_engine.compute_all(df)
+
+        # 2. Drop leading rows where all indicator columns are NaN
+        indicator_cols = [c for c in feat_df.columns
+                          if c not in ("open", "high", "low", "close", "volume")]
+        feat_df = feat_df.dropna(subset=indicator_cols, how="all")
+
+        # 3. Forward-fill residual NaN values from warm-up
+        feat_df = feat_df.ffill()
+
+        # 4. Clip extreme outliers (±10σ window-based)
+        for col in indicator_cols:
+            if feat_df[col].dtype in (np.float32, np.float64, float):
+                mu = feat_df[col].rolling(window=200, min_periods=10).mean()
+                sigma = feat_df[col].rolling(window=200, min_periods=10).std()
+                lower = mu - 10 * sigma
+                upper = mu + 10 * sigma
+                feat_df[col] = feat_df[col].clip(lower=lower, upper=upper)
+
+        # 5. Final NaN drop (safety)
+        feat_df = feat_df.dropna(how="any", subset=[
+            c for c in feat_df.columns
+            if c not in ("open", "high", "low", "close", "volume")
+        ])
+
+        logger.info(
+            f"Feature matrix built: {feat_df.shape[0]} rows × "
+            f"{feat_df.shape[1]} columns."
+        )
+        self._feature_df = feat_df
+        return feat_df
+
+    # ------------------------------------------------------------------
+    # Full training pipeline
+    # ------------------------------------------------------------------
+
+    def train_all_models(self) -> None:
+        """
+        End-to-end training pipeline.
+
+        Steps
+        -----
+        1. Fetch historical Nifty50 spot data (5-min candles).
+        2. Build the full feature matrix.
+        3. Train MarketRegimeClassifier.
+        4. Train PriceDirectionPredictor.
+        5. Log evaluation metrics.
+        6. Save all models to trained_models/.
+        """
+        logger.info("========== ModelTrainer: train_all_models() ==========")
+
+        # 1. Fetch data
+        logger.info("Step 1/5: Fetching training data…")
+        df_raw = self.fetch_training_data(days=self.train_days)
+
+        # 2. Build features
+        logger.info("Step 2/5: Building feature matrix…")
+        df_feat = self.build_feature_matrix(df_raw)
+
+        # 3. Train regime classifier
+        logger.info("Step 3/5: Training MarketRegimeClassifier…")
+        self.regime_classifier.train(df_feat)
+
+        # 4. Determine price-predictor feature columns
+        logger.info("Step 4/5: Training PriceDirectionPredictor…")
+        feature_cols = self.get_feature_columns(df_feat)
+        self._feature_cols = feature_cols
+        self.price_predictor.train(df_feat, feature_cols)
+
+        # 5. Cross-model evaluation summary
+        logger.info("Step 5/5: Evaluating on holdout set…")
+        split_idx = int(len(df_feat) * 0.8)
+        test_df = df_feat.iloc[split_idx:]
+        if len(test_df) > 0:
+            self.evaluate_models(test_df)
+        else:
+            logger.warning("No holdout rows available for evaluation.")
+
+        logger.info("========== ModelTrainer: all models trained & saved ==========")
+
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate_models(self, test_df: pd.DataFrame) -> Dict[str, object]:
+        """
+        Evaluate both models on a holdout set and print reports.
+
+        Parameters
+        ----------
+        test_df : pd.DataFrame
+            Feature-enriched test DataFrame (same columns as training).
+
+        Returns
+        -------
+        dict with keys 'regime_accuracy', 'price_accuracy'
+        """
+        results: Dict[str, object] = {}
+
+        # ── Regime classifier ──────────────────────────────────────────
+        logger.info("--- Evaluating MarketRegimeClassifier ---")
+        try:
+            feat_cols_regime = [
+                c for c in self.regime_classifier.feature_cols
+                if c in test_df.columns
+            ]
+            if feat_cols_regime and self.regime_classifier.model is not None:
+                X_test_regime = self.regime_classifier.scaler.transform(
+                    test_df[feat_cols_regime]
+                    .reindex(columns=self.regime_classifier.feature_cols, fill_value=0)
+                    .values.astype(np.float32)
+                )
+                # Auto-label test set for evaluation
+                from models.regime_classifier import _create_regime_labels
+                y_true_str = _create_regime_labels(test_df).values
+                y_true_enc = self.regime_classifier.label_encoder.transform(y_true_str)
+                y_pred_enc = self.regime_classifier.model.predict(X_test_regime)
+
+                acc = accuracy_score(y_true_enc, y_pred_enc)
+                results["regime_accuracy"] = acc
+                logger.info(f"Regime classifier test accuracy: {acc:.4f}")
+
+                target_names = list(
+                    self.regime_classifier.label_encoder.classes_
+                )
+                report = classification_report(
+                    y_true_enc, y_pred_enc,
+                    target_names=target_names,
+                    zero_division=0,
+                )
+                logger.info(f"Regime classification report:\n{report}")
+
+                cm = confusion_matrix(y_true_enc, y_pred_enc)
+                logger.info(
+                    f"Regime confusion matrix ({target_names}):\n{cm}"
+                )
+        except Exception as exc:
+            logger.warning(f"Regime evaluation failed: {exc}")
+
+        # ── Price direction predictor ──────────────────────────────────
+        logger.info("--- Evaluating PriceDirectionPredictor ---")
+        try:
+            if (self.price_predictor.lstm_model is not None
+                    and self._feature_cols is not None):
+                feature_cols = [
+                    c for c in self._feature_cols if c in test_df.columns
+                ]
+                # Need to create targets for evaluation
+                df_eval = test_df.copy()
+                df_eval["target"] = self.price_predictor.create_target(df_eval)
+                df_eval = df_eval.dropna(
+                    subset=["target"] + feature_cols
+                )
+
+                if len(df_eval) > self.price_predictor.lookback + 5:
+                    df_scaled = df_eval.copy()
+                    df_scaled[feature_cols] = (
+                        self.price_predictor.scaler.transform(df_scaled[feature_cols])
+                    )
+                    X_lstm, X_tab, y = self.price_predictor.prepare_sequences(
+                        df_scaled, feature_cols, "target",
+                        self.price_predictor.lookback,
+                    )
+                    self.price_predictor._evaluate_ensemble(X_lstm, X_tab, y)
+                    # Simple accuracy
+                    acc = accuracy_score(
+                        y,
+                        np.argmax(
+                            self.price_predictor._ensemble_predict(
+                                *_batch_lstm_predict(
+                                    self.price_predictor, X_lstm
+                                ),
+                                self.price_predictor.xgb_model.predict_proba(X_tab),
+                                self.price_predictor.lgbm_model.predict_proba(X_tab),
+                                self.price_predictor.weights,
+                            ),
+                            axis=1,
+                        ),
+                    )
+                    results["price_accuracy"] = acc
+                    logger.info(f"Price predictor test accuracy: {acc:.4f}")
+        except Exception as exc:
+            logger.warning(f"Price predictor evaluation failed: {exc}")
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Staleness check & automatic retraining
+    # ------------------------------------------------------------------
+
+    def retrain_if_needed(self, max_age_days: int = 7) -> bool:
+        """
+        Retrain all models if the persisted artefacts are older than
+        `max_age_days` days.
+
+        Parameters
+        ----------
+        max_age_days : int
+            Maximum age (in days) of model artefacts before retraining.
+            Default is 7 (weekly retraining schedule).
+
+        Returns
+        -------
+        bool — True if retraining was triggered, False otherwise.
+        """
+        # Use the regime classifier metadata file as the staleness sentinel
+        sentinel = self.save_dir / "regime_classifier_meta.pkl"
+
+        if not sentinel.exists():
+            logger.info(
+                "No saved model artefacts found. Starting initial training."
+            )
+            self.train_all_models()
+            return True
+
+        age = datetime.now() - datetime.fromtimestamp(sentinel.stat().st_mtime)
+        age_days = age.total_seconds() / 86_400
+
+        if age_days > max_age_days:
+            logger.info(
+                f"Models are {age_days:.1f} days old (limit={max_age_days}). "
+                "Retraining now…"
+            )
+            self.train_all_models()
+            return True
+
+        logger.info(
+            f"Models are {age_days:.1f} days old — within the {max_age_days}-day "
+            "threshold. No retraining needed."
+        )
+        return False
+
+    # ------------------------------------------------------------------
+    # Feature column registry
+    # ------------------------------------------------------------------
+
+    def get_feature_columns(
+        self, df: Optional[pd.DataFrame] = None
+    ) -> List[str]:
+        """
+        Return the ordered list of feature column names used for training
+        the PriceDirectionPredictor.
+
+        If a DataFrame is supplied the list is filtered to only columns
+        that are actually present in that DataFrame.  If no DataFrame is
+        given the cached list is returned (populated after training).
+
+        Parameters
+        ----------
+        df : pd.DataFrame, optional
+            Feature-enriched DataFrame to intersect against.
+
+        Returns
+        -------
+        List[str]
+        """
+        if df is not None:
+            available = [c for c in _PRICE_FEATURE_CANDIDATES if c in df.columns]
+            # Exclude raw OHLCV and volume — only derived features
+            available = [
+                c for c in available
+                if c not in ("open", "high", "low", "close", "volume")
+            ]
+            if not available:
+                raise ValueError(
+                    "get_feature_columns: no candidate feature columns found in "
+                    "the supplied DataFrame.  Run build_feature_matrix() first."
+                )
+            logger.debug(f"Feature columns selected: {len(available)}")
+            return available
+
+        if self._feature_cols is not None:
+            return self._feature_cols
+
+        # Fall back to full candidate list (caller's responsibility to filter)
+        return list(_PRICE_FEATURE_CANDIDATES)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _batch_lstm_predict(
+    predictor: PriceDirectionPredictor,
+    X_lstm: np.ndarray,
+    batch_size: int = 64,
+) -> np.ndarray:
+    """
+    Run batched LSTM inference and return probability array (n, 3).
+    Avoids loading the full dataset into GPU memory at once.
+    """
+    import torch
+
+    predictor.lstm_model.eval()
+    probs_list = []
+    with torch.no_grad():
+        for start in range(0, len(X_lstm), batch_size):
+            end = start + batch_size
+            batch = torch.tensor(
+                X_lstm[start:end], dtype=torch.float32
+            ).to(predictor.device)
+            logits = predictor.lstm_model(batch)
+            p = torch.softmax(logits, dim=-1).cpu().numpy()
+            probs_list.append(p)
+    return np.vstack(probs_list)
