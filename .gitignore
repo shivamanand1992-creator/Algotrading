@@ -3,9 +3,8 @@
 __pycache__/
 .venv/
 venv/
-trained_models/*.pkl
-trained_models/*.pt
-trained_models/*.json
+trained_models/*
+!trained_models/.gitkeep
 logs/
 *.db
 *.log
