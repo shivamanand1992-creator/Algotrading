@@ -221,33 +221,62 @@ class MarketRegimeClassifier:
                 f"Insufficient training data after cleaning: {len(df)} rows."
             )
 
-        # Encode labels
+        # Encode labels.
+        # The LabelEncoder is always fitted on the *full* REGIME_LABELS list
+        # so the class-index mapping is stable across training runs.
+        # However, XGBoost requires labels to be contiguous [0..n-1].
+        # We achieve this by adding synthetic hold-out rows for any class
+        # that is missing from the actual training data — these phantom rows
+        # use the mean feature vector and are excluded from the val set.
         self.label_encoder = LabelEncoder()
-        self.label_encoder.fit(self.regimes)  # fit on full label set for stability
-        y = self.label_encoder.transform(df["regime"].values)
-        X = df[self.feature_cols].values.astype(np.float32)
+        self.label_encoder.fit(self.regimes)  # stable ordering of all 4 classes
+        y_raw = self.label_encoder.transform(df["regime"].values)
+        X_raw = df[self.feature_cols].values.astype(np.float32)
+
+        # Ensure all n_classes labels appear in training data to satisfy XGBoost
+        n_regime_classes = len(self.label_encoder.classes_)
+        present_classes = set(np.unique(y_raw))
+        missing_classes = sorted(
+            set(range(n_regime_classes)) - present_classes
+        )
+        if missing_classes:
+            logger.warning(
+                f"Regime classes absent from data (will add phantom rows): "
+                + str([self.label_encoder.inverse_transform([c])[0]
+                       for c in missing_classes])
+            )
+            phantom_X = np.tile(
+                X_raw.mean(axis=0), (len(missing_classes), 1)
+            ).astype(np.float32)
+            phantom_y = np.array(missing_classes, dtype=int)
+            X_raw = np.vstack([X_raw, phantom_X])
+            y_raw = np.concatenate([y_raw, phantom_y])
 
         # Scale
         self.scaler = StandardScaler()
-        X_scaled = self.scaler.fit_transform(X)
+        X_scaled = self.scaler.fit_transform(X_raw)
 
-        # Train / val split (80/20, time-ordered)
-        split = int(len(y) * 0.8)
-        X_train, X_val = X_scaled[:split], X_scaled[split:]
-        y_train, y_val = y[:split], y[split:]
+        # Train / val split (80/20, time-ordered — phantom rows stay in train)
+        real_n = len(df)
+        split = int(real_n * 0.8)
+        X_train = np.vstack([X_scaled[:split], X_scaled[real_n:]])  # real + phantom
+        y_train = np.concatenate([y_raw[:split], y_raw[real_n:]])
+        X_val = X_scaled[split:real_n]
+        y_val = y_raw[split:real_n]
 
         logger.info(
-            f"Regime training: {len(y_train)} train, {len(y_val)} val, "
-            f"{len(self.feature_cols)} features."
+            f"Regime training: {len(y_train)} train (incl. {len(missing_classes)} phantom), "
+            f"{len(y_val)} val, {len(self.feature_cols)} features."
         )
 
-        # Label distribution
-        unique, counts = np.unique(y_train, return_counts=True)
+        # Label distribution (train, real rows only)
+        y_train_real = y_raw[:split]
+        unique, counts = np.unique(y_train_real, return_counts=True)
         dist = {
-            self.label_encoder.inverse_transform([u])[0]: int(c)
+            self.label_encoder.inverse_transform([int(u)])[0]: int(c)
             for u, c in zip(unique, counts)
         }
-        logger.info(f"Regime label distribution (train): {dist}")
+        logger.info(f"Regime label distribution (train, real): {dist}")
 
         # Train XGBoost
         self.model = xgb.XGBClassifier(
@@ -256,15 +285,16 @@ class MarketRegimeClassifier:
             learning_rate=self.learning_rate,
             subsample=0.8,
             colsample_bytree=0.8,
-            use_label_encoder=False,
             eval_metric="mlogloss",
+            num_class=n_regime_classes,
+            objective="multi:softprob",
             random_state=42,
             n_jobs=-1,
         )
         self.model.fit(
             X_train,
             y_train,
-            eval_set=[(X_val, y_val)],
+            eval_set=[(X_val, y_val)] if len(y_val) > 0 else None,
             verbose=False,
         )
 

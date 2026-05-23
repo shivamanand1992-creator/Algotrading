@@ -422,27 +422,66 @@ class PriceDirectionPredictor:
         self.lstm_model.eval()
         logger.info("LSTM training complete.")
 
+    @staticmethod
+    def _ensure_all_classes(
+        X: np.ndarray, y: np.ndarray, n_classes: int = 3
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Guarantee that labels 0..n_classes-1 all appear in y.
+
+        XGBoost ≥ 2.x and LightGBM require contiguous integer labels
+        starting at 0.  If some classes are missing from the training
+        split (e.g. all samples are flat), we add phantom rows using the
+        column-wise mean feature values so the model can compile.
+
+        Parameters
+        ----------
+        X         : (n_samples, n_features)
+        y         : (n_samples,) — label-encoded, values in {0, 1, 2}
+        n_classes : int — total number of classes (3 for price direction)
+
+        Returns
+        -------
+        X_out, y_out  — with any missing class labels appended
+        """
+        present = set(np.unique(y))
+        missing = sorted(set(range(n_classes)) - present)
+        if not missing:
+            return X, y
+        phantom_X = np.tile(X.mean(axis=0), (len(missing), 1)).astype(X.dtype)
+        phantom_y = np.array(missing, dtype=y.dtype)
+        return np.vstack([X, phantom_X]), np.concatenate([y, phantom_y])
+
     def _train_xgb(self, X: np.ndarray, y: np.ndarray) -> None:
         """Train XGBoost classifier on tabular features."""
         logger.info("Training XGBoost classifier …")
+
+        # Ensure all 3 class labels are present (required by XGBoost ≥ 2.x)
+        X_fit, y_fit = self._ensure_all_classes(X, y, n_classes=3)
+
         self.xgb_model = xgb.XGBClassifier(
             n_estimators=300,
             max_depth=6,
             learning_rate=0.05,
             subsample=0.8,
             colsample_bytree=0.8,
-            use_label_encoder=False,
             eval_metric="mlogloss",
+            num_class=3,
+            objective="multi:softprob",
             random_state=42,
             n_jobs=-1,
         )
-        self.xgb_model.fit(X, y)
+        self.xgb_model.fit(X_fit, y_fit)
         train_acc = accuracy_score(y, self.xgb_model.predict(X))
         logger.info(f"XGBoost train accuracy: {train_acc:.4f}")
 
     def _train_lgbm(self, X: np.ndarray, y: np.ndarray) -> None:
         """Train LightGBM classifier on tabular features."""
         logger.info("Training LightGBM classifier …")
+
+        # Ensure all 3 class labels are present (required by LightGBM)
+        X_fit, y_fit = self._ensure_all_classes(X, y, n_classes=3)
+
         self.lgbm_model = lgb.LGBMClassifier(
             n_estimators=300,
             max_depth=6,
@@ -451,9 +490,10 @@ class PriceDirectionPredictor:
             colsample_bytree=0.8,
             random_state=42,
             n_jobs=-1,
+            num_class=3,
             verbose=-1,
         )
-        self.lgbm_model.fit(X, y)
+        self.lgbm_model.fit(X_fit, y_fit)
         train_acc = accuracy_score(y, self.lgbm_model.predict(X))
         logger.info(f"LightGBM train accuracy: {train_acc:.4f}")
 
@@ -598,8 +638,13 @@ class PriceDirectionPredictor:
 
         acc = accuracy_score(y, preds)
         logger.info(f"Ensemble validation accuracy: {acc:.4f}")
+        # labels=[0,1,2] ensures report covers all classes even when some
+        # are absent from the validation split (small datasets).
         report = classification_report(
-            y, preds, target_names=["down", "flat", "up"], zero_division=0
+            y, preds,
+            labels=[0, 1, 2],
+            target_names=["down", "flat", "up"],
+            zero_division=0,
         )
         logger.info(f"Classification report:\n{report}")
 
@@ -629,9 +674,10 @@ class PriceDirectionPredictor:
         xgb_path = self.save_dir / "xgb_price_predictor.json"
         self.xgb_model.save_model(str(xgb_path))
 
-        # LightGBM
-        lgbm_path = self.save_dir / "lgbm_price_predictor.txt"
-        self.lgbm_model.booster_.save_model(str(lgbm_path))
+        # LightGBM — persist the full sklearn wrapper with joblib so we
+        # can restore predict_proba without re-fitting.
+        lgbm_path = self.save_dir / "lgbm_price_predictor.pkl"
+        joblib.dump(self.lgbm_model, lgbm_path)
 
         # Scaler + metadata
         meta_path = self.save_dir / "price_predictor_meta.pkl"
@@ -678,9 +724,21 @@ class PriceDirectionPredictor:
         self.xgb_model = xgb.XGBClassifier()
         self.xgb_model.load_model(str(xgb_path))
 
-        # Restore LightGBM
-        lgbm_path = self.save_dir / "lgbm_price_predictor.txt"
-        self.lgbm_model = lgb.LGBMClassifier()
-        self.lgbm_model.booster_ = lgb.Booster(model_file=str(lgbm_path))
+        # Restore LightGBM — full sklearn wrapper persisted with joblib
+        lgbm_path = self.save_dir / "lgbm_price_predictor.pkl"
+        if not lgbm_path.exists():
+            # Backwards-compatibility: try old .txt format if pkl is missing
+            lgbm_txt = self.save_dir / "lgbm_price_predictor.txt"
+            if lgbm_txt.exists():
+                self.lgbm_model = lgb.LGBMClassifier()
+                booster = lgb.Booster(model_file=str(lgbm_txt))
+                # Attach booster via internal attribute (LightGBM ≤ 3.x)
+                self.lgbm_model._Booster = booster
+            else:
+                raise FileNotFoundError(
+                    f"LightGBM model not found at {lgbm_path} or {lgbm_txt}"
+                )
+        else:
+            self.lgbm_model = joblib.load(lgbm_path)
 
         logger.info("PriceDirectionPredictor loaded successfully.")
