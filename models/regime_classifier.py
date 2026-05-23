@@ -277,8 +277,14 @@ class MarketRegimeClassifier:
             self.label_encoder.inverse_transform([i])[0]
             for i in range(len(self.label_encoder.classes_))
         ]
+        # labels= ensures the report covers all classes even if some are
+        # absent from y_val (possible with small validation sets).
+        all_labels = list(range(len(self.label_encoder.classes_)))
         report = classification_report(
-            y_val, y_pred, target_names=target_names, zero_division=0
+            y_val, y_pred,
+            labels=all_labels,
+            target_names=target_names,
+            zero_division=0,
         )
         logger.info(f"Regime classification report:\n{report}")
 
