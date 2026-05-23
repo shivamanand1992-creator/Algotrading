@@ -1,300 +1,774 @@
 """
-Signal generator — combines market regime + price prediction into actionable options signals.
+signal_generator.py
+===================
+Combines MarketRegimeClassifier + PriceDirectionPredictor outputs into
+actionable options trading signals for Nifty50 intraday.
+
+Signal actions
+--------------
+BUY_CE          — Buy a Call option (trend-following long)
+BUY_PE          — Buy a Put option (trend-following short)
+SELL_STRADDLE   — Sell ATM CE + PE simultaneously (premium selling)
+NO_TRADE        — No actionable setup detected
+
+Decision matrix
+---------------
+Regime           | Prediction | Confidence | Action
+─────────────────┼────────────┼────────────┼──────────────────────────────
+trending_up      | up  (+1)   | ≥ 0.65     | BUY_CE  (ATM or OTM+1)
+trending_down    | down (-1)  | ≥ 0.65     | BUY_PE  (ATM or OTM-1)
+ranging          | any        | ≥ 0.65     | SELL_STRADDLE (if IV is high)
+high_volatility  | up  (+1)   | ≥ 0.65     | BUY_CE  (ATM only, small size)
+high_volatility  | down (-1)  | ≥ 0.65     | BUY_PE  (ATM only, small size)
+─── (confidence below threshold) ────────────────── NO_TRADE ────────────
 """
 
+from __future__ import annotations
+
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
-import pandas as pd
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-from loguru import logger
+import pandas as pd
 import pytz
+from loguru import logger
+from scipy.stats import norm
+
+from models.price_predictor import PriceDirectionPredictor
+from models.regime_classifier import MarketRegimeClassifier
 
 IST = pytz.timezone("Asia/Kolkata")
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+_NIFTY_STRIKE_STEP = 50          # Nifty50 strikes are in multiples of 50
+_DEFAULT_LOT_SIZE = 50           # Nifty50 lot size
+_MIN_CONFIDENCE = 0.65           # Default minimum confidence threshold
+_HIGH_IV_PERCENTILE_THRESHOLD = 60.0  # IV percentile above which IV is "high"
+
+
+# =============================================================================
+# Signal dataclass
+# =============================================================================
 
 @dataclass
 class Signal:
-    action: str                    # BUY_CE | BUY_PE | SELL_STRADDLE | SELL_STRANGLE | NO_TRADE
+    """
+    Actionable options trading signal produced by SignalGenerator.
+
+    Fields
+    ------
+    action          : str   — 'BUY_CE' | 'BUY_PE' | 'SELL_STRADDLE' | 'NO_TRADE'
+    strike          : int   — selected strike price (0 for NO_TRADE)
+    expiry          : str   — expiry date string e.g. "25-MAY-2026"
+    confidence      : float — ensemble confidence [0, 1]
+    regime          : str   — detected market regime
+    direction       : int   — predicted direction: +1 (up), -1 (down), 0 (flat)
+    reasons         : list  — human-readable explanation strings
+    spot_price      : float — Nifty50 spot price at signal time
+    estimated_premium: float— estimated option premium (0 if unknown)
+    position_size   : int   — number of lots recommended
+    is_small_size   : bool  — True when high_volatility regime (reduced size)
+    timestamp       : datetime — signal generation time (IST-aware)
+    regime_probs    : dict  — {'trending_up': p, 'ranging': p, ...}
+    direction_probs : dict  — {'up': p, 'flat': p, 'down': p}
+
+    Properties
+    ----------
+    is_actionable   : bool  — True unless action == 'NO_TRADE'
+    is_buy          : bool  — True for BUY_CE / BUY_PE
+    is_sell         : bool  — True for SELL_STRADDLE
+    option_type     : str   — 'CE' | 'PE' | 'STRADDLE' | ''
+    """
+
+    action: str
     strike: int = 0
-    option_type: str = ""          # CE | PE | BOTH
     expiry: str = ""
-    symbol: str = ""
-    token: str = ""
-    exchange: str = "NFO"
-    qty: int = 50
-    price: float = 0.0
-    sl_price: float = 0.0
-    target_price: float = 0.0
     confidence: float = 0.0
     regime: str = "unknown"
-    prediction: int = 0            # -1, 0, +1
-    reasons: list = field(default_factory=list)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(IST))
+    direction: int = 0
+    reasons: List[str] = field(default_factory=list)
+    spot_price: float = 0.0
+    estimated_premium: float = 0.0
+    position_size: int = 1
+    is_small_size: bool = False
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(IST)
+    )
+    regime_probs: Dict[str, float] = field(default_factory=dict)
+    direction_probs: Dict[str, float] = field(default_factory=dict)
 
+    # ------------------------------------------------------------------
+    # Derived properties
+    # ------------------------------------------------------------------
+
+    @property
+    def is_actionable(self) -> bool:
+        """True for any signal that requires actual order placement."""
+        return self.action != "NO_TRADE"
+
+    @property
+    def is_buy(self) -> bool:
+        return self.action in ("BUY_CE", "BUY_PE")
+
+    @property
+    def is_sell(self) -> bool:
+        return self.action == "SELL_STRADDLE"
+
+    @property
+    def option_type(self) -> str:
+        if self.action == "BUY_CE":
+            return "CE"
+        if self.action == "BUY_PE":
+            return "PE"
+        if self.action == "SELL_STRADDLE":
+            return "STRADDLE"
+        return ""
+
+    def __str__(self) -> str:
+        return (
+            f"Signal({self.action} | strike={self.strike} | expiry={self.expiry} | "
+            f"conf={self.confidence:.3f} | regime={self.regime} | "
+            f"dir={self.direction:+d} | size={self.position_size}lot"
+            f"{'[small]' if self.is_small_size else ''})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# No-trade factory
+# ---------------------------------------------------------------------------
+
+def _no_trade(
+    regime: str,
+    direction: int,
+    spot_price: float,
+    reason: str,
+    confidence: float = 0.0,
+    regime_probs: Optional[Dict[str, float]] = None,
+    direction_probs: Optional[Dict[str, float]] = None,
+) -> Signal:
+    return Signal(
+        action="NO_TRADE",
+        strike=0,
+        expiry="",
+        confidence=confidence,
+        regime=regime,
+        direction=direction,
+        reasons=[reason],
+        spot_price=spot_price,
+        regime_probs=regime_probs or {},
+        direction_probs=direction_probs or {},
+    )
+
+
+# =============================================================================
+# Signal Generator
+# =============================================================================
 
 class SignalGenerator:
     """
-    Combines MarketRegimeClassifier + PriceDirectionPredictor
-    to produce actionable trading signals with full entry details.
+    Combines regime + price-direction predictions into actionable options signals.
+
+    Usage
+    -----
+    gen = SignalGenerator(regime_classifier, price_predictor, config)
+    signal = gen.generate_signal(df, options_data=chain_df)
     """
 
-    def __init__(self, regime_classifier, price_predictor, config: dict):
+    def __init__(
+        self,
+        regime_classifier: MarketRegimeClassifier,
+        price_predictor: PriceDirectionPredictor,
+        config: dict,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        regime_classifier : MarketRegimeClassifier
+            Trained regime classifier (must have been trained or loaded).
+        price_predictor : PriceDirectionPredictor
+            Trained price-direction predictor.
+        config : dict
+            Full application configuration.
+        """
         self.regime_clf = regime_classifier
         self.price_pred = price_predictor
         self.config = config
-        self.min_confidence = config["ml"]["price_predictor"]["min_confidence"]
-        self.risk_cfg = config["risk"]
-        self.lot_size = config["trading"]["lot_size"]
-        self._feature_cols: list[str] = []   # populated after first call
 
-    # ── Public API ────────────────────────────────────────────────────────────
+        ml_cfg = config.get("ml", {})
+        pp_cfg = ml_cfg.get("price_predictor", {})
+        self.min_confidence: float = float(
+            pp_cfg.get("min_confidence", _MIN_CONFIDENCE)
+        )
 
-    def generate_signal(self, df: pd.DataFrame, chain_df: Optional[pd.DataFrame] = None) -> Signal:
+        trading_cfg = config.get("trading", {})
+        self.lot_size: int = int(trading_cfg.get("lot_size", _DEFAULT_LOT_SIZE))
+        self.max_lots: int = int(trading_cfg.get("max_lots_per_trade", 2))
+        self.strike_step: int = _NIFTY_STRIKE_STEP
+
+        # Risk config for SL/target calculations
+        self.risk_cfg: dict = config.get("risk", {})
+
+        # IV percentile threshold above which "high IV" SELL_STRADDLE is considered
+        strategy_cfg = config.get("strategies", {}).get("premium_selling", {})
+        self.high_iv_percentile: float = float(
+            strategy_cfg.get("min_iv_percentile", _HIGH_IV_PERCENTILE_THRESHOLD)
+        )
+
+        logger.info(
+            f"SignalGenerator initialised. "
+            f"min_confidence={self.min_confidence}, "
+            f"lot_size={self.lot_size}, max_lots={self.max_lots}"
+        )
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        options_data: Optional[pd.DataFrame] = None,
+        feature_cols: Optional[List[str]] = None,
+    ) -> Signal:
         """
-        Generate a trading signal from feature-enriched OHLCV DataFrame.
+        Analyse the most recent market data and generate a trading signal.
 
         Parameters
         ----------
-        df        : Feature-enriched DataFrame (output of TechnicalFeatureEngine.compute_all)
-        chain_df  : Optional options chain DataFrame (output of OptionsChainAnalyzer.build_option_chain_df)
+        df : pd.DataFrame
+            Feature-enriched OHLCV DataFrame.  Must have at least
+            `lookback` rows and contain all regime + price-predictor
+            feature columns.
+        options_data : pd.DataFrame, optional
+            Current option chain snapshot.  Expected columns:
+              strike, option_type (CE/PE), ltp, iv, oi, volume
+            Used to determine expiry, fill in premium estimates, and
+            check IV levels for straddle signals.
+        feature_cols : list of str, optional
+            Feature column names for the price predictor.  If None, uses
+            the predictor's stored self.price_pred.feature_cols.
 
         Returns
         -------
-        Signal dataclass
+        Signal
         """
-        no_trade = Signal(action="NO_TRADE")
+        # Resolve feature columns
+        feat_cols = feature_cols or self.price_pred.feature_cols
+        if feat_cols is None:
+            logger.warning(
+                "No feature_cols supplied and price_predictor has none stored. "
+                "Returning NO_TRADE."
+            )
+            spot = _latest_close(df)
+            return _no_trade("unknown", 0, spot, "Feature columns not configured")
 
-        if df.empty or len(df) < 30:
-            return no_trade
+        if df is None or df.empty or len(df) < self.price_pred.lookback:
+            spot = _latest_close(df) if df is not None and not df.empty else 0.0
+            return _no_trade(
+                "unknown", 0, spot,
+                f"Insufficient data: need {self.price_pred.lookback} rows, "
+                f"got {len(df) if df is not None else 0}",
+            )
 
+        spot_price = _latest_close(df)
+
+        # ── Regime classification ──────────────────────────────────────
         try:
-            regime, regime_conf = self._get_regime(df)
-        except Exception as e:
-            logger.warning(f"Regime detection failed: {e}")
-            regime, regime_conf = "unknown", 0.0
+            regime, regime_conf, regime_probs = self.regime_clf.predict(df)
+        except Exception as exc:
+            logger.error(f"Regime prediction failed: {exc}")
+            return _no_trade("unknown", 0, spot_price, f"Regime error: {exc}")
 
+        # ── Price direction prediction ─────────────────────────────────
         try:
-            direction, pred_conf, probs = self._get_price_direction(df)
-        except Exception as e:
-            logger.warning(f"Price prediction failed, using rule-based: {e}")
-            direction, pred_conf, probs = self._rule_based_direction(df)
+            direction, price_conf, direction_probs = self.price_pred.predict(
+                df, feat_cols
+            )
+        except Exception as exc:
+            logger.error(f"Price direction prediction failed: {exc}")
+            return _no_trade(
+                regime, 0, spot_price, f"Price prediction error: {exc}",
+                regime_probs=regime_probs,
+            )
 
-        # Combined confidence — geometric mean
-        combined_conf = float(np.sqrt(regime_conf * pred_conf)) if regime_conf > 0 and pred_conf > 0 else pred_conf
-        logger.debug(f"Regime: {regime} ({regime_conf:.0%}) | Direction: {direction} ({pred_conf:.0%}) | Combined: {combined_conf:.0%}")
+        # ── Ensemble confidence: geometric mean of both model confidences ─
+        combined_confidence = float(np.sqrt(regime_conf * price_conf))
 
-        if combined_conf < self.min_confidence:
-            return Signal(action="NO_TRADE", regime=regime, confidence=combined_conf,
-                         reasons=[f"Confidence {combined_conf:.0%} below threshold {self.min_confidence:.0%}"])
+        logger.info(
+            f"SignalGenerator: regime={regime}(conf={regime_conf:.3f}), "
+            f"direction={direction:+d}(conf={price_conf:.3f}), "
+            f"combined_conf={combined_confidence:.3f}"
+        )
 
-        action, option_type, reasons = self._decide_action(regime, direction, df, chain_df)
+        # ── Confidence gate ────────────────────────────────────────────
+        if combined_confidence < self.min_confidence:
+            return _no_trade(
+                regime, direction, spot_price,
+                f"Combined confidence {combined_confidence:.3f} < "
+                f"threshold {self.min_confidence:.3f}",
+                confidence=combined_confidence,
+                regime_probs=regime_probs,
+                direction_probs=direction_probs,
+            )
+
+        # ── Decision logic ─────────────────────────────────────────────
+        reasons: List[str] = [
+            f"Regime: {regime} (conf={regime_conf:.3f})",
+            f"Direction: {_dir_label(direction)} (conf={price_conf:.3f})",
+            f"Combined confidence: {combined_confidence:.3f}",
+        ]
+
+        # Determine IV environment from options data
+        iv_is_high = self._check_high_iv(options_data, spot_price)
+
+        action, strike, is_small_size, extra_reasons = self._apply_decision_logic(
+            regime=regime,
+            direction=direction,
+            spot_price=spot_price,
+            iv_is_high=iv_is_high,
+            options_data=options_data,
+        )
+        reasons.extend(extra_reasons)
 
         if action == "NO_TRADE":
-            return Signal(action="NO_TRADE", regime=regime, confidence=combined_conf, reasons=reasons)
+            return _no_trade(
+                regime, direction, spot_price,
+                "; ".join(reasons),
+                confidence=combined_confidence,
+                regime_probs=regime_probs,
+                direction_probs=direction_probs,
+            )
+
+        # ── Expiry + premium details ───────────────────────────────────
+        expiry = self._resolve_expiry(options_data)
+        position_size = self._size_positions(is_small_size)
 
         signal = Signal(
             action=action,
-            option_type=option_type,
-            exchange="NFO",
-            qty=self.lot_size,
-            confidence=combined_conf,
+            strike=strike,
+            expiry=expiry,
+            confidence=combined_confidence,
             regime=regime,
-            prediction=direction,
+            direction=direction,
             reasons=reasons,
+            spot_price=spot_price,
+            estimated_premium=0.0,   # filled by compute_entry_details below
+            position_size=position_size,
+            is_small_size=is_small_size,
+            regime_probs=regime_probs,
+            direction_probs=direction_probs,
+        )
+
+        # Fill in estimated premium if chain is available
+        if options_data is not None and not options_data.empty:
+            signal = self.compute_entry_details(signal, spot_price, options_data)
+
+        logger.info(f"Generated: {signal}")
+        for r in signal.reasons:
+            logger.debug(f"  Reason: {r}")
+
+        return signal
+
+    # ------------------------------------------------------------------
+    # Decision logic
+    # ------------------------------------------------------------------
+
+    def _apply_decision_logic(
+        self,
+        regime: str,
+        direction: int,
+        spot_price: float,
+        iv_is_high: bool,
+        options_data: Optional[pd.DataFrame],
+    ) -> Tuple[str, int, bool, List[str]]:
+        """
+        Core decision rules.
+
+        Returns
+        -------
+        action        : str  — 'BUY_CE' | 'BUY_PE' | 'SELL_STRADDLE' | 'NO_TRADE'
+        strike        : int  — chosen strike (0 for NO_TRADE)
+        is_small_size : bool — True for high-volatility reduced sizing
+        reasons       : list[str] — additional human-readable reason strings
+        """
+        reasons: List[str] = []
+        atm = _round_to_strike(spot_price, self.strike_step)
+
+        # ── trending_up + predict up → BUY_CE (ATM or OTM+1) ──────────
+        if regime == "trending_up" and direction == 1:
+            strike = atm + self.strike_step  # OTM+1 for better reward/risk
+            reasons.append(
+                f"Trend UP + direction UP → BUY_CE at OTM+1 strike {strike}"
+            )
+            return "BUY_CE", strike, False, reasons
+
+        # ── trending_down + predict down → BUY_PE (ATM or OTM-1) ──────
+        if regime == "trending_down" and direction == -1:
+            strike = atm - self.strike_step  # OTM-1 for better reward/risk
+            reasons.append(
+                f"Trend DOWN + direction DOWN → BUY_PE at OTM-1 strike {strike}"
+            )
+            return "BUY_PE", strike, False, reasons
+
+        # ── ranging + high IV → SELL_STRADDLE ─────────────────────────
+        if regime == "ranging":
+            if iv_is_high:
+                reasons.append(
+                    f"RANGING regime + high IV → SELL_STRADDLE at ATM {atm}"
+                )
+                return "SELL_STRADDLE", atm, False, reasons
+            else:
+                reasons.append(
+                    "RANGING regime but IV not elevated — skipping SELL_STRADDLE"
+                )
+                return "NO_TRADE", 0, False, reasons
+
+        # ── high_volatility + predict up → BUY_CE (ATM, small size) ───
+        if regime == "high_volatility" and direction == 1:
+            reasons.append(
+                f"HIGH VOLATILITY + direction UP → BUY_CE at ATM {atm} (small size)"
+            )
+            return "BUY_CE", atm, True, reasons
+
+        # ── high_volatility + predict down → BUY_PE (ATM, small size) ─
+        if regime == "high_volatility" and direction == -1:
+            reasons.append(
+                f"HIGH VOLATILITY + direction DOWN → BUY_PE at ATM {atm} (small size)"
+            )
+            return "BUY_PE", atm, True, reasons
+
+        # ── Directional signal but mismatched regime/direction ─────────
+        reasons.append(
+            f"No actionable setup: regime={regime}, direction={direction:+d}"
+        )
+        return "NO_TRADE", 0, False, reasons
+
+    # ------------------------------------------------------------------
+    # Entry details
+    # ------------------------------------------------------------------
+
+    def compute_entry_details(
+        self,
+        signal: Signal,
+        spot_price: float,
+        chain_df: pd.DataFrame,
+    ) -> Signal:
+        """
+        Enrich a Signal with strike confirmation, expiry, and estimated premium.
+
+        The option chain DataFrame is expected to have at minimum:
+          strike (int/float), option_type (str: 'CE'|'PE'),
+          ltp (float), expiry (str), iv (float)
+
+        If the chain doesn't contain the signal's strike, the method falls
+        back to the nearest available strike.  When no chain is available,
+        the premium is estimated via a simplified Black-Scholes model.
+
+        Parameters
+        ----------
+        signal     : Signal   — signal to enrich (mutated in-place)
+        spot_price : float    — current Nifty50 spot price
+        chain_df   : pd.DataFrame — options chain snapshot
+
+        Returns
+        -------
+        Signal  — the same Signal with estimated_premium and confirmed
+                  expiry / strike.
+        """
+        if chain_df is None or chain_df.empty:
+            # Black-Scholes fallback for premium estimate
+            signal.estimated_premium = self._estimate_premium_bs(
+                spot_price, signal.strike or _round_to_strike(spot_price),
+                signal.option_type, days_to_expiry=7,
+            )
+            return signal
+
+        # Normalise column names to lower-case
+        chain = chain_df.copy()
+        chain.columns = [c.lower().strip() for c in chain.columns]
+
+        # Determine which leg(s) to look up
+        if signal.action == "BUY_CE":
+            legs = [("CE", signal.strike)]
+        elif signal.action == "BUY_PE":
+            legs = [("PE", signal.strike)]
+        elif signal.action == "SELL_STRADDLE":
+            legs = [("CE", signal.strike), ("PE", signal.strike)]
+        else:
+            return signal
+
+        total_premium = 0.0
+        resolved_strike = signal.strike
+        resolved_expiry = signal.expiry or self._resolve_expiry(chain_df)
+
+        for opt_type, target_strike in legs:
+            # Filter to this option type
+            subset = chain[chain["option_type"].str.upper() == opt_type].copy() \
+                if "option_type" in chain.columns else chain.copy()
+
+            if subset.empty:
+                # Fall back to BS estimate for this leg
+                total_premium += self._estimate_premium_bs(
+                    spot_price, target_strike, opt_type, days_to_expiry=7
+                )
+                continue
+
+            # Snap to nearest available strike in chain
+            if "strike" in subset.columns:
+                available_strikes = subset["strike"].astype(float).values
+                nearest_idx = int(np.argmin(np.abs(available_strikes - target_strike)))
+                nearest_strike = int(available_strikes[nearest_idx])
+                row = subset.iloc[[nearest_idx]]
+            else:
+                row = subset.head(1)
+                nearest_strike = target_strike
+
+            # Extract LTP
+            ltp = 0.0
+            for ltp_col in ("ltp", "last_price", "close"):
+                if ltp_col in row.columns:
+                    val = pd.to_numeric(row[ltp_col].iloc[0], errors="coerce")
+                    if not np.isnan(val) and val > 0:
+                        ltp = float(val)
+                        break
+
+            if ltp == 0.0:
+                ltp = self._estimate_premium_bs(
+                    spot_price, nearest_strike, opt_type, days_to_expiry=7
+                )
+
+            total_premium += ltp
+
+            # Resolve expiry from chain if not yet set
+            if resolved_expiry == "" and "expiry" in row.columns:
+                resolved_expiry = str(row["expiry"].iloc[0])
+
+            resolved_strike = nearest_strike
+
+        signal.strike = resolved_strike
+        signal.expiry = resolved_expiry
+        signal.estimated_premium = round(total_premium, 2)
+
+        logger.debug(
+            f"compute_entry_details: strike={resolved_strike}, "
+            f"expiry={resolved_expiry}, premium={total_premium:.2f}"
         )
         return signal
 
-    def compute_entry_details(self, signal: Signal, spot_price: float, chain_df: Optional[pd.DataFrame]) -> Signal:
-        """
-        Fill in strike, expiry, symbol, token, price, sl_price, target_price
-        from spot price and options chain.
-        """
-        from data.options_chain import OptionsChainAnalyzer
-        analyzer = OptionsChainAnalyzer()
+    # ------------------------------------------------------------------
+    # Black-Scholes premium estimate (fallback when chain unavailable)
+    # ------------------------------------------------------------------
 
-        atm = analyzer.get_atm_strike(spot_price)
-        expiry = analyzer.get_nearest_expiry()
-        signal.expiry = expiry
-
-        if signal.action in ("BUY_CE", "BUY_PE"):
-            signal.strike = atm
-            opt_type = "CE" if signal.action == "BUY_CE" else "PE"
-            signal.option_type = opt_type
-
-            # Estimate premium from chain or Black-Scholes
-            premium = self._get_option_premium(atm, opt_type, spot_price, chain_df)
-            signal.price = premium
-            signal.sl_price = round(premium * (1 - self.risk_cfg["option_buy_sl_pct"]), 2)
-            signal.target_price = round(premium * (1 + self.risk_cfg["option_buy_target_pct"]), 2)
-
-            # Build symbol name for Angel One
-            expiry_tag = self._format_expiry_tag(expiry)
-            signal.symbol = f"NIFTY{expiry_tag}{atm}{opt_type}"
-
-        elif signal.action in ("SELL_STRADDLE", "SELL_STRANGLE"):
-            signal.strike = atm
-            signal.option_type = "BOTH"
-            # For straddle/strangle, price = combined premium received
-            ce_prem = self._get_option_premium(atm, "CE", spot_price, chain_df)
-            pe_prem = self._get_option_premium(atm, "PE", spot_price, chain_df)
-            signal.price = ce_prem + pe_prem
-            signal.sl_price = round(signal.price * (1 + self.risk_cfg["option_sell_sl_pct"]), 2)
-            signal.target_price = round(signal.price * 0.50, 2)   # 50% decay target
-            signal.symbol = f"NIFTY{self._format_expiry_tag(expiry)}{atm}STRADDLE"
-
-        return signal
-
-    # ── Internal helpers ──────────────────────────────────────────────────────
-
-    def _get_regime(self, df: pd.DataFrame) -> tuple[str, float]:
-        """Get market regime via classifier or rule-based fallback."""
-        try:
-            from features.market_regime import MarketRegimeDetector
-            feat_cols = self._get_regime_feature_cols(df)
-            if feat_cols and hasattr(self.regime_clf, "model") and self.regime_clf.model is not None:
-                regime, conf = self.regime_clf.get_current_regime(df)
-                return regime, conf
-        except Exception:
-            pass
-        # Rule-based fallback
-        from features.market_regime import MarketRegimeDetector
-        detector = MarketRegimeDetector()
-        regime = detector.detect_regime_rules(df)
-        return regime, 0.75   # Fixed confidence for rule-based
-
-    def _get_price_direction(self, df: pd.DataFrame) -> tuple[int, float, dict]:
-        """Get price direction via predictor or fallback."""
-        feat_cols = self._get_predictor_feature_cols(df)
-        if feat_cols and hasattr(self.price_pred, "is_trained") and self.price_pred.is_trained:
-            return self.price_pred.predict(df, feat_cols)
-        return self._rule_based_direction(df)
-
-    def _rule_based_direction(self, df: pd.DataFrame) -> tuple[int, float, dict]:
-        """Deterministic direction from EMA + RSI + MACD."""
-        latest = df.iloc[-1]
-        score = 0
-        count = 0
-
-        ema9 = latest.get("ema_9", np.nan)
-        ema21 = latest.get("ema_21", np.nan)
-        if not (np.isnan(ema9) or np.isnan(ema21)):
-            score += 1 if ema9 > ema21 else -1
-            count += 1
-
-        rsi = latest.get("rsi", np.nan)
-        if not np.isnan(rsi):
-            if rsi > 55:
-                score += 1
-            elif rsi < 45:
-                score -= 1
-            count += 1
-
-        macd_hist = latest.get("macd_histogram", np.nan)
-        if not np.isnan(macd_hist):
-            score += 1 if macd_hist > 0 else -1
-            count += 1
-
-        if count == 0:
-            return 0, 0.0, {"up": 0.33, "flat": 0.34, "down": 0.33}
-
-        norm = score / count    # -1 to +1
-        direction = 1 if norm > 0.3 else (-1 if norm < -0.3 else 0)
-        confidence = abs(norm) * 0.65 + 0.30   # map to [0.30, 0.95]
-        probs = {
-            "up": max(0, norm) / 2 + 0.33,
-            "flat": 0.33 * (1 - abs(norm)),
-            "down": max(0, -norm) / 2 + 0.33,
-        }
-        return direction, float(confidence), probs
-
-    def _decide_action(
-        self, regime: str, direction: int, df: pd.DataFrame, chain_df: Optional[pd.DataFrame]
-    ) -> tuple[str, str, list]:
-        """Map regime + direction to a concrete options action."""
-        reasons = [f"Regime: {regime}", f"Price direction: {direction:+d}"]
-
-        if regime in ("trending_up", "trending_down"):
-            if direction == 1:
-                reasons.append("Trend + bullish signal → BUY CE")
-                return "BUY_CE", "CE", reasons
-            elif direction == -1:
-                reasons.append("Trend + bearish signal → BUY PE")
-                return "BUY_PE", "PE", reasons
-            else:
-                reasons.append("Trend detected but direction unclear")
-                return "NO_TRADE", "", reasons
-
-        elif regime == "ranging":
-            iv_ok = self._check_iv_for_selling(chain_df)
-            if iv_ok:
-                reasons.append("Ranging market + elevated IV → SELL STRADDLE")
-                return "SELL_STRADDLE", "BOTH", reasons
-            else:
-                reasons.append("Ranging but IV too low for premium selling")
-                return "NO_TRADE", "", reasons
-
-        elif regime == "high_volatility":
-            if direction == 1:
-                reasons.append("High vol + bullish → BUY CE (ATM, small size)")
-                return "BUY_CE", "CE", reasons
-            elif direction == -1:
-                reasons.append("High vol + bearish → BUY PE (ATM, small size)")
-                return "BUY_PE", "PE", reasons
-            else:
-                return "NO_TRADE", "", reasons
-
-        reasons.append(f"Unknown regime: {regime}")
-        return "NO_TRADE", "", reasons
-
-    def _check_iv_for_selling(self, chain_df: Optional[pd.DataFrame]) -> bool:
-        """Returns True if IV conditions are suitable for premium selling."""
-        if chain_df is None or chain_df.empty:
-            return False
-        try:
-            avg_iv = chain_df[["ce_iv", "pe_iv"]].mean().mean()
-            return avg_iv > 12.0   # IV% threshold
-        except Exception:
-            return False
-
-    def _get_option_premium(
-        self, strike: int, opt_type: str, spot: float, chain_df: Optional[pd.DataFrame]
+    @staticmethod
+    def _estimate_premium_bs(
+        spot: float,
+        strike: int,
+        opt_type: str,
+        days_to_expiry: float = 7,
+        iv: float = 0.15,
+        risk_free_rate: float = 0.065,
     ) -> float:
-        """Get option premium from chain or estimate via Black-Scholes."""
-        if chain_df is not None and not chain_df.empty:
-            row = chain_df[chain_df["strike"] == strike]
-            if not row.empty:
-                col = "ce_ltp" if opt_type == "CE" else "pe_ltp"
-                val = row.iloc[0].get(col, 0)
-                if val > 0:
-                    return float(val)
+        """
+        Simplified Black-Scholes call/put price.
 
-        # Black-Scholes fallback
-        return self._bs_price(spot, strike, opt_type, dte=7, iv=0.15)
+        Parameters
+        ----------
+        spot            : float  — current spot price
+        strike          : int    — option strike
+        opt_type        : str    — 'CE' or 'PE'
+        days_to_expiry  : float  — calendar days to expiry
+        iv              : float  — implied volatility (annualised fraction)
+        risk_free_rate  : float  — annual risk-free rate
 
-    @staticmethod
-    def _bs_price(S: float, K: int, opt_type: str, dte: float = 7, iv: float = 0.15) -> float:
-        """Simplified Black-Scholes option price."""
-        import math
-        from scipy.stats import norm
-        T = max(dte / 252, 1e-6)
-        r = 0.065
-        d1 = (math.log(S / K) + (r + 0.5 * iv**2) * T) / (iv * math.sqrt(T))
-        d2 = d1 - iv * math.sqrt(T)
-        if opt_type == "CE":
-            return max(S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2), 0.05)
-        return max(K * math.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1), 0.05)
+        Returns
+        -------
+        float — estimated option premium
+        """
+        T = max(days_to_expiry / 365.0, 1e-6)
+        S, K = float(spot), float(strike)
+        r, sigma = risk_free_rate, iv
 
-    @staticmethod
-    def _format_expiry_tag(expiry: str) -> str:
-        """Convert 'DD-MMM-YYYY' → 'DDMMMYYYY' uppercase for symbol name."""
-        return expiry.replace("-", "").upper()
+        try:
+            d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (
+                sigma * math.sqrt(T)
+            )
+            d2 = d1 - sigma * math.sqrt(T)
 
-    def _get_regime_feature_cols(self, df: pd.DataFrame) -> list[str]:
-        wanted = ["adx", "atr_pct", "rsi", "macd_histogram", "bb_width",
-                  "ema_9", "ema_21", "volume"]
-        return [c for c in wanted if c in df.columns]
+            if opt_type.upper() == "CE":
+                price = S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)
+            else:  # PE
+                price = K * math.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
-    def _get_predictor_feature_cols(self, df: pd.DataFrame) -> list[str]:
-        exclude = {"open", "high", "low", "close", "volume", "date"}
-        return [c for c in df.columns if c not in exclude and df[c].dtype in (float, int, "float64", "int64")]
+            return max(round(float(price), 2), 0.05)
+        except Exception:
+            # Intrinsic value fallback
+            if opt_type.upper() == "CE":
+                return max(round(S - K, 2), 0.05)
+            return max(round(K - S, 2), 0.05)
+
+    # ------------------------------------------------------------------
+    # IV environment helper
+    # ------------------------------------------------------------------
+
+    def _check_high_iv(
+        self,
+        options_data: Optional[pd.DataFrame],
+        spot_price: float,
+    ) -> bool:
+        """
+        Returns True if the current IV environment is "high" — i.e. the
+        median IV of the nearest ATM options exceeds the historical
+        `high_iv_percentile` threshold stored in this instance.
+
+        Falls back to False if no options data is available.
+        """
+        if options_data is None or options_data.empty:
+            logger.debug("No options data available — assuming IV is not high.")
+            return False
+
+        chain = options_data.copy()
+        chain.columns = [c.lower().strip() for c in chain.columns]
+
+        # Try various common IV column names
+        iv_col = None
+        for candidate in ("iv", "implied_volatility", "ce_iv", "pe_iv"):
+            if candidate in chain.columns:
+                iv_col = candidate
+                break
+
+        if iv_col is None:
+            logger.debug("Option chain missing IV column — assuming IV not high.")
+            return False
+
+        atm = _round_to_strike(spot_price, self.strike_step)
+
+        # ATM ± 2 strikes
+        near_strikes = [
+            atm - 2 * self.strike_step, atm - self.strike_step,
+            atm, atm + self.strike_step, atm + 2 * self.strike_step,
+        ]
+
+        if "strike" in chain.columns:
+            near = chain[chain["strike"].astype(float).round().astype(int).isin(near_strikes)]
+        else:
+            near = chain
+
+        if near.empty:
+            near = chain
+
+        iv_series = pd.to_numeric(near[iv_col], errors="coerce").dropna()
+        if iv_series.empty:
+            return False
+
+        median_iv = float(iv_series.median())
+        all_iv = pd.to_numeric(chain[iv_col], errors="coerce").dropna()
+        if all_iv.empty:
+            return False
+
+        percentile_val = float(np.percentile(all_iv, self.high_iv_percentile))
+        is_high = median_iv >= percentile_val
+
+        logger.debug(
+            f"IV check: ATM-zone median IV={median_iv:.2f}, "
+            f"p{self.high_iv_percentile:.0f}={percentile_val:.2f} → "
+            f"high_iv={is_high}"
+        )
+        return is_high
+
+    # ------------------------------------------------------------------
+    # Expiry resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_expiry(
+        self,
+        options_data: Optional[pd.DataFrame],
+    ) -> str:
+        """
+        Determine the nearest weekly expiry from the options chain.
+
+        If no chain is available (or the chain lacks an expiry column),
+        falls back to computing the next Thursday's date (Nifty weekly
+        expiry) in "DD-MMM-YYYY" format.
+
+        Parameters
+        ----------
+        options_data : pd.DataFrame or None
+
+        Returns
+        -------
+        str  — expiry date e.g. "29-MAY-2026"
+        """
+        if options_data is not None and not options_data.empty:
+            chain = options_data.copy()
+            chain.columns = [c.lower().strip() for c in chain.columns]
+            if "expiry" in chain.columns:
+                expiries = chain["expiry"].dropna().unique()
+                if len(expiries) > 0:
+                    parsed: List[Tuple[datetime, str]] = []
+                    for e in expiries:
+                        try:
+                            dt = pd.to_datetime(str(e), dayfirst=True)
+                            if dt.tzinfo is None:
+                                dt = dt.tz_localize(IST)
+                            parsed.append((dt, str(e)))
+                        except Exception:
+                            pass
+                    if parsed:
+                        parsed.sort(key=lambda x: x[0])
+                        return parsed[0][1]
+
+        # Fallback: compute next Thursday from today (IST)
+        now = datetime.now(IST)
+        days_ahead = 3 - now.weekday()  # Thursday is weekday 3 (Mon=0)
+        if days_ahead <= 0:
+            days_ahead += 7
+        next_thursday = now + pd.Timedelta(days=days_ahead)
+        return next_thursday.strftime("%d-%b-%Y").upper()
+
+    # ------------------------------------------------------------------
+    # Position sizing
+    # ------------------------------------------------------------------
+
+    def _size_positions(self, is_small_size: bool) -> int:
+        """
+        Return recommended lot count.
+
+        In high_volatility regimes only 1 lot is traded regardless of
+        max_lots setting to cap risk in uncertain conditions.
+
+        Parameters
+        ----------
+        is_small_size : bool — True for high-volatility signals
+
+        Returns
+        -------
+        int — number of lots (≥ 1)
+        """
+        if is_small_size:
+            return 1
+        return max(1, self.max_lots)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _latest_close(df: pd.DataFrame) -> float:
+    """Return the most recent close price from an OHLCV DataFrame."""
+    if df is None or df.empty or "close" not in df.columns:
+        return 0.0
+    return float(df["close"].iloc[-1])
+
+
+def _round_to_strike(price: float, step: int = 50) -> int:
+    """Round a spot price to the nearest valid Nifty strike."""
+    return int(round(price / step) * step)
+
+
+def _dir_label(direction: int) -> str:
+    mapping = {1: "UP", -1: "DOWN", 0: "FLAT"}
+    return mapping.get(direction, str(direction))
