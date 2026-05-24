@@ -23,7 +23,7 @@ from loguru import logger
 from data.angel_client import AngelOneClient
 
 try:
-    from SmartApi.SmartWebSocket import SmartWebSocket
+    from SmartApi.SmartWebSocketV2 import SmartWebSocketV2 as SmartWebSocket
 except ImportError as _err:
     logger.error(
         f"SmartApi package not found. Install with: pip install smartapi-python  [{_err}]"
@@ -216,7 +216,11 @@ class LiveFeed:
                 logger.warning("unsubscribe called but WebSocket is not connected.")
                 return
             try:
-                self._ws.unsubscribe(symbols)
+                v2_tokens = [
+                    {"exchangeType": s.get("exchange_type", 1), "tokens": [s.get("token", "")]}
+                    for s in symbols
+                ]
+                self._ws.unsubscribe("livefeed", 2, v2_tokens)
                 tokens = [s.get("token", "?") for s in symbols]
                 logger.info(f"Unsubscribed from tokens: {tokens}")
                 # Clear buffers for unsubscribed tokens
@@ -392,10 +396,14 @@ class LiveFeed:
             self._reconnect_attempts = 0
             # Subscribe to all requested symbols
             try:
+                v2_tokens = [
+                    {"exchangeType": s["exchange_type"], "tokens": [s["token"]]}
+                    for s in self._initial_symbols
+                ]
                 ws.subscribe(
                     correlation_id="livefeed",
-                    mode=2,          # MODE_QUOTE — includes OI, bid/ask
-                    token_list=self._initial_symbols,
+                    mode=2,
+                    token_list=v2_tokens,
                 )
                 logger.info(
                     f"Subscribed to {len(self._initial_symbols)} instruments."
@@ -403,8 +411,8 @@ class LiveFeed:
             except Exception as exc:
                 logger.error(f"Subscription error on open: {exc}")
 
-        def _on_data(ws, message, data_type, continue_flag):
-            self._handle_tick(data_type, message)
+        def _on_data(ws, message):
+            self._handle_tick(2, message)
 
         def _on_error(ws, error):
             logger.error(f"SmartWebSocket error: {error}")
