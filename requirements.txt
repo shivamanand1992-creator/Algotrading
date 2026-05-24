@@ -10,8 +10,7 @@ numpy==2.2.6
 scipy==1.13.1
 
 # Technical Analysis
-ta==0.11.0
-pandas-ta==0.4.71b0
+ta
 
 # Machine Learning
 scikit-learn==1.3.2
