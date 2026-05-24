@@ -359,9 +359,20 @@ class MarketRegimeClassifier:
 
     def __init__(
         self,
-        model_path: str | Path = _DEFAULT_MODEL_PATH,
+        model_path=_DEFAULT_MODEL_PATH,
         xgb_params: Optional[dict] = None,
     ) -> None:
+        # Accept either a config dict (from config.yaml ml.regime_model section)
+        # or a plain path string/Path object.
+        if isinstance(model_path, dict):
+            cfg = model_path
+            model_path = cfg.get("model_save_path", _DEFAULT_MODEL_PATH)
+            if xgb_params is None:
+                xgb_params = {
+                    k: cfg[k]
+                    for k in ("n_estimators", "max_depth", "learning_rate")
+                    if k in cfg
+                }
         self.model_path = Path(model_path)
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
