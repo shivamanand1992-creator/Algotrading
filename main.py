@@ -102,9 +102,9 @@ class TradingEngine:
 
         # Strategies
         self.strategies = {
-            "trend": TrendFollowingStrategy(config, "trend_following"),
-            "premium": PremiumSellingStrategy(config, "premium_selling"),
-            "scalp": ScalpingStrategy(config, "scalping"),
+            "trend": TrendFollowingStrategy(config),
+            "premium": PremiumSellingStrategy(config),
+            "scalp": ScalpingStrategy(config),
         }
 
         # Execution layer
