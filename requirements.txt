@@ -30,7 +30,6 @@ plotly==5.18.0
 
 # Alerts
 python-telegram-bot==20.7
-smtplib2==0.2.1
 
 # Config & Utils
 PyYAML==6.0.1
@@ -41,7 +40,7 @@ pytz==2023.3.post1
 apscheduler==3.10.4
 
 # Backtesting
-vectorbt==0.26.1
+vectorbt
 
 # Database (for trade logs)
 sqlalchemy==2.0.23
