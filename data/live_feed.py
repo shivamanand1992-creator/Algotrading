@@ -22,13 +22,22 @@ from loguru import logger
 
 from data.angel_client import AngelOneClient
 
-try:
-    from SmartApi.SmartWebSocketV2 import SmartWebSocketV2 as SmartWebSocket
-except ImportError as _err:
-    logger.error(
-        f"SmartApi package not found. Install with: pip install smartapi-python  [{_err}]"
-    )
-    raise
+# Try multiple module paths across smartapi-python versions
+_SmartWebSocket = None
+for _ws_mod, _ws_cls in [
+    ("SmartApi.smartWebSocket", "SmartWebSocket"),
+    ("SmartApi.SmartWebSocketV2", "SmartWebSocketV2"),
+    ("SmartApi.SmartWebSocket", "SmartWebSocket"),
+]:
+    try:
+        import importlib as _il
+        _SmartWebSocket = getattr(_il.import_module(_ws_mod), _ws_cls)
+        break
+    except (ImportError, AttributeError):
+        continue
+
+if _SmartWebSocket is None:
+    logger.warning("SmartApi WebSocket not found — live feed disabled, REST polling will be used.")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -149,7 +158,7 @@ class LiveFeed:
         self._callback_lock = threading.Lock()
 
         # WebSocket handle
-        self._ws: Optional[SmartWebSocket] = None
+        self._ws = None
         self._ws_lock = threading.Lock()
 
         # Control flags
@@ -239,6 +248,9 @@ class LiveFeed:
         Non-blocking: returns immediately after the thread is launched.
         Call stop() to shut it down.
         """
+        if _SmartWebSocket is None:
+            logger.warning("WebSocket unavailable — skipping live feed. Price data via REST polling only.")
+            return
         if self._running.is_set():
             logger.warning("LiveFeed.start() called but feed is already running.")
             return
@@ -381,7 +393,7 @@ class LiveFeed:
         )
 
         with self._ws_lock:
-            self._ws = SmartWebSocket(
+            self._ws = _SmartWebSocket(
                 auth_token=self._client.access_token,
                 api_key=api_key,
                 client_code=client_code,
