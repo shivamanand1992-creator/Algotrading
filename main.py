@@ -52,6 +52,7 @@ def setup_logging(config: dict):
     logger.add(sys.stdout, level=log_cfg.get("level", "INFO"), colorize=True,
                format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | {message}")
     Path("logs").mkdir(exist_ok=True)
+    Path("trained_models").mkdir(exist_ok=True)
     logger.add(
         log_cfg.get("file", "logs/trading.log"),
         level=log_cfg.get("level", "INFO"),

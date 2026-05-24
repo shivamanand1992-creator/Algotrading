@@ -181,6 +181,16 @@ class TradingDashboard:
 
     def run_live(self, refresh_seconds: float = 1.0):
         """Run the live dashboard. Call update() from your trading loop to push new state."""
+        import sys
+        if not sys.stdout.isatty():
+            # Non-interactive environment (Railway/server): print periodic snapshots to logs
+            while True:
+                try:
+                    self.print_snapshot()
+                    time.sleep(30)
+                except KeyboardInterrupt:
+                    break
+            return
         with Live(self.render(), console=console, refresh_per_second=1 / refresh_seconds, screen=True) as live:
             while True:
                 try:

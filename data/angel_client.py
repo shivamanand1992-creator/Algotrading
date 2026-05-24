@@ -88,12 +88,13 @@ class AngelOneClient:
 
     _SESSION_REFRESH_INTERVAL_HOURS: int = 6
 
-    def __init__(self) -> None:
-        config_path = _PROJECT_ROOT / "config" / "config.yaml"
-        with open(config_path, "r") as fh:
-            raw_config = yaml.safe_load(fh)
+    def __init__(self, config: dict = None) -> None:
+        if config is None:
+            config_path = _PROJECT_ROOT / "config" / "config.yaml"
+            with open(config_path, "r") as fh:
+                config = yaml.safe_load(fh)
 
-        broker_cfg = raw_config.get("broker", {})
+        broker_cfg = config.get("broker", {})
 
         self.api_key: str       = _resolve_env(broker_cfg.get("api_key", ""))
         self.client_code: str   = _resolve_env(broker_cfg.get("client_code", ""))
