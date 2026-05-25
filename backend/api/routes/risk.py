@@ -3,7 +3,7 @@ from typing import List
 
 from backend.api.models.responses import RiskLimitsResponse, RiskMetricsResponse, RiskAlert
 from backend.dependencies import get_risk_manager, get_position_manager
-from backend.config import config
+from backend.config import config, DEMO_MODE
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
 
@@ -13,6 +13,11 @@ async def get_risk_limits(
     risk_manager=Depends(get_risk_manager),
     position_manager=Depends(get_position_manager)
 ):
+    if DEMO_MODE:
+        return RiskLimitsResponse(
+            daily_loss_limit=20000, daily_loss_used=577.5, daily_loss_percentage=2.89,
+            per_trade_risk_limit=1.0, max_positions=5, current_positions=2
+        )
     """Get current risk limits vs usage"""
     # Get config limits
     risk_config = config.trading_config.get('risk_management', {})

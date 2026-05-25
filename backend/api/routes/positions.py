@@ -5,7 +5,7 @@ from backend.api.models.responses import PositionResponse, PortfolioSummary
 from backend.api.models.requests import ClosePositionRequest
 from backend.dependencies import get_position_manager
 from backend.services.position_service import PositionService
-from backend.config import config
+from backend.config import config, DEMO_MODE
 
 router = APIRouter(prefix="/api", tags=["positions"])
 
@@ -24,6 +24,17 @@ def get_position_service():
 @router.get("/positions", response_model=List[PositionResponse])
 async def get_all_positions(service: PositionService = Depends(get_position_service)):
     """Get all open positions"""
+    if DEMO_MODE:
+        return [
+            PositionResponse(order_id="DEMO001", symbol="NIFTY25MAY24500CE", quantity=50,
+                             entry_price=145.50, current_price=162.30, pnl=840.0,
+                             pnl_percent=11.55, strategy="trend", status="open",
+                             entry_time="2024-05-25T09:30:00"),
+            PositionResponse(order_id="DEMO002", symbol="NIFTY25MAY24400PE", quantity=50,
+                             entry_price=98.75, current_price=87.20, pnl=-577.5,
+                             pnl_percent=-11.69, strategy="premium", status="open",
+                             entry_time="2024-05-25T10:15:00"),
+        ]
     return await service.get_all_positions()
 
 
@@ -59,4 +70,10 @@ async def close_position(
 @router.get("/portfolio/summary", response_model=PortfolioSummary)
 async def get_portfolio_summary(service: PositionService = Depends(get_position_service)):
     """Get portfolio summary"""
+    if DEMO_MODE:
+        return PortfolioSummary(
+            total_capital=500000.0, used_capital=121250.0, available_capital=378750.0,
+            total_pnl=262.5, daily_pnl=262.5, total_pnl_percent=0.05,
+            open_positions=2, total_trades_today=5, win_rate=60.0
+        )
     return await service.get_portfolio_summary()

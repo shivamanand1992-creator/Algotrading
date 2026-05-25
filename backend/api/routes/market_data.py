@@ -13,7 +13,7 @@ from backend.dependencies import (
     get_signal_generator
 )
 from backend.services.market_service import MarketService
-from backend.config import config
+from backend.config import config, DEMO_MODE
 
 router = APIRouter(prefix="/api/market", tags=["market"])
 
@@ -39,22 +39,42 @@ def get_market_service():
 @router.get("/current", response_model=MarketDataResponse)
 async def get_current_market_data(service: MarketService = Depends(get_market_service)):
     """Get current market data for Nifty50"""
+    if DEMO_MODE:
+        return MarketDataResponse(
+            symbol="NIFTY", ltp=24567.85, change=123.45, change_percentage=0.51,
+            open=24444.40, high=24610.20, low=24398.75, volume=1250000,
+            iv_percentile=42.5, pcr=0.87, timestamp="2024-05-25T10:30:00"
+        )
     return await service.get_current_market_data()
 
 
 @router.get("/options_chain", response_model=List[OptionsChainItem])
 async def get_options_chain(service: MarketService = Depends(get_market_service)):
     """Get options chain with Greeks"""
+    if DEMO_MODE:
+        return []
     return await service.get_options_chain()
 
 
 @router.get("/regime", response_model=MarketRegimeResponse)
 async def get_market_regime(service: MarketService = Depends(get_market_service)):
     """Get current market regime classification"""
+    if DEMO_MODE:
+        return MarketRegimeResponse(
+            regime="trending_up", confidence=0.78,
+            regime_probabilities={"trending_up": 0.78, "ranging": 0.15, "volatile": 0.07},
+            recommended_strategies=["trend", "scalping"]
+        )
     return await service.get_market_regime()
 
 
 @router.get("/predictions", response_model=PredictionResponse)
 async def get_predictions(service: MarketService = Depends(get_market_service)):
     """Get ML model predictions"""
+    if DEMO_MODE:
+        return PredictionResponse(
+            direction="bullish", confidence=0.72,
+            predicted_move=0.8, time_horizon="1h",
+            model_agreement=0.85
+        )
     return await service.get_predictions()

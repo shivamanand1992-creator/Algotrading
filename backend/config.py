@@ -38,3 +38,6 @@ class BackendConfig:
 
 # Singleton instance
 config = BackendConfig()
+
+# Demo mode — set DEMO_MODE=true to run without broker credentials (mock data)
+DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"

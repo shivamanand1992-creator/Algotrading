@@ -13,7 +13,7 @@ from models.signal_generator import SignalGenerator
 from models.price_predictor import PriceDirectionPredictor
 from models.regime_classifier import MarketRegimeClassifier
 from data.options_chain import OptionsChainAnalyzer
-from backend.config import config
+from backend.config import config, DEMO_MODE
 
 
 # Global instances (initialized on startup)
@@ -27,29 +27,37 @@ _regime_classifier = None
 _options_analyzer = None
 
 
-def get_angel_client() -> AngelOneClient:
+def get_angel_client():
     global _angel_client
+    if DEMO_MODE:
+        return None
     if _angel_client is None:
         _angel_client = AngelOneClient(config.trading_config)
     return _angel_client
 
 
-def get_position_manager() -> PositionManager:
+def get_position_manager():
     global _position_manager
+    if DEMO_MODE:
+        return None
     if _position_manager is None:
         _position_manager = PositionManager(config.trading_config)
     return _position_manager
 
 
-def get_risk_manager() -> RiskManager:
+def get_risk_manager():
     global _risk_manager
+    if DEMO_MODE:
+        return None
     if _risk_manager is None:
         _risk_manager = RiskManager(config.trading_config)
     return _risk_manager
 
 
-def get_order_manager() -> OrderManager:
+def get_order_manager():
     global _order_manager
+    if DEMO_MODE:
+        return None
     if _order_manager is None:
         angel_client = get_angel_client()
         risk_manager = get_risk_manager()
@@ -57,8 +65,10 @@ def get_order_manager() -> OrderManager:
     return _order_manager
 
 
-def get_signal_generator() -> SignalGenerator:
+def get_signal_generator():
     global _signal_generator
+    if DEMO_MODE:
+        return None
     if _signal_generator is None:
         regime_classifier = get_regime_classifier()
         price_predictor = get_price_predictor()
@@ -66,22 +76,28 @@ def get_signal_generator() -> SignalGenerator:
     return _signal_generator
 
 
-def get_price_predictor() -> PriceDirectionPredictor:
+def get_price_predictor():
     global _price_predictor
+    if DEMO_MODE:
+        return None
     if _price_predictor is None:
         _price_predictor = PriceDirectionPredictor(config.trading_config)
     return _price_predictor
 
 
-def get_regime_classifier() -> MarketRegimeClassifier:
+def get_regime_classifier():
     global _regime_classifier
+    if DEMO_MODE:
+        return None
     if _regime_classifier is None:
         _regime_classifier = MarketRegimeClassifier(config.trading_config)
     return _regime_classifier
 
 
-def get_options_analyzer() -> OptionsChainAnalyzer:
+def get_options_analyzer():
     global _options_analyzer
+    if DEMO_MODE:
+        return None
     if _options_analyzer is None:
         angel_client = get_angel_client()
         _options_analyzer = OptionsChainAnalyzer(config.trading_config, angel_client)

@@ -5,7 +5,7 @@ from backend.api.models.responses import StrategyStatus, TradeSignalResponse
 from backend.api.models.requests import StartStrategyRequest, UpdateStrategyConfigRequest
 from backend.dependencies import get_order_manager, get_signal_generator
 from backend.services.strategy_service import StrategyService
-from backend.config import config
+from backend.config import config, DEMO_MODE
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
@@ -26,9 +26,24 @@ def get_strategy_service():
     return _strategy_service
 
 
+_DEMO_STRATEGIES = [
+    StrategyStatus(name="trend", display_name="Trend Following", status="stopped",
+                   mode="paper", uptime_seconds=0, signals_today=3, trades_today=2,
+                   pnl_today=840.0, regime_suitable=True),
+    StrategyStatus(name="premium", display_name="Premium Selling", status="stopped",
+                   mode="paper", uptime_seconds=0, signals_today=1, trades_today=1,
+                   pnl_today=-577.5, regime_suitable=False),
+    StrategyStatus(name="scalping", display_name="Scalping", status="stopped",
+                   mode="paper", uptime_seconds=0, signals_today=7, trades_today=4,
+                   pnl_today=320.0, regime_suitable=True),
+]
+
+
 @router.get("", response_model=List[StrategyStatus])
 async def list_strategies(service: StrategyService = Depends(get_strategy_service)):
     """List all available strategies with their status"""
+    if DEMO_MODE:
+        return _DEMO_STRATEGIES
     return await service.get_all_strategies()
 
 
