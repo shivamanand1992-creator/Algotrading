@@ -12,7 +12,7 @@ export function useWebSocket() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [lastSignal, setLastSignal] = useState<any>(null);
-  const retryRef = useRef<NodeJS.Timeout>();
+  const retryRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const connect = useCallback(() => {
     if (wsRef.current) wsRef.current.close();

@@ -127,8 +127,8 @@ export function DashboardView() {
                       : 'text-red-400'
                   }`}
                 >
-                  {marketData?.change >= 0 ? '+' : ''}
-                  {marketData?.change.toFixed(2)} (
+                  {(marketData?.change ?? 0) >= 0 ? '+' : ''}
+                  {(marketData?.change ?? 0).toFixed(2)} (
                   {formatPercent(marketData?.change_percentage || 0)})
                 </div>
               </div>
