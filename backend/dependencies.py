@@ -100,7 +100,7 @@ def get_options_analyzer():
         return None
     if _options_analyzer is None:
         angel_client = get_angel_client()
-        _options_analyzer = OptionsChainAnalyzer(config.trading_config, angel_client)
+        _options_analyzer = OptionsChainAnalyzer()
     return _options_analyzer
 
 

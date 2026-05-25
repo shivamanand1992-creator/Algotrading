@@ -255,6 +255,45 @@ body {
   color: #ff6b6b;
 }
 
+/* STS Logo badge */
+.sts-logo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.12) 0%, transparent 70%);
+  box-shadow: 0 0 16px rgba(0, 229, 255, 0.3);
+  transition: box-shadow 0.3s ease;
+}
+
+.sts-logo-badge:hover {
+  box-shadow: 0 0 28px rgba(0, 229, 255, 0.6);
+}
+
+/* Slow spin for circular widgets */
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spinSlow 8s linear infinite;
+}
+
+/* 3D card hover effect */
+.card-3d {
+  transform-style: preserve-3d;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  perspective: 1000px;
+}
+
+.card-3d:hover {
+  transform: translateY(-4px) rotateX(2deg);
+  box-shadow: 0 12px 40px rgba(0, 229, 255, 0.25);
+}
+
 /* Loading animation */
 .loading-spinner {
   border: 3px solid rgba(0, 229, 255, 0.1);
