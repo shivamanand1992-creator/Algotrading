@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import { CircularWidget } from '../ui/CircularWidget';
 import { Card } from '../ui/Card';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -7,12 +7,14 @@ import { positionsApi, marketApi, riskApi } from '../../api/client';
 import { formatCurrency, formatPercent } from '../../utils/formatters';
 import type { PortfolioSummary, MarketData, RiskLimits } from '../../types/api';
 
-const stagger = {
-  container: { hidden: {}, show: { transition: { staggerChildren: 0.08 } } },
-  item: {
-    hidden: { opacity: 0, y: 24 },
-    show:   { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
-  },
+const staggerContainer: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.08 } },
+};
+
+const staggerItem: Variants = {
+  hidden: { opacity: 0, y: 24 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
 };
 
 export function DashboardView() {
@@ -53,12 +55,12 @@ export function DashboardView() {
   return (
     <motion.div
       className="space-y-6"
-      variants={stagger.container}
+      variants={staggerContainer}
       initial="hidden"
       animate="show"
     >
       {/* Header row */}
-      <motion.div variants={stagger.item} className="flex items-center justify-between">
+      <motion.div variants={staggerItem} className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-black text-jarvis-primary glow-text tracking-widest neon-flicker">
             COMMAND CENTER
@@ -84,7 +86,7 @@ export function DashboardView() {
       </motion.div>
 
       {/* Circular KPI widgets */}
-      <motion.div variants={stagger.item}>
+      <motion.div variants={staggerItem}>
         <motion.div
           className="glass-panel py-10 px-6 neon-border"
           style={{ perspective: 1000 }}
@@ -131,7 +133,7 @@ export function DashboardView() {
       </motion.div>
 
       {/* Market + Portfolio */}
-      <motion.div variants={stagger.item} className="grid grid-cols-2 gap-6">
+      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-6">
         {/* Market Overview */}
         <Card title="Market Overview" scanLine>
           <div className="space-y-4">
@@ -212,7 +214,7 @@ export function DashboardView() {
       </motion.div>
 
       {/* Active Positions */}
-      <motion.div variants={stagger.item}>
+      <motion.div variants={staggerItem}>
         <Card title={`Active Positions ${positions.length > 0 ? `(${positions.length})` : ''}`} scanLine>
           {positions.length > 0 ? (
             <div className="overflow-x-auto">
