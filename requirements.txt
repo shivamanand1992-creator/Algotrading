@@ -40,6 +40,7 @@ apscheduler==3.10.4
 
 # Database (for trade logs)
 sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
 
 # Web Backend
 fastapi==0.109.0

@@ -15,6 +15,7 @@ Table: trades
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -142,10 +143,19 @@ class PositionManager:
         self._wins_today:        int = 0
         self._losses_today:      int = 0
 
-        # Database
-        db_url  = config.get("database", {}).get("url", "sqlite:///logs/trades.db")
-        db_path = Path(db_url.replace("sqlite:///", ""))
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Database — prefer DATABASE_URL env var (Railway PostgreSQL sets this)
+        db_url = (
+            os.environ.get("DATABASE_URL")
+            or config.get("database", {}).get("url", "sqlite:///logs/trades.db")
+        )
+        # Railway provides postgres:// but SQLAlchemy 2.x requires postgresql://
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+        # Create parent directory only for local SQLite
+        if db_url.startswith("sqlite:///"):
+            db_path = Path(db_url.replace("sqlite:///", ""))
+            db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._engine = create_engine(db_url, echo=False, future=True)
         _Base.metadata.create_all(self._engine)
