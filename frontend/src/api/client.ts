@@ -10,7 +10,9 @@ import type {
   SystemStatus,
 } from '../types/api';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// In production (Railway) frontend is served by the same server, so use relative URLs.
+// In local dev, proxy to localhost:8000.
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 export const api = axios.create({
   baseURL: API_BASE,

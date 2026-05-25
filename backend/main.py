@@ -6,6 +6,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
 from backend.config import config
@@ -23,16 +25,12 @@ from backend.websocket_manager import ws_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     print("Starting FastAPI backend...")
-    print(f"CORS origins: {config.cors_origins}")
     yield
-    # Shutdown
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()
 
 
-# Create FastAPI app
 app = FastAPI(
     title="Algotrading API",
     description="JARVIS-style algorithmic trading platform API",
@@ -40,31 +38,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
+# Include API routers
 app.include_router(system.router)
 app.include_router(strategies.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
 app.include_router(market_data.router)
 app.include_router(risk.router)
-
-
-@app.get("/")
-async def root():
-    return {
-        "message": "Algotrading API",
-        "version": "1.0.0",
-        "status": "running"
-    }
 
 
 @app.get("/health")
@@ -74,28 +62,29 @@ async def health_check():
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates"""
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive and listen for client messages
             data = await websocket.receive_text()
-            # Echo back for now (can add custom handlers later)
-            await websocket.send_json({
-                "type": "ack",
-                "message": "Message received",
-                "data": data
-            })
+            await websocket.send_json({"type": "ack", "data": data})
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
 
 
+# Serve React frontend — mount AFTER all API routes
+_frontend_build = Path(__file__).parent.parent / "frontend" / "build"
+if _frontend_build.exists():
+    app.mount("/static", StaticFiles(directory=str(_frontend_build / "static")), name="static")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        return FileResponse(str(_frontend_build / "index.html"))
+else:
+    @app.get("/")
+    async def root():
+        return {"message": "Algotrading API v1.0.0 — frontend not built yet"}
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host=config.host,
-        port=config.port,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=int(__import__("os").getenv("PORT", 8000)), log_level="info")
