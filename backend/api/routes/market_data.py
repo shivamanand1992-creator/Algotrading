@@ -73,8 +73,8 @@ async def get_predictions(service: MarketService = Depends(get_market_service)):
     """Get ML model predictions"""
     if DEMO_MODE:
         return PredictionResponse(
-            direction="bullish", confidence=0.72,
-            predicted_move=0.8, time_horizon="1h",
-            model_agreement=0.85
+            direction=1, direction_label="UP", confidence=0.72,
+            direction_probabilities={"UP": 0.72, "FLAT": 0.18, "DOWN": 0.10},
+            timestamp="2024-05-25T10:30:00"
         )
     return await service.get_predictions()

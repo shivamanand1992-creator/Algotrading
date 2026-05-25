@@ -44,6 +44,10 @@ export interface MarketData {
   ltp: number;
   change: number;
   change_percentage: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
   iv_percentile: number;
   pcr: number;
   timestamp: string;
@@ -53,15 +57,19 @@ export interface MarketRegime {
   current_regime: string;
   confidence: number;
   regime_probabilities: Record<string, number>;
-  timestamp: string;
+  recommended_strategies?: string[];
+  timestamp?: string;
 }
 
 export interface Prediction {
-  direction: number;
-  direction_label: 'UP' | 'DOWN' | 'FLAT';
+  direction: string;
+  direction_label: string;
   confidence: number;
-  direction_probabilities: Record<string, number>;
-  timestamp: string;
+  predicted_move?: number;
+  time_horizon?: string;
+  model_agreement?: number;
+  direction_probabilities?: Record<string, number>;
+  timestamp?: string;
 }
 
 export interface RiskLimits {
@@ -72,6 +80,7 @@ export interface RiskLimits {
   max_positions: number;
   current_positions: number;
 }
+
 
 export interface SystemStatus {
   status: 'healthy' | 'degraded' | 'down';

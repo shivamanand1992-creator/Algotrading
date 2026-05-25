@@ -1,25 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { positionsApi } from '../../api/client';
 import { Card } from '../ui/Card';
-
-interface Position {
-  order_id: string;
-  symbol: string;
-  quantity: number;
-  entry_price: number;
-  current_price: number;
-  pnl: number;
-  strategy: string;
-}
-
-interface PortfolioSummary {
-  total_capital: number;
-  used_capital: number;
-  available_capital: number;
-  total_pnl: number;
-  total_pnl_pct: number;
-  open_positions: number;
-}
+import type { Position, PortfolioSummary } from '../../types/api';
 
 export function PortfolioView() {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -33,7 +15,7 @@ export function PortfolioView() {
           positionsApi.getAll(),
           positionsApi.getPortfolio(),
         ]);
-        setPositions(posRes.data.positions || []);
+        setPositions(Array.isArray(posRes.data) ? posRes.data : []);
         setSummary(sumRes.data);
       } catch (err) {
         console.error('Failed to fetch portfolio data:', err);
@@ -69,7 +51,7 @@ export function PortfolioView() {
             { label: 'Available', value: fmt(summary.available_capital), color: 'text-jarvis-accent' },
             {
               label: 'Total P&L',
-              value: `${summary.total_pnl >= 0 ? '+' : ''}${fmt(summary.total_pnl)} (${summary.total_pnl_pct.toFixed(2)}%)`,
+              value: `${summary.total_pnl >= 0 ? '+' : ''}${fmt(summary.total_pnl)} (${summary.total_pnl_percentage.toFixed(2)}%)`,
               color: summary.total_pnl >= 0 ? 'text-green-400' : 'text-red-400',
             },
           ].map((item) => (
@@ -104,11 +86,11 @@ export function PortfolioView() {
                     className="border-b border-jarvis-primary/10 hover:bg-jarvis-primary/5 transition-colors"
                   >
                     <td className="py-3 pr-4 font-mono text-jarvis-primary">{pos.symbol}</td>
-                    <td className="py-3 pr-4 text-right font-mono">{pos.quantity}</td>
+                    <td className="py-3 pr-4 text-right font-mono">{pos.qty}</td>
                     <td className="py-3 pr-4 text-right font-mono">{pos.entry_price.toFixed(2)}</td>
                     <td className="py-3 pr-4 text-right font-mono">{pos.current_price.toFixed(2)}</td>
-                    <td className={`py-3 pr-4 text-right font-mono font-bold ${pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {pos.pnl >= 0 ? '+' : ''}{pos.pnl.toFixed(2)}
+                    <td className={`py-3 pr-4 text-right font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(2)}
                     </td>
                     <td className="py-3 text-jarvis-text-secondary text-xs uppercase">{pos.strategy}</td>
                   </tr>

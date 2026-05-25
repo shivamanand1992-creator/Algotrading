@@ -26,13 +26,17 @@ async def get_all_positions(service: PositionService = Depends(get_position_serv
     """Get all open positions"""
     if DEMO_MODE:
         return [
-            PositionResponse(order_id="DEMO001", symbol="NIFTY25MAY24500CE", quantity=50,
-                             entry_price=145.50, current_price=162.30, pnl=840.0,
-                             pnl_percent=11.55, strategy="trend", status="open",
+            PositionResponse(order_id="DEMO001", symbol="NIFTY25MAY24500CE", strike=24500,
+                             entry_price=145.50, current_price=162.30, qty=50,
+                             direction="BUY", unrealized_pnl=840.0, realized_pnl=0.0,
+                             pnl_percentage=11.55, strategy="trend", regime="trending_up",
+                             sl_price=130.0, target_price=180.0,
                              entry_time="2024-05-25T09:30:00"),
-            PositionResponse(order_id="DEMO002", symbol="NIFTY25MAY24400PE", quantity=50,
-                             entry_price=98.75, current_price=87.20, pnl=-577.5,
-                             pnl_percent=-11.69, strategy="premium", status="open",
+            PositionResponse(order_id="DEMO002", symbol="NIFTY25MAY24400PE", strike=24400,
+                             entry_price=98.75, current_price=87.20, qty=50,
+                             direction="BUY", unrealized_pnl=-577.5, realized_pnl=0.0,
+                             pnl_percentage=-11.69, strategy="premium", regime="trending_up",
+                             sl_price=88.0, target_price=120.0,
                              entry_time="2024-05-25T10:15:00"),
         ]
     return await service.get_all_positions()
@@ -73,7 +77,7 @@ async def get_portfolio_summary(service: PositionService = Depends(get_position_
     if DEMO_MODE:
         return PortfolioSummary(
             total_capital=500000.0, used_capital=121250.0, available_capital=378750.0,
-            total_pnl=262.5, daily_pnl=262.5, total_pnl_percent=0.05,
-            open_positions=2, total_trades_today=5, win_rate=60.0
+            total_pnl=262.5, total_pnl_percentage=0.05,
+            open_positions_count=2, daily_pnl=262.5, daily_pnl_percentage=0.05
         )
     return await service.get_portfolio_summary()
