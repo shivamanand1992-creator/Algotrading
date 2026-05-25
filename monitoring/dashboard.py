@@ -39,7 +39,8 @@ def _color_regime(regime: str) -> str:
         "high_volatility": "[bold magenta]",
     }
     c = colors.get(regime, "")
-    return f"{c}{regime.upper().replace('_', ' ')}[/]"
+    label = regime.upper().replace('_', ' ')
+    return f"{c}{label}[/]" if c else label
 
 
 class TradingDashboard:
