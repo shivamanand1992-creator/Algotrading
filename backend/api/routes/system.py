@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from typing import List
 import time
+import httpx
 
 from backend.api.models.responses import SystemStatusResponse, LogEntry, ErrorResponse
 from backend.api.models.requests import SystemModeRequest
@@ -55,3 +56,19 @@ async def set_system_mode(request: SystemModeRequest):
     global _current_mode
     _current_mode = request.mode
     return {"message": f"Mode switched to {request.mode}"}
+
+
+@router.get("/my-ip")
+async def get_outbound_ip():
+    """Return the server's outbound public IP — use this to whitelist in Angel One"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            r = await client.get("https://api.ipify.org?format=json")
+            ip = r.json().get("ip", "unknown")
+        except Exception:
+            try:
+                r = await client.get("https://ifconfig.me/ip")
+                ip = r.text.strip()
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Could not determine outbound IP: {e}")
+    return {"outbound_ip": ip, "note": "Add this IP to Angel One SmartAPI whitelist"}
