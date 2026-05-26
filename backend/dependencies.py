@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from typing import Generator
@@ -99,13 +100,19 @@ def get_signal_generator():
     return _signal_generator
 
 
+def _model_save_dir() -> Path:
+    """Resolve model save directory: env var → absolute repo-anchored path."""
+    default = str(Path(__file__).parent.parent / "trained_models")
+    return Path(os.getenv("MODEL_SAVE_PATH", default))
+
+
 def get_price_predictor():
     global _price_predictor
     if DEMO_MODE:
         return None
     if _price_predictor is None:
         pred = PriceDirectionPredictor(config.trading_config)
-        meta_path = Path("trained_models/price_predictor_meta.pkl")
+        meta_path = _model_save_dir() / "price_predictor_meta.pkl"
         if meta_path.exists():
             try:
                 pred.load()
@@ -122,7 +129,7 @@ def get_regime_classifier():
         return None
     if _regime_classifier is None:
         clf = MarketRegimeClassifier(config.trading_config)
-        meta_path = Path("trained_models/regime_classifier_meta.pkl")
+        meta_path = _model_save_dir() / "regime_classifier_meta.pkl"
         if meta_path.exists():
             try:
                 clf.load()

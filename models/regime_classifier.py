@@ -18,6 +18,7 @@ The classifier is trained on a curated feature set derived from:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -146,7 +147,11 @@ class MarketRegimeClassifier:
     clf2.load()
     """
 
-    _DEFAULT_SAVE_DIR = Path("trained_models")
+    # Prefer MODEL_SAVE_PATH env var (set in Railway to match Volume mount),
+    # then fall back to an absolute path anchored at the repo root.
+    _DEFAULT_SAVE_DIR = Path(
+        os.getenv("MODEL_SAVE_PATH", str(Path(__file__).parent.parent / "trained_models"))
+    )
     _META_FILENAME = "regime_classifier_meta.pkl"
     _MODEL_FILENAME = "regime_classifier.json"
 

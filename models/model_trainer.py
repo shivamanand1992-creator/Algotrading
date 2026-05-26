@@ -110,9 +110,11 @@ class ModelTrainer:
         ml_cfg = config.get("ml", {})
         training_cfg = ml_cfg.get("training", {})
 
+        import os as _os
         self.train_days: int = int(training_cfg.get("train_days", 252))
+        _default_save = str(Path(__file__).parent.parent / "trained_models")
         self.save_dir = Path(
-            training_cfg.get("model_save_path", "trained_models")
+            _os.getenv("MODEL_SAVE_PATH", training_cfg.get("model_save_path", _default_save))
         )
         self.save_dir.mkdir(parents=True, exist_ok=True)
 

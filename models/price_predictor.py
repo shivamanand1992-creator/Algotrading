@@ -106,8 +106,11 @@ class PriceDirectionPredictor:
     direction, confidence, probs = predictor.predict(df_recent, feature_cols)
     """
 
-    # Default model save directory (relative to project root)
-    _DEFAULT_SAVE_DIR = Path("trained_models")
+    # Prefer MODEL_SAVE_PATH env var (set in Railway to match Volume mount),
+    # then fall back to an absolute path anchored at the repo root.
+    _DEFAULT_SAVE_DIR = Path(
+        os.getenv("MODEL_SAVE_PATH", str(Path(__file__).parent.parent / "trained_models"))
+    )
 
     def __init__(self, config: dict):
         """
