@@ -80,7 +80,7 @@ class StrategyService:
             raise ValueError(f"Strategy {name} is already running")
 
         strategy_class    = self.available_strategies[name]['class']
-        strategy_instance = strategy_class(self.config, self.order_manager)
+        strategy_instance = strategy_class(self.config)
 
         run_info: dict = {
             'instance':      strategy_instance,
