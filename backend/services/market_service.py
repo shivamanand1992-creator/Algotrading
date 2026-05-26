@@ -1,10 +1,17 @@
 import sys
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import pandas as pd
 from loguru import logger
+
+# Angel One's API interprets date strings as IST.  Railway runs UTC.
+# Always compute "now" in IST so the date strings we send are correct.
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+def _now_ist() -> datetime:
+    return datetime.now(_IST).replace(tzinfo=None)
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -23,7 +30,7 @@ NIFTY_SYMBOL   = "NIFTY"
 
 def _nearest_expiry() -> str:
     """Return the nearest Thursday expiry in DD-MMM-YYYY format (Angel One style)."""
-    today = datetime.now()
+    today = _now_ist()
     days_to_thursday = (3 - today.weekday()) % 7
     if days_to_thursday == 0 and today.hour >= 15:
         days_to_thursday = 7
@@ -54,7 +61,7 @@ class MarketService:
         return MarketDataResponse(
             symbol=NIFTY_SYMBOL, ltp=0.0, change=0.0,
             change_percentage=0.0, iv_percentile=50.0, pcr=1.0,
-            timestamp=datetime.now(),
+            timestamp=_now_ist(),
         )
 
     # ------------------------------------------------------------------
@@ -73,10 +80,10 @@ class MarketService:
             # Fetch previous day's close if cache is stale (>5 min)
             if (
                 not self._cache_ts
-                or (datetime.now() - self._cache_ts).total_seconds() > 300
+                or (datetime.now(_IST) - self._cache_ts).total_seconds() > 300
             ):
-                now    = datetime.now()
-                f_date = (now - timedelta(days=5)).strftime("%Y-%m-%d 09:00")
+                now    = _now_ist()
+                f_date = (now - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
                 t_date = now.strftime("%Y-%m-%d %H:%M")
                 try:
                     hist = await self._run_sync(
@@ -87,7 +94,7 @@ class MarketService:
                         self._cached_prev_close = float(hist.iloc[-2]["close"])
                     elif not hist.empty and len(hist) == 1:
                         self._cached_prev_close = float(hist.iloc[0]["open"])
-                    self._cache_ts = datetime.now()
+                    self._cache_ts = datetime.now(_IST)
                 except Exception as e:
                     logger.warning(f"Historical data fetch failed: {e}")
 
@@ -100,9 +107,9 @@ class MarketService:
                 ltp=ltp,
                 change=round(change, 2),
                 change_percentage=round(change_pct, 2),
-                iv_percentile=45.0,   # requires historical IV data; kept as placeholder
-                pcr=1.0,              # requires options OI sum; updated in get_options_chain
-                timestamp=datetime.now(),
+                iv_percentile=45.0,
+                pcr=1.0,
+                timestamp=_now_ist(),
             )
         except Exception as e:
             logger.error(f"get_current_market_data error: {e}")
@@ -172,7 +179,7 @@ class MarketService:
             return MarketRegimeResponse(
                 current_regime="ranging", confidence=0.5,
                 regime_probabilities={"trending_up": 0.2, "trending_down": 0.2, "ranging": 0.5, "high_volatility": 0.1},
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
         try:
             df = await self._get_ohlcv_dataframe()
@@ -185,14 +192,14 @@ class MarketService:
                 current_regime=signal.regime,
                 confidence=max(signal.regime_probs.values()),
                 regime_probabilities=signal.regime_probs,
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
         except Exception as e:
             logger.error(f"get_market_regime error: {e}")
             return MarketRegimeResponse(
                 current_regime="ranging", confidence=0.5,
                 regime_probabilities={"trending_up": 0.25, "trending_down": 0.25, "ranging": 0.35, "high_volatility": 0.15},
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
 
     # ------------------------------------------------------------------
@@ -204,7 +211,7 @@ class MarketService:
             return PredictionResponse(
                 direction=0, direction_label="FLAT", confidence=0.5,
                 direction_probabilities={"UP": 0.33, "FLAT": 0.34, "DOWN": 0.33},
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
         try:
             df = await self._get_ohlcv_dataframe()
@@ -219,14 +226,14 @@ class MarketService:
                 direction_label=direction_labels.get(signal.direction, "FLAT"),
                 confidence=signal.confidence,
                 direction_probabilities=signal.direction_probs,
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
         except Exception as e:
             logger.error(f"get_predictions error: {e}")
             return PredictionResponse(
                 direction=0, direction_label="FLAT", confidence=0.5,
                 direction_probabilities={"UP": 0.33, "FLAT": 0.34, "DOWN": 0.33},
-                timestamp=datetime.now(),
+                timestamp=_now_ist(),
             )
 
     # ------------------------------------------------------------------
@@ -238,8 +245,8 @@ class MarketService:
         if not self.angel_client:
             return []
         try:
-            now    = datetime.now()
-            f_date = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+            now    = _now_ist()
+            f_date = (now - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
             t_date = now.strftime("%Y-%m-%d %H:%M")
             hist   = await self._run_sync(
                 self.angel_client.get_historical_data,
@@ -262,8 +269,8 @@ class MarketService:
         if not self.angel_client:
             return pd.DataFrame()
         try:
-            now    = datetime.now()
-            f_date = (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M")
+            now    = _now_ist()
+            f_date = (now - timedelta(days=3)).strftime("%Y-%m-%d 09:15")
             t_date = now.strftime("%Y-%m-%d %H:%M")
             hist   = await self._run_sync(
                 self.angel_client.get_historical_data,
