@@ -146,6 +146,22 @@ class OrderManager:
             )
             return None
 
+        # ---- Hard rule: never open a short (written) options position ----
+        _is_sell_entry = (
+            signal.action in ("SELL_STRADDLE", "SELL_STRANGLE")
+            or (
+                getattr(signal, "transaction_type", "BUY") == "SELL"
+                and getattr(signal, "exchange", "") in ("NFO", "BFO")
+            )
+        )
+        if _is_sell_entry:
+            logger.warning(
+                f"[OrderManager] Trade blocked — option selling is strictly disabled. "
+                f"Signal: {signal.action} ({getattr(signal, 'transaction_type', '?')} "
+                f"{signal.symbol})"
+            )
+            return None
+
         # ---- Risk gate ----
         open_positions = self.get_open_positions()
         can_trade, block_reason = self.risk_manager.can_place_trade(
@@ -171,6 +187,22 @@ class OrderManager:
             order_type = signal.order_type,
             limit_price= signal.price,
         )
+
+        # ---- Live-only: verify actual cash balance before placing order ----
+        if not self.paper_trading:
+            required_cash = fill_price * qty
+            available_cash = self._get_available_cash()
+            if available_cash < required_cash:
+                logger.warning(
+                    f"[OrderManager] Insufficient funds: need ₹{required_cash:,.0f} "
+                    f"to buy {qty}x {signal.symbol} @ ₹{fill_price:.2f}, "
+                    f"but only ₹{available_cash:,.0f} cash available. Trade skipped."
+                )
+                return None
+            logger.debug(
+                f"[OrderManager] Fund check passed: ₹{available_cash:,.0f} available, "
+                f"₹{required_cash:,.0f} required."
+            )
 
         # ---- SL / target from RiskManager ----
         sl_price, target_price = self.risk_manager.calculate_sl_and_target(
@@ -495,6 +527,30 @@ class OrderManager:
     # ------------------------------------------------------------------
     # Raw order placement
     # ------------------------------------------------------------------
+
+    def _get_available_cash(self) -> float:
+        """Fetch actual deposited cash balance from Angel One (never margin).
+
+        Returns 0.0 on any error so the caller can safely block the trade.
+        """
+        if not self.client:
+            return 0.0
+        try:
+            funds = self.client.get_funds()
+            # 'availablecash' = deposited cash credited to the account.
+            # 'net' = net free balance after all utilisations.
+            # We take the lower of the two to be conservative.
+            cash   = float(funds.get("availablecash") or 0)
+            net    = float(funds.get("net")           or 0)
+            result = min(cash, net) if (cash > 0 and net > 0) else max(cash, net)
+            logger.debug(f"[OrderManager] Fund balance — availablecash=₹{cash:,.0f}, net=₹{net:,.0f}")
+            return result
+        except Exception as exc:
+            logger.warning(
+                f"[OrderManager] Could not fetch fund balance: {exc}. "
+                "Blocking trade as a safety measure."
+            )
+            return 0.0
 
     def _place_order(
         self,
