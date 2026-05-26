@@ -1,6 +1,7 @@
 import sys
 import asyncio
 from pathlib import Path
+from datetime import datetime, timezone, timedelta, date as _date
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -12,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.requests import Request
 from contextlib import asynccontextmanager
 from starlette.middleware.base import BaseHTTPMiddleware
+from loguru import logger
 
 from backend.config import config
 from backend.api.routes import (
@@ -26,6 +28,57 @@ from backend.api.routes import auth as auth_routes
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+# ---------------------------------------------------------------------------
+# EOD auto square-off — runs at 15:15 IST every weekday
+# ---------------------------------------------------------------------------
+
+async def _eod_squareoff_loop() -> None:
+    """Background task: square off all positions at 15:15 IST on trading days."""
+    last_squareoff_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday         = today.weekday() < 5          # Mon–Fri
+            past_cutoff        = (now_ist.hour, now_ist.minute) >= (15, 15)
+            not_done_today     = last_squareoff_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_squareoff_date = today
+                logger.warning("EOD 15:15 — auto square-off triggered.")
+
+                # Stop all running strategies first
+                try:
+                    from backend.api.routes.strategies import get_strategy_service
+                    svc = get_strategy_service()
+                    for name in list(svc.running_strategies.keys()):
+                        await svc.stop_strategy(name)
+                        logger.info(f"EOD: strategy '{name}' stopped.")
+                except Exception as exc:
+                    logger.error(f"EOD strategy stop error: {exc}")
+
+                # Square off all open positions
+                try:
+                    from backend.dependencies import get_order_manager
+                    loop = asyncio.get_event_loop()
+                    om = get_order_manager()
+                    await loop.run_in_executor(
+                        None, om.exit_all_positions, "EOD auto square-off 15:15"
+                    )
+                    logger.info("EOD: all positions squared off.")
+                except Exception as exc:
+                    logger.error(f"EOD square-off error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_eod_squareoff_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)  # check every minute
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +118,12 @@ class _AuthMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting FastAPI backend...")
-    # Lazy-import to avoid circular deps at module load time
     from backend.api.routes.positions import get_position_service
     from backend.api.routes.market_data import get_market_service
     asyncio.create_task(
         ws_manager.start_periodic_updates(get_position_service(), get_market_service())
     )
+    asyncio.create_task(_eod_squareoff_loop())
     yield
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()

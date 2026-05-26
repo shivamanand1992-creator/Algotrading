@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { positionsApi } from '../../api/client';
+import { positionsApi, api } from '../../api/client';
 import { Card } from '../ui/Card';
 import type { Position, PortfolioSummary } from '../../types/api';
 
@@ -7,6 +7,8 @@ export function PortfolioView() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [squaringOff, setSquaringOff] = useState(false);
+  const [squareOffMsg, setSquareOffMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,6 +30,24 @@ export function PortfolioView() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleSquareOff = async () => {
+    if (!window.confirm('Square off ALL open positions and stop all strategies now?')) return;
+    setSquaringOff(true);
+    setSquareOffMsg(null);
+    try {
+      const res = await api.post('/api/system/squareoff');
+      setSquareOffMsg({ text: res.data.message, ok: res.data.success });
+      // Refresh data immediately
+      const [posRes, sumRes] = await Promise.all([positionsApi.getAll(), positionsApi.getPortfolio()]);
+      setPositions(Array.isArray(posRes.data) ? posRes.data : []);
+      setSummary(sumRes.data);
+    } catch {
+      setSquareOffMsg({ text: 'Square-off request failed — check logs.', ok: false });
+    } finally {
+      setSquaringOff(false);
+    }
+  };
+
   const fmt = (n: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
@@ -41,7 +61,36 @@ export function PortfolioView() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">Portfolio</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">Portfolio</h2>
+        <div className="flex items-center gap-4">
+          {squareOffMsg && (
+            <span className={`text-xs font-mono tracking-wider ${squareOffMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {squareOffMsg.text}
+            </span>
+          )}
+          <button
+            onClick={handleSquareOff}
+            disabled={squaringOff || positions.length === 0}
+            style={{
+              padding: '8px 18px',
+              background: 'transparent',
+              border: '1px solid rgba(255,68,68,0.6)',
+              color: 'rgba(255,68,68,0.9)',
+              fontSize: 11,
+              letterSpacing: 3,
+              fontFamily: "'Courier New', monospace",
+              cursor: positions.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: positions.length === 0 ? 0.4 : 1,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => { if (positions.length > 0) { (e.target as HTMLButtonElement).style.background = 'rgba(255,68,68,0.1)'; (e.target as HTMLButtonElement).style.boxShadow = '0 0 12px rgba(255,68,68,0.2)'; } }}
+            onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent'; (e.target as HTMLButtonElement).style.boxShadow = 'none'; }}
+          >
+            {squaringOff ? 'CLOSING...' : '⬛ SQUARE OFF ALL'}
+          </button>
+        </div>
+      </div>
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

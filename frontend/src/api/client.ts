@@ -52,6 +52,7 @@ export const systemApi = {
   getStatus: () => api.get<SystemStatus>('/api/system/status'),
   setMode: (mode: 'paper' | 'live' | 'backtest') =>
     api.post('/api/system/mode', { mode }),
+  squareOffAll: () => api.post('/api/system/squareoff'),
 };
 
 // Strategy endpoints

@@ -148,6 +148,43 @@ async def get_training_status():
     }
 
 
+@router.post("/squareoff")
+async def manual_squareoff():
+    """Immediately square off all open positions and stop all running strategies."""
+    results = {"strategies_stopped": [], "positions_closed": [], "errors": []}
+
+    # Stop all running strategies
+    try:
+        from backend.api.routes.strategies import get_strategy_service
+        svc = get_strategy_service()
+        for name in list(svc.running_strategies.keys()):
+            await svc.stop_strategy(name)
+            results["strategies_stopped"].append(name)
+    except Exception as exc:
+        results["errors"].append(f"Strategy stop: {exc}")
+
+    # Square off all positions
+    try:
+        from backend.dependencies import get_order_manager
+        loop = asyncio.get_event_loop()
+        om = get_order_manager()
+        exit_ids = await loop.run_in_executor(
+            None, om.exit_all_positions, "Manual square-off"
+        )
+        results["positions_closed"] = exit_ids
+    except Exception as exc:
+        results["errors"].append(f"Square-off: {exc}")
+
+    return {
+        "success": len(results["errors"]) == 0,
+        "message": (
+            f"Squared off {len(results['positions_closed'])} position(s), "
+            f"stopped {len(results['strategies_stopped'])} strategy(s)."
+        ),
+        **results,
+    }
+
+
 @router.get("/my-ip")
 async def get_outbound_ip():
     """Return the server's outbound public IP — use this to whitelist in Angel One"""
