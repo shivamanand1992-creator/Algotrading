@@ -85,6 +85,9 @@ _PRICE_FEATURE_CANDIDATES: List[str] = [
     # Time-of-day features (model learns session patterns)
     "hour", "minute", "minutes_since_open", "minutes_to_close",
     "is_first_30min", "is_last_30min", "day_of_week", "is_expiry_day",
+    # Daily multi-timeframe context — big-picture trend
+    "daily_ema_20", "daily_ema_50", "daily_ema_200",
+    "daily_rsi", "daily_above_200ema", "daily_trend", "daily_weekly_ret",
 ]
 
 
@@ -296,11 +299,180 @@ class ModelTrainer:
         except Exception as _vix_err:
             logger.warning(f"VIX fetch skipped ({_vix_err}) — training without VIX features.")
 
+        # ------------------------------------------------------------------
+        # Multi-timeframe daily context — big-picture trend features
+        # ------------------------------------------------------------------
+        try:
+            daily_ctx = self._fetch_daily_context(years=2)
+            if daily_ctx is not None and not daily_ctx.empty:
+                # Normalise daily index to tz-naive midnight Timestamps
+                daily_ctx.index = pd.to_datetime(daily_ctx.index).normalize()
+                if getattr(daily_ctx.index, "tz", None) is not None:
+                    daily_ctx.index = daily_ctx.index.tz_localize(None)
+
+                # Extract date component of each 5-min bar as tz-naive Timestamp
+                bar_dates = pd.to_datetime(df.index.date)
+
+                _daily_cols = [
+                    "daily_ema_20", "daily_ema_50", "daily_ema_200",
+                    "daily_rsi", "daily_above_200ema", "daily_trend", "daily_weekly_ret",
+                ]
+                for col in _daily_cols:
+                    if col in daily_ctx.columns:
+                        val_dict = daily_ctx[col].to_dict()
+                        df[col] = [val_dict.get(d, np.nan) for d in bar_dates]
+
+                # Fill forward/back so mid-session bars get the same daily value
+                present = [c for c in _daily_cols if c in df.columns]
+                if present:
+                    df[present] = df[present].ffill().bfill()
+
+                logger.info(
+                    f"Daily context merged: {daily_ctx.shape[0]} trading days enriched "
+                    f"({daily_ctx.index[0].date()} → {daily_ctx.index[-1].date()})."
+                )
+        except Exception as _daily_err:
+            logger.warning(f"Daily context skipped ({_daily_err}) — continuing without daily features.")
+
         logger.info(
             f"Yahoo Finance data fetched: {len(df)} candles "
             f"({df.index[0]} → {df.index[-1]})"
         )
         self._raw_df = df
+        return df
+
+    def _fetch_daily_context(self, years: int = 2) -> Optional[pd.DataFrame]:
+        """Fetch daily OHLCV + compute slow trend indicators for multi-timeframe context.
+
+        Tries NSE India's public API first; falls back to Yahoo Finance (^NSEI, 2yr daily).
+        Returns DataFrame indexed by tz-naive midnight Timestamps with columns:
+        daily_ema_20/50/200, daily_rsi, daily_above_200ema, daily_trend, daily_weekly_ret.
+        """
+        import yfinance as yf
+
+        df: Optional[pd.DataFrame] = None
+
+        # Try NSE first (2+ years of history available)
+        try:
+            df = self._fetch_nse_daily_api(years=years)
+        except Exception as e:
+            logger.debug(f"NSE daily API unavailable ({e}), falling back to Yahoo Finance…")
+
+        # Yahoo Finance fallback
+        if df is None or df.empty:
+            try:
+                raw = yf.Ticker("^NSEI").history(period=f"{years * 365}d", interval="1d")
+                if raw is not None and not raw.empty:
+                    raw = raw.rename(columns={"Open": "open", "High": "high",
+                                              "Low": "low", "Close": "close"})
+                    raw.index.name = "date"
+                    if getattr(raw.index, "tz", None) is not None:
+                        raw.index = raw.index.tz_localize(None)
+                    raw.index = pd.to_datetime(raw.index).normalize()
+                    df = raw[["open", "high", "low", "close"]].copy()
+                    logger.info(f"Daily context via Yahoo Finance: {len(df)} trading days")
+            except Exception as e2:
+                logger.warning(f"Yahoo Finance daily context failed: {e2}")
+
+        if df is None or df.empty:
+            return None
+
+        # ── Compute slow indicators ──────────────────────────────────────
+        c = df["close"]
+
+        df["daily_ema_20"]  = c.ewm(span=20,  adjust=False).mean()
+        df["daily_ema_50"]  = c.ewm(span=50,  adjust=False).mean()
+        df["daily_ema_200"] = c.ewm(span=200, adjust=False).mean()
+
+        delta = c.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        df["daily_rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+
+        df["daily_above_200ema"] = (c > df["daily_ema_200"]).astype(int)
+
+        ema_diff_pct = (df["daily_ema_20"] - df["daily_ema_50"]) / df["daily_ema_50"]
+        df["daily_trend"] = np.where(ema_diff_pct > 0.003,  1,
+                            np.where(ema_diff_pct < -0.003, -1, 0)).astype(int)
+
+        df["daily_weekly_ret"] = c.pct_change(5)
+
+        keep = [
+            "daily_ema_20", "daily_ema_50", "daily_ema_200",
+            "daily_rsi", "daily_above_200ema", "daily_trend", "daily_weekly_ret",
+        ]
+        df = df[[col for col in keep if col in df.columns]].ffill().bfill()
+        return df
+
+    def _fetch_nse_daily_api(self, years: int = 2) -> Optional[pd.DataFrame]:
+        """Fetch Nifty 50 daily OHLCV from NSE India's public API.
+
+        NSE requires a browser-style session cookie obtained by visiting the homepage first.
+        Returns DataFrame indexed by tz-naive date Timestamps with open/high/low/close columns.
+        """
+        import requests
+        from datetime import date as _date
+
+        end_d   = _date.today()
+        start_d = end_d - timedelta(days=years * 365 + 10)
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.nseindia.com/",
+        }
+        session = requests.Session()
+        session.headers.update(headers)
+
+        # Cookie warm-up — two quick GETs to establish an NSE session
+        session.get("https://www.nseindia.com", timeout=10)
+        time.sleep(0.5)
+        session.get(
+            "https://www.nseindia.com/market-data/live-equity-market",
+            timeout=10,
+        )
+        time.sleep(0.5)
+
+        url = (
+            "https://www.nseindia.com/api/historical/indicesHistory"
+            f"?name=NIFTY%2050"
+            f"&startDate={start_d.strftime('%d-%m-%Y')}"
+            f"&endDate={end_d.strftime('%d-%m-%Y')}"
+        )
+        resp = session.get(url, timeout=20)
+        resp.raise_for_status()
+
+        records = (resp.json().get("data") or {}).get("indexCloseOnlineRecords", [])
+        if not records:
+            raise ValueError("NSE API returned empty indexCloseOnlineRecords")
+
+        rows = []
+        for r in records:
+            try:
+                dt = datetime.strptime(r["EOD_TIMESTAMP"], "%d-%b-%Y")
+                rows.append({
+                    "date":  dt,
+                    "open":  float(r.get("EOD_OPEN_INDEX_VAL",  0) or 0),
+                    "high":  float(r.get("EOD_HIGH_INDEX_VAL",  0) or 0),
+                    "low":   float(r.get("EOD_LOW_INDEX_VAL",   0) or 0),
+                    "close": float(r.get("EOD_CLOSE_INDEX_VAL", 0) or 0),
+                })
+            except Exception:
+                continue
+
+        if not rows:
+            raise ValueError("NSE API: no parseable records in response")
+
+        df = pd.DataFrame(rows).set_index("date").sort_index()
+        df.index = pd.to_datetime(df.index).normalize()
+        logger.info(
+            f"NSE daily data: {len(df)} trading days "
+            f"({df.index[0].date()} → {df.index[-1].date()})"
+        )
         return df
 
     # ------------------------------------------------------------------
