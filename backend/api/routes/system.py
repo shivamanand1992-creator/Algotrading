@@ -1,19 +1,52 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from typing import List
+import asyncio
 import time
 import httpx
 
 from backend.api.models.responses import SystemStatusResponse, LogEntry, ErrorResponse
 from backend.api.models.requests import SystemModeRequest
-from backend.dependencies import get_angel_client, reset_angel_client
-from backend.config import DEMO_MODE
+from backend.dependencies import get_angel_client, reset_angel_client, reload_ml_models
+from backend.config import config, DEMO_MODE
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 # Store startup time
 _startup_time = time.time()
 _current_mode = "demo" if DEMO_MODE else "paper"
+
+# Training state
+_train_status = "idle"   # idle | running | complete | failed
+_train_progress = ""
+_train_error = ""
+
+
+def _do_train(angel_client, days: int) -> None:
+    """Synchronous training — runs in a thread executor."""
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+    from models.model_trainer import ModelTrainer
+    trainer = ModelTrainer(angel_client, config.trading_config)
+    trainer.train_all_models()
+
+
+async def _run_training(angel_client, days: int) -> None:
+    global _train_status, _train_progress, _train_error
+    _train_status = "running"
+    _train_progress = f"Fetching {days} days of historical data and training models..."
+    _train_error = ""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _do_train, angel_client, days)
+        reload_ml_models()
+        _train_status = "complete"
+        _train_progress = "Models trained successfully and loaded into memory."
+    except Exception as e:
+        _train_status = "failed"
+        _train_error = str(e)
+        _train_progress = ""
 
 
 @router.get("/status", response_model=SystemStatusResponse)
@@ -76,6 +109,33 @@ async def reconnect_broker():
     if client is not None:
         return {"success": True, "message": "Angel One reconnected successfully"}
     return {"success": False, "message": "Reconnect failed — check credentials and IP whitelist"}
+
+
+@router.post("/train")
+async def start_training(days: int = 252, force: bool = False, angel_client=Depends(get_angel_client)):
+    """Train ML models using Angel One historical data. Runs as a background task."""
+    global _train_status
+    if DEMO_MODE:
+        raise HTTPException(status_code=400, detail="Training not available in demo mode")
+    if _train_status == "running":
+        raise HTTPException(status_code=409, detail="Training already in progress")
+    if angel_client is None:
+        raise HTTPException(status_code=503, detail="Broker not connected — cannot fetch training data")
+    asyncio.create_task(_run_training(angel_client, days))
+    return {
+        "started": True,
+        "message": f"Training started in background ({days} days of data). ETA ~10-15 min. Poll /api/system/train/status."
+    }
+
+
+@router.get("/train/status")
+async def get_training_status():
+    """Poll the current ML model training status."""
+    return {
+        "status": _train_status,
+        "progress": _train_progress,
+        "error": _train_error,
+    }
 
 
 @router.get("/my-ip")

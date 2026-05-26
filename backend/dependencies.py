@@ -104,7 +104,15 @@ def get_price_predictor():
     if DEMO_MODE:
         return None
     if _price_predictor is None:
-        _price_predictor = PriceDirectionPredictor(config.trading_config)
+        pred = PriceDirectionPredictor(config.trading_config)
+        meta_path = Path("trained_models/price_predictor_meta.pkl")
+        if meta_path.exists():
+            try:
+                pred.load()
+                logger.info("PriceDirectionPredictor loaded from disk.")
+            except Exception as e:
+                logger.warning(f"Could not load price predictor: {e}")
+        _price_predictor = pred
     return _price_predictor
 
 
@@ -113,8 +121,25 @@ def get_regime_classifier():
     if DEMO_MODE:
         return None
     if _regime_classifier is None:
-        _regime_classifier = MarketRegimeClassifier(config.trading_config)
+        clf = MarketRegimeClassifier(config.trading_config)
+        meta_path = Path("trained_models/regime_classifier_meta.pkl")
+        if meta_path.exists():
+            try:
+                clf.load()
+                logger.info("MarketRegimeClassifier loaded from disk.")
+            except Exception as e:
+                logger.warning(f"Could not load regime classifier: {e}")
+        _regime_classifier = clf
     return _regime_classifier
+
+
+def reload_ml_models():
+    """Reset ML singletons so the next request re-instantiates them from saved weights."""
+    global _regime_classifier, _price_predictor, _signal_generator
+    _regime_classifier = None
+    _price_predictor = None
+    _signal_generator = None
+    logger.info("ML model singletons reset — will reload from disk on next use.")
 
 
 def get_options_analyzer():

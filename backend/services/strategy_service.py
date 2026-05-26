@@ -172,7 +172,7 @@ class StrategyService:
 
         # Generate signal (sync call, run in executor)
         try:
-            signal = await loop.run_in_executor(None, self.signal_generator.generate, df)
+            signal = await loop.run_in_executor(None, self.signal_generator.generate_signal, df)
         except Exception as e:
             logger.warning(f"[{name}] Signal generation failed: {e}")
             return
