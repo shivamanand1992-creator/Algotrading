@@ -2,7 +2,7 @@ import sys
 import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -14,6 +14,31 @@ from backend.api.models.responses import StrategyStatus, TradeSignalResponse
 
 # How often (seconds) each strategy loop checks for signals
 STRATEGY_INTERVAL = 300   # 5 minutes
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _is_market_open() -> bool:
+    """Returns True only during NSE trading hours (Mon–Fri 09:15–15:30 IST)."""
+    now = datetime.now(_IST)
+    if now.weekday() >= 5:          # Saturday=5, Sunday=6
+        return False
+    t = (now.hour, now.minute)
+    return (9, 15) <= t <= (15, 30)
+
+
+def _seconds_until_next_open() -> int:
+    """Seconds from now until next NSE open (09:15 IST, next weekday)."""
+    now = datetime.now(_IST)
+    # Start from today's open
+    candidate = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    # If today's open is in the past or it's already after open, move to next day
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    # Skip weekends
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return max(1, int((candidate - now).total_seconds()))
 
 
 class StrategyService:
@@ -126,6 +151,19 @@ class StrategyService:
         """Runs continuously, generating signals every STRATEGY_INTERVAL seconds."""
         logger.info(f"[{name}] Signal loop started (mode={mode})")
         while name in self.running_strategies:
+            # Market hours gate — sleep until next NSE open if market is closed
+            if not _is_market_open():
+                secs = _seconds_until_next_open()
+                logger.info(
+                    f"[{name}] Market closed — sleeping {secs / 3600:.1f}h until next open."
+                )
+                try:
+                    # Wake at most every hour to recheck (handles DST / holiday edge cases)
+                    await asyncio.sleep(min(secs, 3600))
+                except asyncio.CancelledError:
+                    break
+                continue
+
             try:
                 await self._run_strategy_cycle(name, strategy_instance, mode)
             except asyncio.CancelledError:
