@@ -92,6 +92,8 @@ export const marketApi = {
 // Risk endpoints
 export const riskApi = {
   getLimits: () => api.get<RiskLimits>('/api/risk/limits'),
+  updateLimits: (body: { daily_loss_limit?: number; max_positions?: number; per_trade_risk_percent?: number }) =>
+    api.put('/api/risk/limits', body),
   getMetrics: () => api.get('/api/risk/metrics'),
   getAlerts: () => api.get('/api/risk/alerts'),
 };

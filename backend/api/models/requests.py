@@ -26,3 +26,9 @@ class TradeFilterRequest(BaseModel):
 
 class SystemModeRequest(BaseModel):
     mode: str = Field(..., pattern="^(paper|live|backtest)$")
+
+
+class UpdateRiskLimitsRequest(BaseModel):
+    daily_loss_limit: Optional[float] = None      # absolute ₹ amount
+    max_positions: Optional[int] = None
+    per_trade_risk_percent: Optional[float] = None
