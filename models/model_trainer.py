@@ -185,9 +185,11 @@ class ModelTrainer:
             time.sleep(0.25)
 
         if not all_frames:
-            raise RuntimeError(
-                "fetch_training_data: No data could be retrieved from Angel One."
+            logger.warning(
+                "Angel One returned no candle data for NSE/26000. "
+                "Falling back to Yahoo Finance (^NSEI)…"
             )
+            return self._fetch_from_yfinance(days)
 
         df = pd.concat(all_frames, ignore_index=True)
         df = df.drop_duplicates(subset=["timestamp"])
@@ -206,6 +208,48 @@ class ModelTrainer:
 
         logger.info(
             f"Training data fetched: {len(df)} candles "
+            f"({df.index[0]} → {df.index[-1]})"
+        )
+        self._raw_df = df
+        return df
+
+    def _fetch_from_yfinance(self, days: int) -> pd.DataFrame:
+        """Fallback: fetch NIFTY 50 OHLCV via Yahoo Finance when Angel One returns nothing."""
+        import yfinance as yf  # optional dep — installed alongside Angel One client
+
+        # yfinance 5-min data is only available for the last 60 calendar days
+        actual_days = min(days, 60)
+        logger.info(
+            f"Yahoo Finance fallback: fetching {actual_days} days of 5-min ^NSEI data…"
+        )
+
+        ticker = yf.Ticker("^NSEI")
+        df = ticker.history(period=f"{actual_days}d", interval="5m")
+
+        if df is None or df.empty:
+            raise RuntimeError(
+                "fetch_training_data: No data from Angel One or Yahoo Finance (^NSEI)."
+            )
+
+        df = df.rename(columns={
+            "Open": "open", "High": "high", "Low": "low",
+            "Close": "close", "Volume": "volume",
+        })
+        df.index.name = "timestamp"
+
+        # Localise to IST
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+        else:
+            df.index = df.index.tz_convert("Asia/Kolkata")
+
+        df = df[["open", "high", "low", "close", "volume"]]
+        df = df.between_time("09:15", "15:30")
+        df = df[~df.index.duplicated(keep="first")]
+        df = df.sort_index()
+
+        logger.info(
+            f"Yahoo Finance data fetched: {len(df)} candles "
             f"({df.index[0]} → {df.index[-1]})"
         )
         self._raw_df = df

@@ -34,6 +34,7 @@ def _do_train(angel_client, days: int) -> None:
     sys.path.append(str(Path(__file__).parent.parent.parent.parent))
     from models.model_trainer import ModelTrainer
     trainer = ModelTrainer(angel_client, config.trading_config)
+    trainer.train_days = days  # override config default with user-supplied value
     trainer.train_all_models(on_step=_update_progress)
 
 

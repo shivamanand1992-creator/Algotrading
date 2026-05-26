@@ -243,7 +243,7 @@ class MarketService:
     async def get_ohlcv_data(self, interval: str = "FIFTEEN_MINUTE", days: int = 5) -> list:
         """Return a list of OHLCV dicts suitable for a line/candlestick chart."""
         if not self.angel_client:
-            return []
+            return await self._get_ohlcv_from_yfinance(interval, days)
         try:
             now    = _now_ist()
             f_date = (now - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
@@ -253,12 +253,65 @@ class MarketService:
                 NIFTY_EXCHANGE, NIFTY_TOKEN, interval, f_date, t_date,
             )
             if hist is None or hist.empty:
-                return []
+                logger.info("Angel One returned no OHLCV data — falling back to Yahoo Finance")
+                return await self._get_ohlcv_from_yfinance(interval, days)
             hist = hist.copy()
             hist["timestamp"] = hist["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%S")
             return hist.to_dict("records")
         except Exception as e:
             logger.error(f"get_ohlcv_data error: {e}")
+            return await self._get_ohlcv_from_yfinance(interval, days)
+
+    async def _get_ohlcv_from_yfinance(self, interval: str, days: int) -> list:
+        """Fallback OHLCV from Yahoo Finance (^NSEI) when Angel One returns nothing."""
+        try:
+            import yfinance as yf
+
+            _yf_map = {
+                "FIVE_MINUTE":    "5m",
+                "FIFTEEN_MINUTE": "15m",
+                "ONE_HOUR":       "1h",
+                "ONE_DAY":        "1d",
+            }
+            yf_interval = _yf_map.get(interval, "15m")
+
+            # yfinance sub-hourly data is capped at 60 days
+            if yf_interval in ("5m", "15m"):
+                actual_days = min(days, 60)
+            elif yf_interval == "1h":
+                actual_days = min(days, 730)
+            else:
+                actual_days = days
+
+            def _fetch():
+                return yf.Ticker("^NSEI").history(
+                    period=f"{actual_days}d", interval=yf_interval
+                )
+
+            df = await self._run_sync(_fetch)
+
+            if df is None or df.empty:
+                return []
+
+            # Localise to IST and format
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+            else:
+                df.index = df.index.tz_convert("Asia/Kolkata")
+
+            df = df.rename(columns={
+                "Open": "open", "High": "high", "Low": "low",
+                "Close": "close", "Volume": "volume",
+            })
+            df.index.name = "timestamp"
+            df = df.reset_index()
+            df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+            keep = ["timestamp", "open", "high", "low", "close", "volume"]
+            df = df[[c for c in keep if c in df.columns]]
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"_get_ohlcv_from_yfinance error: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -267,7 +320,7 @@ class MarketService:
 
     async def _get_ohlcv_dataframe(self) -> pd.DataFrame:
         if not self.angel_client:
-            return pd.DataFrame()
+            return await self._yf_ohlcv_dataframe()
         try:
             now    = _now_ist()
             f_date = (now - timedelta(days=3)).strftime("%Y-%m-%d 09:15")
@@ -277,9 +330,37 @@ class MarketService:
                 NIFTY_EXCHANGE, NIFTY_TOKEN, "FIFTEEN_MINUTE", f_date, t_date,
             )
             if hist is None or hist.empty:
-                return pd.DataFrame()
-            df = hist.copy()
-            return df
+                return await self._yf_ohlcv_dataframe()
+            return hist.copy()
         except Exception as e:
             logger.error(f"_get_ohlcv_dataframe error: {e}")
+            return await self._yf_ohlcv_dataframe()
+
+    async def _yf_ohlcv_dataframe(self) -> pd.DataFrame:
+        """Return a 3-day 15-min OHLCV DataFrame from Yahoo Finance for signal generation."""
+        try:
+            import yfinance as yf
+
+            def _fetch():
+                return yf.Ticker("^NSEI").history(period="5d", interval="15m")
+
+            df = await self._run_sync(_fetch)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+            else:
+                df.index = df.index.tz_convert("Asia/Kolkata")
+
+            df = df.rename(columns={
+                "Open": "open", "High": "high", "Low": "low",
+                "Close": "close", "Volume": "volume",
+            })
+            df.index.name = "timestamp"
+            df = df.reset_index()
+            df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
+            return df
+        except Exception as e:
+            logger.error(f"_yf_ohlcv_dataframe error: {e}")
             return pd.DataFrame()
