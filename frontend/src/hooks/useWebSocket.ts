@@ -17,7 +17,8 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (wsRef.current) wsRef.current.close();
 
-    const ws = new WebSocket(`${WS_BASE}/ws/live`);
+    const token = localStorage.getItem('algo_auth_token') ?? '';
+    const ws = new WebSocket(`${WS_BASE}/ws/live?token=${token}`);
 
     ws.onopen = () => {
       console.log('WebSocket connected');

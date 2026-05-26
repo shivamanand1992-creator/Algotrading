@@ -116,7 +116,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
     try:
         verify_token(token)
     except Exception:
-        await websocket.close(code=4001)
+        await websocket.accept()
+        await websocket.close(code=4001)  # 4001 = unauthorised
         return
     await ws_manager.connect(websocket)
     try:
