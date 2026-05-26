@@ -364,3 +364,44 @@ class MarketService:
         except Exception as e:
             logger.error(f"_yf_ohlcv_dataframe error: {e}")
             return pd.DataFrame()
+
+    async def get_vix_data(self, interval: str = "FIFTEEN_MINUTE", days: int = 5) -> list:
+        """Fetch India VIX (^INDIAVIX) data from Yahoo Finance."""
+        try:
+            import yfinance as yf
+            _yf_map = {
+                "FIVE_MINUTE":    "5m",
+                "FIFTEEN_MINUTE": "15m",
+                "ONE_HOUR":       "1h",
+                "ONE_DAY":        "1d",
+            }
+            yf_interval = _yf_map.get(interval, "15m")
+            actual_days = min(days, 60) if yf_interval in ("5m", "15m") else days
+
+            def _fetch():
+                return yf.Ticker("^INDIAVIX").history(
+                    period=f"{actual_days}d", interval=yf_interval
+                )
+
+            df = await self._run_sync(_fetch)
+            if df is None or df.empty:
+                return []
+
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+            else:
+                df.index = df.index.tz_convert("Asia/Kolkata")
+
+            df = df.rename(columns={
+                "Open": "open", "High": "high", "Low": "low",
+                "Close": "close", "Volume": "volume",
+            })
+            df.index.name = "timestamp"
+            df = df.reset_index()
+            df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+            keep = ["timestamp", "open", "high", "low", "close"]
+            df = df[[c for c in keep if c in df.columns]]
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"get_vix_data error: {e}")
+            return []

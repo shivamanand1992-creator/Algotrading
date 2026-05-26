@@ -80,6 +80,11 @@ _PRICE_FEATURE_CANDIDATES: List[str] = [
     "upper_wick", "lower_wick",
     # Support / Resistance
     "dist_to_support", "dist_to_resistance",
+    # India VIX features
+    "vix_close", "vix_change_5", "vix_is_high", "vix_is_low",
+    # Time-of-day features (model learns session patterns)
+    "hour", "minute", "minutes_since_open", "minutes_to_close",
+    "is_first_30min", "is_last_30min", "day_of_week", "is_expiry_day",
 ]
 
 
@@ -255,6 +260,41 @@ class ModelTrainer:
         if "volume" in df.columns and (df["volume"] == 0).all():
             df["volume"] = (df["close"] / df["close"].max() * 100_000).round().astype(int).clip(lower=1)
             logger.debug("Synthetic volume applied for ^NSEI index data.")
+
+        # ------------------------------------------------------------------
+        # Time-of-day features — model learns intraday session patterns
+        # ------------------------------------------------------------------
+        df["hour"]               = df.index.hour
+        df["minute"]             = df.index.minute
+        df["minutes_since_open"] = (df.index.hour - 9) * 60 + df.index.minute - 15
+        df["minutes_to_close"]   = (15 * 60 + 30) - (df.index.hour * 60 + df.index.minute)
+        df["is_first_30min"]     = (df["minutes_since_open"] <= 30).astype(int)
+        df["is_last_30min"]      = (df["minutes_to_close"]   <= 30).astype(int)
+        df["day_of_week"]        = df.index.dayofweek   # 0=Mon … 4=Fri
+        df["is_expiry_day"]      = (df.index.dayofweek == 3).astype(int)  # Thursday
+
+        # ------------------------------------------------------------------
+        # India VIX features — strong predictor of options premium & regime
+        # ------------------------------------------------------------------
+        try:
+            vix_df = yf.Ticker("^INDIAVIX").history(
+                period=f"{actual_days}d", interval="5m"
+            )
+            if vix_df is not None and not vix_df.empty:
+                if vix_df.index.tz is None:
+                    vix_df.index = vix_df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+                else:
+                    vix_df.index = vix_df.index.tz_convert("Asia/Kolkata")
+                vix_df = vix_df[["Close"]].rename(columns={"Close": "vix_close"})
+                # Align to Nifty 5-min bars (VIX may have slightly different timestamps)
+                df = df.merge(vix_df, left_index=True, right_index=True, how="left")
+                df["vix_close"]    = df["vix_close"].ffill().bfill()
+                df["vix_change_5"] = df["vix_close"].pct_change(5)   # 5-bar % change
+                df["vix_is_high"]  = (df["vix_close"] > 20).astype(int)
+                df["vix_is_low"]   = (df["vix_close"] < 12).astype(int)
+                logger.info(f"India VIX merged: {df['vix_close'].notna().sum()} rows enriched.")
+        except Exception as _vix_err:
+            logger.warning(f"VIX fetch skipped ({_vix_err}) — training without VIX features.")
 
         logger.info(
             f"Yahoo Finance data fetched: {len(df)} candles "

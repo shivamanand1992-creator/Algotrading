@@ -59,6 +59,10 @@ export const marketApi = {
   getPredictions: () => api.get<Prediction>('/api/market/predictions'),
   getOHLCV: (interval = 'FIFTEEN_MINUTE', days = 5) =>
     api.get<OHLCVCandle[]>(`/api/market/ohlcv?interval=${interval}&days=${days}`),
+  getVIX: (interval = 'FIFTEEN_MINUTE', days = 5) =>
+    api.get<{ timestamp: string; open: number; high: number; low: number; close: number }[]>(
+      `/api/market/vix?interval=${interval}&days=${days}`
+    ),
 };
 
 // Risk endpoints

@@ -92,6 +92,18 @@ async def get_ohlcv(
     return await service.get_ohlcv_data(interval=interval, days=days)
 
 
+@router.get("/vix")
+async def get_vix(
+    interval: str = "FIFTEEN_MINUTE",
+    days: int = 5,
+    service: MarketService = Depends(get_market_service),
+):
+    """Get India VIX historical data for charting alongside Nifty."""
+    if DEMO_MODE:
+        return _demo_vix()
+    return await service.get_vix_data(interval=interval, days=days)
+
+
 def _demo_ohlcv():
     """Generate ~50 synthetic 15-min candles for demo mode."""
     import random
@@ -113,3 +125,24 @@ def _demo_ohlcv():
         price = close
         t += timedelta(minutes=15)
     return candles
+
+
+def _demo_vix():
+    """Generate ~50 synthetic VIX data points for demo mode."""
+    import random
+    from datetime import datetime, timedelta
+    points = []
+    vix = 14.5
+    t = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0) - timedelta(days=1)
+    for _ in range(50):
+        vix += random.uniform(-0.4, 0.4)
+        vix = max(10.0, min(28.0, vix))
+        points.append({
+            "timestamp": t.isoformat(),
+            "open": round(vix, 2),
+            "high": round(vix + random.uniform(0, 0.3), 2),
+            "low":  round(vix - random.uniform(0, 0.3), 2),
+            "close": round(vix, 2),
+        })
+        t += timedelta(minutes=15)
+    return points
