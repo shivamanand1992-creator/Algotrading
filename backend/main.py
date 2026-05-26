@@ -1,4 +1,5 @@
 import sys
+import asyncio
 from pathlib import Path
 
 # Add parent directory to path
@@ -26,6 +27,12 @@ from backend.websocket_manager import ws_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting FastAPI backend...")
+    # Lazy-import to avoid circular deps at module load time
+    from backend.api.routes.positions import get_position_service
+    from backend.api.routes.market_data import get_market_service
+    asyncio.create_task(
+        ws_manager.start_periodic_updates(get_position_service(), get_market_service())
+    )
     yield
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()

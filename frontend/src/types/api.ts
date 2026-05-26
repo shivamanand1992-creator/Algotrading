@@ -97,3 +97,18 @@ export interface WebSocketMessage {
   message?: string;
   timestamp?: string;
 }
+
+export interface OHLCVCandle {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface TrainStatus {
+  status: 'idle' | 'running' | 'complete' | 'failed';
+  progress: string;
+  error: string;
+}

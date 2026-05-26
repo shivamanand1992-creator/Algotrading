@@ -22,6 +22,11 @@ _train_progress = ""
 _train_error = ""
 
 
+def _update_progress(msg: str) -> None:
+    global _train_progress
+    _train_progress = msg
+
+
 def _do_train(angel_client, days: int) -> None:
     """Synchronous training — runs in a thread executor."""
     import sys
@@ -29,7 +34,7 @@ def _do_train(angel_client, days: int) -> None:
     sys.path.append(str(Path(__file__).parent.parent.parent.parent))
     from models.model_trainer import ModelTrainer
     trainer = ModelTrainer(angel_client, config.trading_config)
-    trainer.train_all_models()
+    trainer.train_all_models(on_step=_update_progress)
 
 
 async def _run_training(angel_client, days: int) -> None:

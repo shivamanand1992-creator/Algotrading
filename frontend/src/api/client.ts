@@ -8,6 +8,8 @@ import type {
   Prediction,
   RiskLimits,
   SystemStatus,
+  OHLCVCandle,
+  TrainStatus,
 } from '../types/api';
 
 // In production (Railway) frontend is served by the same server, so use relative URLs.
@@ -55,6 +57,8 @@ export const marketApi = {
   getOptionsChain: () => api.get('/api/market/options_chain'),
   getRegime: () => api.get<MarketRegime>('/api/market/regime'),
   getPredictions: () => api.get<Prediction>('/api/market/predictions'),
+  getOHLCV: (interval = 'FIFTEEN_MINUTE', days = 5) =>
+    api.get<OHLCVCandle[]>(`/api/market/ohlcv?interval=${interval}&days=${days}`),
 };
 
 // Risk endpoints
@@ -70,4 +74,10 @@ export const tradesApi = {
   getStatistics: () => api.get('/api/trades/statistics'),
   export: (format: 'csv' | 'json' = 'csv') =>
     api.get('/api/trades/export', { params: { format } }),
+};
+
+// Training endpoints
+export const trainingApi = {
+  getStatus: () => api.get<TrainStatus>('/api/system/train/status'),
+  start: (days = 60) => api.post(`/api/system/train?days=${days}`),
 };

@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, type Variants } from 'framer-motion';
+import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { CircularWidget } from '../ui/CircularWidget';
 import { Card } from '../ui/Card';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { positionsApi, marketApi, riskApi } from '../../api/client';
+import { positionsApi, marketApi, riskApi, trainingApi } from '../../api/client';
 import { formatCurrency, formatPercent } from '../../utils/formatters';
-import type { PortfolioSummary, MarketData, RiskLimits } from '../../types/api';
+import type { PortfolioSummary, MarketData, RiskLimits, TrainStatus } from '../../types/api';
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -17,11 +18,17 @@ const staggerItem: Variants = {
   show:   { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
 };
 
+const SPARKLINE_MAX = 80;
+
 export function DashboardView() {
   const { connected, positions, marketData: wsMarketData } = useWebSocket();
   const [portfolio, setPortfolio]   = useState<PortfolioSummary | null>(null);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [riskLimits, setRiskLimits] = useState<RiskLimits | null>(null);
+  const [sparkline, setSparkline]   = useState<{ v: number }[]>([]);
+  const [trainStatus, setTrainStatus] = useState<TrainStatus | null>(null);
+  const [trainStarting, setTrainStarting] = useState(false);
+  const trainPollerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,9 +50,35 @@ export function DashboardView() {
     return () => clearInterval(iv);
   }, []);
 
+  // Poll training status
   useEffect(() => {
-    if (wsMarketData) setMarketData(wsMarketData);
+    const poll = async () => {
+      try {
+        const res = await trainingApi.getStatus();
+        setTrainStatus(res.data);
+      } catch {}
+    };
+    poll();
+    trainPollerRef.current = setInterval(poll, 5000);
+    return () => { if (trainPollerRef.current) clearInterval(trainPollerRef.current); };
+  }, []);
+
+  // Build sparkline from WS ticks
+  useEffect(() => {
+    if (wsMarketData) {
+      setMarketData(wsMarketData);
+      setSparkline(prev => {
+        const next = [...prev, { v: wsMarketData.ltp }];
+        return next.length > SPARKLINE_MAX ? next.slice(-SPARKLINE_MAX) : next;
+      });
+    }
   }, [wsMarketData]);
+
+  const handleTrainNow = async () => {
+    setTrainStarting(true);
+    try { await trainingApi.start(60); } catch {}
+    setTrainStarting(false);
+  };
 
   const pnl        = portfolio?.total_pnl ?? 0;
   const pnlColor   = pnl >= 0 ? 'green' : 'red';
@@ -130,6 +163,115 @@ export function DashboardView() {
             />
           </div>
         </motion.div>
+      </motion.div>
+
+      {/* Sparkline + Training */}
+      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-6">
+        {/* Nifty Sparkline */}
+        <div className="rounded-xl p-4" style={{ background: 'rgba(0,15,35,0.7)', border: '1px solid rgba(0,229,255,0.15)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-jarvis-text-secondary uppercase tracking-widest">NIFTY Live</span>
+            <span className="text-xs font-mono text-jarvis-primary">
+              {marketData?.ltp ? marketData.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
+            </span>
+          </div>
+          {sparkline.length > 2 ? (
+            <ResponsiveContainer width="100%" height={80}>
+              <AreaChart data={sparkline} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                <defs>
+                  <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#00e5ff" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#00e5ff" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="v" stroke="#00e5ff" strokeWidth={1.5}
+                  fill="url(#sparkGrad)" dot={false} isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-20 flex items-center justify-center text-xs text-jarvis-text-secondary/60">
+              Waiting for live ticks…
+            </div>
+          )}
+        </div>
+
+        {/* Model Training Widget */}
+        <div className="rounded-xl p-4" style={{ background: 'rgba(0,15,35,0.7)', border: '1px solid rgba(0,229,255,0.15)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-jarvis-text-secondary uppercase tracking-widest">Model Training</span>
+            {trainStatus?.status === 'complete' && (
+              <span className="text-xs text-green-400 font-bold">● Ready</span>
+            )}
+            {trainStatus?.status === 'failed' && (
+              <span className="text-xs text-red-400 font-bold">● Failed</span>
+            )}
+            {trainStatus?.status === 'running' && (
+              <motion.span className="text-xs text-yellow-400 font-bold"
+                animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>
+                ● Training…
+              </motion.span>
+            )}
+          </div>
+
+          {trainStatus?.status === 'running' && (
+            <div className="space-y-2">
+              <div className="text-xs text-jarvis-text-secondary truncate">{trainStatus.progress}</div>
+              {['Step 1', 'Step 2', 'Step 3', 'Step 4', 'Step 5'].map((s, i) => {
+                const stepNum = parseInt(trainStatus.progress?.match(/Step (\d)/)?.[1] ?? '0');
+                return (
+                  <div key={s} className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${i < stepNum ? 'bg-green-400' : i === stepNum - 1 ? 'bg-yellow-400' : 'bg-jarvis-primary/20'}`} />
+                    <div className="text-xs text-jarvis-text-secondary">{s}/5</div>
+                    <div className="flex-1 bg-jarvis-primary/10 rounded-full h-1">
+                      <div className="bg-jarvis-primary h-1 rounded-full transition-all duration-500"
+                        style={{ width: `${i < stepNum ? 100 : i === stepNum - 1 ? 60 : 0}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {trainStatus?.status === 'idle' && (
+            <div className="space-y-2">
+              <p className="text-xs text-yellow-400/80">⚠ Models not trained. Strategies will generate no signals until trained.</p>
+              <button
+                onClick={handleTrainNow}
+                disabled={trainStarting}
+                className="w-full py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all"
+                style={{ background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.4)', color: '#00e5ff' }}
+              >
+                {trainStarting ? 'Starting…' : 'Train Now (60 days)'}
+              </button>
+            </div>
+          )}
+
+          {trainStatus?.status === 'complete' && (
+            <div className="space-y-1">
+              <p className="text-xs text-green-400">✓ {trainStatus.progress}</p>
+              <button
+                onClick={handleTrainNow}
+                disabled={trainStarting}
+                className="text-xs text-jarvis-text-secondary hover:text-jarvis-primary transition-colors"
+              >
+                Retrain →
+              </button>
+            </div>
+          )}
+
+          {trainStatus?.status === 'failed' && (
+            <div className="space-y-2">
+              <p className="text-xs text-red-400 break-words">{trainStatus.error || 'Training failed'}</p>
+              <button
+                onClick={handleTrainNow}
+                disabled={trainStarting}
+                className="text-xs text-jarvis-text-secondary hover:text-jarvis-primary transition-colors"
+              >
+                Retry →
+              </button>
+            </div>
+          )}
+        </div>
       </motion.div>
 
       {/* Market + Portfolio */}

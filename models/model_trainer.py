@@ -275,7 +275,7 @@ class ModelTrainer:
     # Full training pipeline
     # ------------------------------------------------------------------
 
-    def train_all_models(self) -> None:
+    def train_all_models(self, on_step=None) -> None:
         """
         End-to-end training pipeline.
 
@@ -287,29 +287,39 @@ class ModelTrainer:
         4. Train PriceDirectionPredictor.
         5. Log evaluation metrics.
         6. Save all models to trained_models/.
+
+        Parameters
+        ----------
+        on_step : callable, optional
+            Called with a progress string at the start of each step.
         """
-        logger.info("========== ModelTrainer: train_all_models() ==========")
+        def _step(msg: str):
+            logger.info(msg)
+            if on_step:
+                on_step(msg)
+
+        _step("========== ModelTrainer: train_all_models() ==========")
 
         # 1. Fetch data
-        logger.info("Step 1/5: Fetching training data…")
+        _step("Step 1/5: Fetching training data…")
         df_raw = self.fetch_training_data(days=self.train_days)
 
         # 2. Build features
-        logger.info("Step 2/5: Building feature matrix…")
+        _step("Step 2/5: Building feature matrix…")
         df_feat = self.build_feature_matrix(df_raw)
 
         # 3. Train regime classifier
-        logger.info("Step 3/5: Training MarketRegimeClassifier…")
+        _step("Step 3/5: Training MarketRegimeClassifier…")
         self.regime_classifier.train(df_feat)
 
         # 4. Determine price-predictor feature columns
-        logger.info("Step 4/5: Training PriceDirectionPredictor…")
+        _step("Step 4/5: Training PriceDirectionPredictor…")
         feature_cols = self.get_feature_columns(df_feat)
         self._feature_cols = feature_cols
         self.price_predictor.train(df_feat, feature_cols)
 
         # 5. Cross-model evaluation summary
-        logger.info("Step 5/5: Evaluating on holdout set…")
+        _step("Step 5/5: Evaluating on holdout set…")
         split_idx = int(len(df_feat) * 0.8)
         test_df = df_feat.iloc[split_idx:]
         if len(test_df) > 0:
@@ -317,7 +327,7 @@ class ModelTrainer:
         else:
             logger.warning("No holdout rows available for evaluation.")
 
-        logger.info("========== ModelTrainer: all models trained & saved ==========")
+        _step("All models trained and saved successfully.")
 
     # ------------------------------------------------------------------
     # Evaluation

@@ -14,6 +14,10 @@ const navItems: NavItem[] = [
   { id: 'risk', label: 'Risk', icon: '🛡️' },
 ];
 
+const bottomNavItems: NavItem[] = [
+  { id: 'help', label: 'Help & Guide', icon: '❓' },
+];
+
 interface SidebarProps {
   activeView: string;
   onNavigate: (view: string) => void;
@@ -39,10 +43,26 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
         ))}
       </nav>
 
-      <div className="p-6 border-t border-jarvis-primary/30">
-        <div className="text-xs text-jarvis-text-secondary text-center">
-          <div>v1.0.0</div>
-          <div className="mt-1">Shivam Trading System</div>
+      <div className="border-t border-jarvis-primary/30">
+        {bottomNavItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => onNavigate(item.id)}
+            className={`w-full px-6 py-4 flex items-center space-x-3 transition-all duration-300 ${
+              activeView === item.id
+                ? 'bg-jarvis-primary/20 border-r-4 border-jarvis-primary text-jarvis-primary'
+                : 'text-jarvis-text-secondary hover:bg-jarvis-primary/10 hover:text-jarvis-primary'
+            }`}
+          >
+            <span className="text-2xl">{item.icon}</span>
+            <span className="font-medium">{item.label}</span>
+          </button>
+        ))}
+        <div className="p-6 border-t border-jarvis-primary/30">
+          <div className="text-xs text-jarvis-text-secondary text-center">
+            <div>v1.0.0</div>
+            <div className="mt-1">Shivam Trading System</div>
+          </div>
         </div>
       </div>
     </aside>

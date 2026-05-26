@@ -78,3 +78,38 @@ async def get_predictions(service: MarketService = Depends(get_market_service)):
             timestamp="2024-05-25T10:30:00"
         )
     return await service.get_predictions()
+
+
+@router.get("/ohlcv")
+async def get_ohlcv(
+    interval: str = "FIFTEEN_MINUTE",
+    days: int = 5,
+    service: MarketService = Depends(get_market_service),
+):
+    """Get historical OHLCV candles for Nifty50 (used for line charts)."""
+    if DEMO_MODE:
+        return _demo_ohlcv()
+    return await service.get_ohlcv_data(interval=interval, days=days)
+
+
+def _demo_ohlcv():
+    """Generate ~50 synthetic 15-min candles for demo mode."""
+    import random
+    from datetime import datetime, timedelta
+    candles = []
+    price = 24500.0
+    t = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0) - timedelta(days=1)
+    for _ in range(50):
+        open_ = price
+        change = random.uniform(-80, 80)
+        close = round(open_ + change, 2)
+        high  = round(max(open_, close) + random.uniform(0, 40), 2)
+        low   = round(min(open_, close) - random.uniform(0, 40), 2)
+        candles.append({
+            "timestamp": t.isoformat(),
+            "open": open_, "high": high, "low": low, "close": close,
+            "volume": random.randint(50000, 200000),
+        })
+        price = close
+        t += timedelta(minutes=15)
+    return candles

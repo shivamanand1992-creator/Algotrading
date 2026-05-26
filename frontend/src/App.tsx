@@ -5,6 +5,7 @@ import { StrategyPanel } from './components/strategies/StrategyPanel';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { MarketDataView } from './components/market/MarketDataView';
 import { RiskView } from './components/risk/RiskView';
+import { HelpView } from './components/help/HelpView';
 import './styles/jarvis-theme.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
       case 'portfolio': return <PortfolioView />;
       case 'market': return <MarketDataView />;
       case 'risk': return <RiskView />;
+      case 'help': return <HelpView />;
       default: return <DashboardView />;
     }
   };

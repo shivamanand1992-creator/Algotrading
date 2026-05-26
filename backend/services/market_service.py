@@ -230,6 +230,42 @@ class MarketService:
             )
 
     # ------------------------------------------------------------------
+    # Public: OHLCV candles for charting
+    # ------------------------------------------------------------------
+
+    async def get_ohlcv_data(self, interval: str = "FIFTEEN_MINUTE", days: int = 5) -> list:
+        """Return a list of OHLCV dicts suitable for a line/candlestick chart."""
+        if not self.angel_client:
+            return []
+        try:
+            now    = datetime.now()
+            f_date = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+            t_date = now.strftime("%Y-%m-%d %H:%M")
+            hist   = await self._run_sync(
+                self.angel_client.get_historical_data,
+                NIFTY_EXCHANGE, NIFTY_TOKEN, interval, f_date, t_date,
+            )
+            if not hist:
+                return []
+            result = []
+            for row in hist:
+                try:
+                    result.append({
+                        "timestamp": str(row[0]) if not hasattr(row[0], "isoformat") else row[0].isoformat(),
+                        "open":   float(row[1]),
+                        "high":   float(row[2]),
+                        "low":    float(row[3]),
+                        "close":  float(row[4]),
+                        "volume": int(row[5]),
+                    })
+                except Exception:
+                    continue
+            return result
+        except Exception as e:
+            logger.error(f"get_ohlcv_data error: {e}")
+            return []
+
+    # ------------------------------------------------------------------
     # Internal: fetch real 15-min OHLCV for model input
     # ------------------------------------------------------------------
 
