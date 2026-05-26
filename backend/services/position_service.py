@@ -16,10 +16,10 @@ class PositionService:
 
     async def get_all_positions(self) -> List[PositionResponse]:
         """Get all open positions"""
-        positions = self.position_manager.get_all_positions()
+        positions = self.position_manager.get_open_positions()
 
         result = []
-        for pos_id, pos_info in positions.items():
+        for pos_info in positions:
             pnl_pct = (pos_info.unrealized_pnl / (pos_info.entry_price * pos_info.qty) * 100
                        if pos_info.entry_price * pos_info.qty > 0 else 0)
 

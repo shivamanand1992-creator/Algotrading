@@ -158,7 +158,7 @@ class PositionManager:
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._engine = create_engine(db_url, echo=False, future=True)
-        _Base.metadata.create_all(self._engine)
+        _Base.metadata.create_all(self._engine, checkfirst=True)
 
         logger.info(
             f"[PositionManager] Initialised — DB={db_url}, today={self._today}"
