@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from typing import Generator
+from loguru import logger
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -18,6 +19,7 @@ from backend.config import config, DEMO_MODE
 
 # Global instances (initialized on startup)
 _angel_client = None
+_angel_client_attempted = False   # connect() tried at least once
 _position_manager = None
 _order_manager = None
 _risk_manager = None
@@ -28,12 +30,33 @@ _options_analyzer = None
 
 
 def get_angel_client():
-    global _angel_client
+    global _angel_client, _angel_client_attempted
     if DEMO_MODE:
         return None
-    if _angel_client is None:
-        _angel_client = AngelOneClient(config.trading_config)
+    if not _angel_client_attempted:
+        _angel_client_attempted = True
+        try:
+            client = AngelOneClient(config.trading_config)
+            client.connect()
+            _angel_client = client
+            logger.info("Angel One connected successfully.")
+        except Exception as e:
+            logger.warning(
+                f"Angel One connection failed ({e}). "
+                "Check ANGEL_API_KEY / ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET "
+                "env vars and whitelist your Railway outbound IP in Angel One API settings "
+                "(Settings → API → Authorized IPs). "
+                "Running without broker — live market data unavailable; paper positions tracked locally."
+            )
+            _angel_client = None
     return _angel_client
+
+
+def reset_angel_client():
+    """Force a reconnect attempt on the next call to get_angel_client()."""
+    global _angel_client, _angel_client_attempted
+    _angel_client = None
+    _angel_client_attempted = False
 
 
 def get_position_manager():

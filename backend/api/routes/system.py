@@ -6,7 +6,7 @@ import httpx
 
 from backend.api.models.responses import SystemStatusResponse, LogEntry, ErrorResponse
 from backend.api.models.requests import SystemModeRequest
-from backend.dependencies import get_angel_client
+from backend.dependencies import get_angel_client, reset_angel_client
 from backend.config import DEMO_MODE
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -30,7 +30,7 @@ async def get_system_status(angel_client=Depends(get_angel_client)):
     """Get system health status"""
     try:
         # Check broker connection
-        broker_connected = True  # TODO: Implement actual check
+        broker_connected = angel_client is not None
 
         uptime = int(time.time() - _startup_time)
 
@@ -66,6 +66,16 @@ async def set_system_mode(request: SystemModeRequest):
     global _current_mode
     _current_mode = request.mode
     return {"message": f"Mode switched to {request.mode}"}
+
+
+@router.post("/reconnect")
+async def reconnect_broker():
+    """Force a fresh Angel One connection attempt (after whitelisting IP or fixing credentials)."""
+    reset_angel_client()
+    client = get_angel_client()
+    if client is not None:
+        return {"success": True, "message": "Angel One reconnected successfully"}
+    return {"success": False, "message": "Reconnect failed — check credentials and IP whitelist"}
 
 
 @router.get("/my-ip")

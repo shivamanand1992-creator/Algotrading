@@ -16,6 +16,8 @@ class PositionService:
 
     async def get_all_positions(self) -> List[PositionResponse]:
         """Get all open positions"""
+        if not self.position_manager:
+            return []
         positions = self.position_manager.get_open_positions()
 
         result = []

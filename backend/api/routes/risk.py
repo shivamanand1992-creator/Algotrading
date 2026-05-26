@@ -30,7 +30,7 @@ async def get_risk_limits(
     daily_loss_used = 0
     daily_loss_pct = (daily_loss_used / daily_loss_limit * 100) if daily_loss_limit > 0 else 0
 
-    current_positions = len(position_manager.get_open_positions())
+    current_positions = len(position_manager.get_open_positions()) if position_manager else 0
 
     return RiskLimitsResponse(
         daily_loss_limit=daily_loss_limit,
