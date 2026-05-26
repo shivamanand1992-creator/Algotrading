@@ -29,7 +29,11 @@ function STSLogo() {
   );
 }
 
-export function Header() {
+interface HeaderProps {
+  onLogout?: () => void;
+}
+
+export function Header({ onLogout }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [mode, setMode] = useState<string>('demo');
@@ -113,6 +117,36 @@ export function Header() {
           </div>
           <div className="w-px h-8 bg-jarvis-primary/20" />
           <ModeToggle currentMode={mode} onModeChange={setMode} />
+          {onLogout && (
+            <>
+              <div className="w-px h-8 bg-jarvis-primary/20" />
+              <button
+                onClick={onLogout}
+                title="Sign out"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(0,229,255,0.25)',
+                  color: 'rgba(0,229,255,0.6)',
+                  padding: '5px 10px',
+                  fontSize: 10,
+                  letterSpacing: 2,
+                  cursor: 'pointer',
+                  fontFamily: "'Courier New', monospace",
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => {
+                  (e.target as HTMLButtonElement).style.borderColor = '#00e5ff';
+                  (e.target as HTMLButtonElement).style.color = '#00e5ff';
+                }}
+                onMouseLeave={e => {
+                  (e.target as HTMLButtonElement).style.borderColor = 'rgba(0,229,255,0.25)';
+                  (e.target as HTMLButtonElement).style.color = 'rgba(0,229,255,0.6)';
+                }}
+              >
+                LOGOUT
+              </button>
+            </>
+          )}
         </div>
       </div>
     </motion.header>

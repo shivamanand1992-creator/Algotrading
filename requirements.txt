@@ -50,3 +50,7 @@ python-multipart==0.0.6
 pydantic==2.5.3
 httpx~=0.25.2
 yfinance>=0.2.50
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4

@@ -24,6 +24,29 @@ export const api = axios.create({
   },
 });
 
+// Auto-logout on any 401 response (expired or invalid token)
+api.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('algo_auth_token');
+      delete api.defaults.headers.common['Authorization'];
+      // Reload to show login screen
+      window.location.reload();
+    }
+    return Promise.reject(err);
+  }
+);
+
+/** Returns a WebSocket URL with the current JWT appended as ?token= */
+export function wsUrl(path: string): string {
+  const token = localStorage.getItem('algo_auth_token') ?? '';
+  const base = API_BASE
+    ? API_BASE.replace(/^http/, 'ws')
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  return `${base}${path}?token=${token}`;
+}
+
 // System endpoints
 export const systemApi = {
   getStatus: () => api.get<SystemStatus>('/api/system/status'),

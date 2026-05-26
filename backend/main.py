@@ -8,8 +8,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.requests import Request
 from contextlib import asynccontextmanager
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config import config
 from backend.api.routes import (
@@ -18,10 +20,46 @@ from backend.api.routes import (
     positions,
     trades,
     market_data,
-    risk
+    risk,
 )
+from backend.api.routes import auth as auth_routes
+from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware — protects all /api/* paths except public endpoints
+# ---------------------------------------------------------------------------
+_PUBLIC_API_PATHS = {
+    "/api/auth/login",
+    "/api/system/status",  # Railway health check
+    "/health",
+}
+
+class _AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Pass through: static files, frontend routes, public API paths, WS
+        if (
+            not path.startswith("/api")
+            or path in _PUBLIC_API_PATHS
+            or path.startswith("/ws/")
+        ):
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+        token = auth_header.split(" ", 1)[1]
+        try:
+            verify_token(token)
+        except Exception:
+            return JSONResponse({"detail": "Token invalid or expired"}, status_code=401)
+
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -42,9 +80,12 @@ app = FastAPI(
     title="Algotrading API",
     description="JARVIS-style algorithmic trading platform API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,   # disable /docs in production
+    redoc_url=None,
 )
 
+# CORS must be added before AuthMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,8 +93,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(_AuthMiddleware)
 
 # Include API routers
+app.include_router(auth_routes.router)   # /api/auth/* — public login endpoint
 app.include_router(system.router)
 app.include_router(strategies.router)
 app.include_router(positions.router)
@@ -68,7 +111,13 @@ async def health_check():
 
 
 @app.websocket("/ws/live")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: str = ""):
+    # Validate token passed as query param: /ws/live?token=<jwt>
+    try:
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=4001)
+        return
     await ws_manager.connect(websocket)
     try:
         while True:
