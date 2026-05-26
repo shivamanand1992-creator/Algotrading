@@ -144,27 +144,49 @@ class StrategyService:
     async def _run_strategy_cycle(self, name: str, strategy_instance, mode: str) -> None:
         """One cycle: fetch market data → generate signal → optionally execute."""
         import pandas as pd
+        from datetime import timedelta
         loop = asyncio.get_event_loop()
 
-        # Attempt to get real market data from angel_client via strategy's order_manager
         df = pd.DataFrame()
+
+        # 1. Try Angel One
         if self.order_manager and hasattr(self.order_manager, 'angel_client') and self.order_manager.angel_client:
             try:
-                from datetime import timedelta
                 client = self.order_manager.angel_client
                 now    = datetime.now()
                 f_date = (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M")
                 t_date = now.strftime("%Y-%m-%d %H:%M")
-                hist   = await loop.run_in_executor(
+                hist = await loop.run_in_executor(
                     None,
                     client.get_historical_data,
                     "NSE", "26000", "FIFTEEN_MINUTE", f_date, t_date,
                 )
-                if hist:
-                    df = pd.DataFrame(hist, columns=["timestamp", "open", "high", "low", "close", "volume"])
-                    df = df.astype({"open": float, "high": float, "low": float, "close": float, "volume": float})
+                if hist is not None and not hist.empty:
+                    df = hist.copy()
             except Exception as e:
-                logger.warning(f"[{name}] Market data fetch failed: {e}")
+                logger.warning(f"[{name}] Angel One data fetch failed: {e}")
+
+        # 2. Fallback to Yahoo Finance when Angel One returns nothing
+        if df.empty:
+            try:
+                import yfinance as yf
+
+                def _yf_fetch():
+                    return yf.Ticker("^NSEI").history(period="5d", interval="15m")
+
+                yf_df = await loop.run_in_executor(None, _yf_fetch)
+                if yf_df is not None and not yf_df.empty:
+                    yf_df = yf_df.rename(columns={
+                        "Open": "open", "High": "high", "Low": "low",
+                        "Close": "close", "Volume": "volume",
+                    })
+                    yf_df.index.name = "timestamp"
+                    yf_df = yf_df.reset_index()
+                    yf_df["timestamp"] = pd.to_datetime(yf_df["timestamp"]).dt.tz_localize(None)
+                    df = yf_df[["timestamp", "open", "high", "low", "close", "volume"]].copy()
+                    logger.debug(f"[{name}] Using Yahoo Finance data ({len(df)} rows)")
+            except Exception as e:
+                logger.warning(f"[{name}] Yahoo Finance fallback failed: {e}")
 
         if df.empty:
             logger.debug(f"[{name}] No market data — skipping cycle.")

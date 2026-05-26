@@ -248,6 +248,14 @@ class ModelTrainer:
         df = df[~df.index.duplicated(keep="first")]
         df = df.sort_index()
 
+        # ^NSEI is an index — Yahoo Finance reports 0 volume for every bar.
+        # Replace with synthetic relative volume so VWAP is computable and
+        # the final dropna(how="any") in build_feature_matrix doesn't wipe
+        # all rows because the vwap column is all-NaN.
+        if "volume" in df.columns and (df["volume"] == 0).all():
+            df["volume"] = (df["close"] / df["close"].max() * 100_000).round().astype(int).clip(lower=1)
+            logger.debug("Synthetic volume applied for ^NSEI index data.")
+
         logger.info(
             f"Yahoo Finance data fetched: {len(df)} candles "
             f"({df.index[0]} → {df.index[-1]})"
@@ -290,8 +298,10 @@ class ModelTrainer:
                           if c not in ("open", "high", "low", "close", "volume")]
         feat_df = feat_df.dropna(subset=indicator_cols, how="all")
 
-        # 3. Forward-fill residual NaN values from warm-up
-        feat_df = feat_df.ffill()
+        # 3. Forward-fill then back-fill residual NaN values from warm-up
+        # bfill ensures the very first bars (before indicators warm up) are filled
+        # so the final dropna doesn't eliminate the entire dataset.
+        feat_df = feat_df.ffill().bfill()
 
         # 4. Clip extreme outliers (±10σ window-based)
         for col in indicator_cols:

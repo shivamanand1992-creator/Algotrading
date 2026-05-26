@@ -127,6 +127,10 @@ async def start_training(days: int = 252, force: bool = False, angel_client=Depe
         raise HTTPException(status_code=409, detail="Training already in progress")
     if angel_client is None:
         raise HTTPException(status_code=503, detail="Broker not connected — cannot fetch training data")
+    # Set status synchronously before spawning so rapid duplicate clicks get a 409
+    _train_status = "running"
+    _train_progress = f"Starting — will fetch {days} days of Nifty50 data…"
+    _train_error = ""
     asyncio.create_task(_run_training(angel_client, days))
     return {
         "started": True,
