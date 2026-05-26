@@ -85,18 +85,41 @@ class MarketService:
                 now    = _now_ist()
                 f_date = (now - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
                 t_date = now.strftime("%Y-%m-%d %H:%M")
+                prev_close_found = False
+
+                # Try Angel One first
                 try:
                     hist = await self._run_sync(
                         self.angel_client.get_historical_data,
                         NIFTY_EXCHANGE, NIFTY_TOKEN, "ONE_DAY", f_date, t_date,
                     )
-                    if not hist.empty and len(hist) >= 2:
+                    if hist is not None and not hist.empty and len(hist) >= 2:
                         self._cached_prev_close = float(hist.iloc[-2]["close"])
-                    elif not hist.empty and len(hist) == 1:
+                        prev_close_found = True
+                    elif hist is not None and not hist.empty:
                         self._cached_prev_close = float(hist.iloc[0]["open"])
-                    self._cache_ts = datetime.now(_IST)
+                        prev_close_found = True
                 except Exception as e:
-                    logger.warning(f"Historical data fetch failed: {e}")
+                    logger.warning(f"Angel One prev-close fetch failed: {e}")
+
+                # Fallback: Yahoo Finance ^NSEI daily (Angel One returns nothing for spot index)
+                if not prev_close_found:
+                    try:
+                        import yfinance as yf
+                        def _yf_prev():
+                            return yf.Ticker("^NSEI").history(period="5d", interval="1d")
+                        yf_df = await self._run_sync(_yf_prev)
+                        if yf_df is not None and not yf_df.empty:
+                            closes = yf_df["Close"].dropna()
+                            if len(closes) >= 2:
+                                self._cached_prev_close = float(closes.iloc[-2])
+                            elif len(closes) == 1:
+                                self._cached_prev_close = float(closes.iloc[-1])
+                            logger.debug(f"YFinance prev close: {self._cached_prev_close:.2f}")
+                    except Exception as yf_err:
+                        logger.warning(f"YFinance prev-close fallback failed: {yf_err}")
+
+                self._cache_ts = datetime.now(_IST)
 
             prev = self._cached_prev_close if self._cached_prev_close > 0 else ltp
             change     = ltp - prev
