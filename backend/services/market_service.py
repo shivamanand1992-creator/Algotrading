@@ -83,10 +83,10 @@ class MarketService:
                         self.angel_client.get_historical_data,
                         NIFTY_EXCHANGE, NIFTY_TOKEN, "ONE_DAY", f_date, t_date,
                     )
-                    if hist and len(hist) >= 2:
-                        self._cached_prev_close = float(hist[-2][4])  # previous day close
-                    elif hist and len(hist) == 1:
-                        self._cached_prev_close = float(hist[0][1])   # today's open as fallback
+                    if not hist.empty and len(hist) >= 2:
+                        self._cached_prev_close = float(hist.iloc[-2]["close"])
+                    elif not hist.empty and len(hist) == 1:
+                        self._cached_prev_close = float(hist.iloc[0]["open"])
                     self._cache_ts = datetime.now()
                 except Exception as e:
                     logger.warning(f"Historical data fetch failed: {e}")
@@ -245,22 +245,11 @@ class MarketService:
                 self.angel_client.get_historical_data,
                 NIFTY_EXCHANGE, NIFTY_TOKEN, interval, f_date, t_date,
             )
-            if not hist:
+            if hist is None or hist.empty:
                 return []
-            result = []
-            for row in hist:
-                try:
-                    result.append({
-                        "timestamp": str(row[0]) if not hasattr(row[0], "isoformat") else row[0].isoformat(),
-                        "open":   float(row[1]),
-                        "high":   float(row[2]),
-                        "low":    float(row[3]),
-                        "close":  float(row[4]),
-                        "volume": int(row[5]),
-                    })
-                except Exception:
-                    continue
-            return result
+            hist = hist.copy()
+            hist["timestamp"] = hist["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+            return hist.to_dict("records")
         except Exception as e:
             logger.error(f"get_ohlcv_data error: {e}")
             return []
@@ -280,10 +269,9 @@ class MarketService:
                 self.angel_client.get_historical_data,
                 NIFTY_EXCHANGE, NIFTY_TOKEN, "FIFTEEN_MINUTE", f_date, t_date,
             )
-            if not hist:
+            if hist is None or hist.empty:
                 return pd.DataFrame()
-            df = pd.DataFrame(hist, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df = df.astype({"open": float, "high": float, "low": float, "close": float, "volume": float})
+            df = hist.copy()
             return df
         except Exception as e:
             logger.error(f"_get_ohlcv_dataframe error: {e}")

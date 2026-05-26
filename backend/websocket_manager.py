@@ -48,9 +48,10 @@ class WebSocketManager:
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients"""
         disconnected = []
+        json_str = json.dumps(message, default=str)
         for connection in self.active_connections:
             try:
-                await connection.send_json(message)
+                await connection.send_text(json_str)
             except Exception as e:
                 print(f"Error broadcasting to client: {e}")
                 disconnected.append(connection)
