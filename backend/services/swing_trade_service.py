@@ -289,6 +289,9 @@ class SwingTradeService:
             return None
 
         token = await self._resolve_token(sig.symbol)
+        if not token or token == "0":
+            logger.error(f"[SwingService] Could not resolve token for {sig.symbol} — skipping live order.")
+            return None
         # NSE cash equity trading symbol uses the "-EQ" suffix in Angel One
         eq_symbol = f"{sig.symbol}-EQ"
         try:

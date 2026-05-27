@@ -298,11 +298,15 @@ class AngelOneClient:
                 token = None
                 for item in result.get("data", []):
                     ts = str(item.get("tradingsymbol", "")).upper()
+                    # Angel One returns "symboltoken" (not "token") for equity scrips
+                    tok = item.get("symboltoken") or item.get("token")
+                    if not tok:
+                        continue
                     if ts == eq_symbol:
-                        token = str(item["token"])
+                        token = str(tok)
                         break
                     if ts == exact and token is None:
-                        token = str(item["token"])
+                        token = str(tok)
                 if token:
                     logger.debug(f"searchScrip: {symbol} → token={token}")
                     return token
