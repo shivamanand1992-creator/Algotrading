@@ -4,9 +4,9 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { CircularWidget } from '../ui/CircularWidget';
 import { Card } from '../ui/Card';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { positionsApi, marketApi, riskApi, trainingApi } from '../../api/client';
+import { positionsApi, marketApi, riskApi, trainingApi, stocksApi } from '../../api/client';
 import { formatCurrency, formatPercent } from '../../utils/formatters';
-import type { PortfolioSummary, MarketData, RiskLimits, TrainStatus } from '../../types/api';
+import type { PortfolioSummary, MarketData, RiskLimits, TrainStatus, SwingPosition } from '../../types/api';
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -27,20 +27,23 @@ export function DashboardView() {
   const [riskLimits, setRiskLimits] = useState<RiskLimits | null>(null);
   const [sparkline, setSparkline]   = useState<{ v: number }[]>([]);
   const [trainStatus, setTrainStatus] = useState<TrainStatus | null>(null);
+  const [swingPositions, setSwingPositions] = useState<SwingPosition[]>([]);
   const [trainStarting, setTrainStarting] = useState(false);
   const trainPollerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [pRes, mRes, rRes] = await Promise.all([
+        const [pRes, mRes, rRes, swRes] = await Promise.all([
           positionsApi.getPortfolio(),
           marketApi.getCurrent(),
           riskApi.getLimits(),
+          stocksApi.getPositions(),
         ]);
         setPortfolio(pRes.data);
         setMarketData(mRes.data);
         setRiskLimits(rRes.data);
+        setSwingPositions(Array.isArray(swRes.data) ? swRes.data : []);
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       }
@@ -428,6 +431,66 @@ export function DashboardView() {
           )}
         </Card>
       </motion.div>
+
+      {/* Swing Positions */}
+      {swingPositions.length > 0 && (() => {
+        const swingPnl = swingPositions.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0);
+        const swingPnlPct = swingPositions.reduce((s, p) => s + (p.pnl_pct ?? 0), 0) / swingPositions.length;
+        return (
+          <motion.div variants={staggerItem}>
+            <Card title={`Swing Positions (${swingPositions.length})`} scanLine>
+              {/* Overall swing P&L row */}
+              <div className="flex items-center justify-between mb-4 px-2 py-2 rounded-lg" style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.1)' }}>
+                <span className="text-xs text-jarvis-text-secondary uppercase tracking-widest">Swing P&L (unrealised)</span>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-mono font-bold ${swingPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {formatCurrency(swingPnl)}
+                  </span>
+                  <span className={`text-xs font-mono px-2 py-0.5 rounded ${swingPnl >= 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'}`}>
+                    {swingPnlPct >= 0 ? '+' : ''}{swingPnlPct.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-jarvis-text-secondary border-b border-white/10">
+                      <th className="pb-2 text-left">Stock</th>
+                      <th className="pb-2 text-right">Entry</th>
+                      <th className="pb-2 text-right">CMP</th>
+                      <th className="pb-2 text-right">P&L%</th>
+                      <th className="pb-2 text-right">SL</th>
+                      <th className="pb-2 text-right">Target</th>
+                      <th className="pb-2 text-center">Mode</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {swingPositions.map(pos => (
+                      <tr key={pos.symbol} className="border-b border-white/5 hover:bg-white/5">
+                        <td className="py-2 font-bold text-jarvis-primary">{pos.symbol}</td>
+                        <td className="py-2 text-right font-mono">₹{pos.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="py-2 text-right font-mono">₹{pos.current_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="py-2 text-right">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${(pos.pnl_pct ?? 0) >= 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'}`}>
+                            {(pos.pnl_pct ?? 0) >= 0 ? '+' : ''}{(pos.pnl_pct ?? 0).toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="py-2 text-right font-mono text-red-400">₹{pos.stop_loss.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="py-2 text-right font-mono text-green-400">₹{pos.target1.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="py-2 text-center">
+                          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: pos.mode === 'live' ? 'rgba(255,23,68,0.15)' : 'rgba(0,229,255,0.1)', color: pos.mode === 'live' ? '#ff1744' : '#00e5ff' }}>
+                            {pos.mode.toUpperCase()}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </motion.div>
+        );
+      })()}
     </motion.div>
   );
 }

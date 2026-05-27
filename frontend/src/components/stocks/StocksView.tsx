@@ -408,6 +408,7 @@ export function StocksView() {
                   <th className="pb-3 text-green-400">Target 1</th>
                   <th className="pb-3 text-green-300">Target 2</th>
                   <th className="pb-3">SL%</th>
+                  <th className="pb-3 text-green-400">T1%</th>
                   <th className="pb-3 text-left pl-4">Confidence</th>
                   <th className="pb-3 text-center">RSI</th>
                   <th className="pb-3 text-center">ADX</th>
@@ -435,6 +436,9 @@ export function StocksView() {
                       <td className="py-3 text-right font-mono text-green-400">{formatPrice(sig.target1)}</td>
                       <td className="py-3 text-right font-mono text-green-300">{formatPrice(sig.target2)}</td>
                       <td className="py-3 text-right text-orange-400">-{sig.sl_pct}%</td>
+                      <td className="py-3 text-right text-green-400 font-mono text-xs">
+                        +{((sig.target1 - sig.entry_price) / sig.entry_price * 100).toFixed(1)}%
+                      </td>
 
                       {/* Confidence bar */}
                       <td className="py-3 pl-4 min-w-[120px]">

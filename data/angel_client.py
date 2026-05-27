@@ -291,11 +291,21 @@ class AngelOneClient:
         try:
             result = self._smart.searchScrip(exchange, symbol)
             if result and result.get("status"):
+                # NSE cash equity trading symbols are "SYMBOL-EQ"; match that first,
+                # then fall back to exact match for any other exchange formats.
+                eq_symbol = f"{symbol.upper()}-EQ"
+                exact     = symbol.upper()
+                token = None
                 for item in result.get("data", []):
-                    if str(item.get("tradingsymbol", "")).upper() == symbol.upper():
+                    ts = str(item.get("tradingsymbol", "")).upper()
+                    if ts == eq_symbol:
                         token = str(item["token"])
-                        logger.debug(f"searchScrip: {symbol} → token={token}")
-                        return token
+                        break
+                    if ts == exact and token is None:
+                        token = str(item["token"])
+                if token:
+                    logger.debug(f"searchScrip: {symbol} → token={token}")
+                    return token
         except Exception as exc:
             logger.warning(f"searchScrip({exchange}, {symbol}) failed: {exc}")
         return None
@@ -464,7 +474,10 @@ class AngelOneClient:
         )
         resp = self._smart.placeOrder(order_params)
         _assert_ok(resp, "placeOrder")
-        order_id = str(resp.get("data", {}).get("orderid", ""))
+        # SmartConnect v1.3+ returns data as a dict {"orderid": "..."};
+        # older versions return the order ID string directly.
+        data = resp.get("data") or {}
+        order_id = data if isinstance(data, str) else str(data.get("orderid", ""))
         logger.success(f"Order placed successfully. order_id={order_id}")
         return order_id
 

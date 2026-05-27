@@ -288,6 +288,8 @@ class SwingTradeService:
             return None
 
         token = await self._resolve_token(sig.symbol)
+        # NSE cash equity trading symbol uses the "-EQ" suffix in Angel One
+        eq_symbol = f"{sig.symbol}-EQ"
         try:
             loop = asyncio.get_event_loop()
             order_id = await loop.run_in_executor(
@@ -295,7 +297,7 @@ class SwingTradeService:
                 lambda: self.angel_client.place_order(
                     variety          = "NORMAL",
                     exchange         = "NSE",
-                    symbol           = sig.symbol,
+                    symbol           = eq_symbol,
                     token            = token,
                     qty              = qty,
                     order_type       = "MARKET",
@@ -338,8 +340,9 @@ class SwingTradeService:
         """Place a live CNC sell order to exit a position."""
         if self.angel_client is None:
             return
-        symbol = pos["symbol"]
-        token  = pos.get("token", await self._resolve_token(symbol))
+        symbol    = pos["symbol"]
+        eq_symbol = f"{symbol}-EQ"
+        token     = pos.get("token", await self._resolve_token(symbol))
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
@@ -347,7 +350,7 @@ class SwingTradeService:
                 lambda: self.angel_client.place_order(
                     variety          = "NORMAL",
                     exchange         = "NSE",
-                    symbol           = symbol,
+                    symbol           = eq_symbol,
                     token            = token,
                     qty              = pos["qty"],
                     order_type       = "MARKET",
