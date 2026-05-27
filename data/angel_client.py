@@ -150,6 +150,10 @@ class AngelOneClient:
         with self._session_lock:
             try:
                 data = self._smart.generateToken(self.refresh_token)
+                if not isinstance(data, dict):
+                    raise RuntimeError(
+                        f"generateToken returned {type(data).__name__}: {str(data)[:120]}"
+                    )
                 if data.get("status") is False:
                     logger.warning(
                         "Token refresh returned failure; attempting full re-login."
@@ -528,7 +532,7 @@ class AngelOneClient:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _assert_ok(response: dict, api_name: str) -> None:
+def _assert_ok(response, api_name: str) -> None:
     """
     Raise a RuntimeError if the Angel One API response indicates failure.
 
@@ -536,6 +540,11 @@ def _assert_ok(response: dict, api_name: str) -> None:
     """
     if response is None:
         raise RuntimeError(f"{api_name}: received None response from API.")
+    if not isinstance(response, dict):
+        raise RuntimeError(
+            f"{api_name}: expected dict response, got {type(response).__name__}: "
+            f"{str(response)[:120]}"
+        )
     if response.get("status") is False:
         msg = response.get("message", "No error message provided.")
         raise RuntimeError(f"{api_name} API error: {msg}")

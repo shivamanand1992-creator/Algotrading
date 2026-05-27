@@ -68,13 +68,43 @@ class MarketService:
     # Current market data
     # ------------------------------------------------------------------
 
+    async def _get_ltp_with_fallback(self) -> float:
+        """Get Nifty LTP from Angel One, falling back to Yahoo Finance if session is broken."""
+        if self.angel_client:
+            try:
+                ltp = await self._run_sync(
+                    self.angel_client.get_ltp, NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN
+                )
+                return float(ltp)
+            except Exception as e:
+                logger.warning(f"Angel One get_ltp failed ({e}), trying Yahoo Finance…")
+
+        # Yahoo Finance fallback
+        try:
+            import yfinance as yf
+            def _yf_ltp():
+                t = yf.Ticker("^NSEI")
+                hist = t.history(period="2d", interval="1m")
+                if hist is not None and not hist.empty:
+                    return float(hist["Close"].dropna().iloc[-1])
+                return 0.0
+            ltp = await self._run_sync(_yf_ltp)
+            if ltp > 0:
+                logger.debug(f"Yahoo Finance LTP fallback: {ltp:.2f}")
+                return ltp
+        except Exception as yf_err:
+            logger.warning(f"Yahoo Finance LTP fallback failed: {yf_err}")
+
+        # Last resort: return cached value if we have one
+        return self._cached_ltp or 0.0
+
     async def get_current_market_data(self) -> MarketDataResponse:
         if not self.angel_client:
             return self._default_market()
         try:
-            ltp: float = await self._run_sync(
-                self.angel_client.get_ltp, NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN
-            )
+            ltp: float = await self._get_ltp_with_fallback()
+            if ltp == 0.0:
+                return self._default_market()
             self._cached_ltp = ltp
 
             # Fetch previous day's close if cache is stale (>5 min)
@@ -209,7 +239,7 @@ class MarketService:
             if df.empty:
                 raise ValueError("Empty OHLCV dataframe")
             signal = await asyncio.get_event_loop().run_in_executor(
-                None, self.signal_generator.generate, df
+                None, self.signal_generator.generate_signal, df
             )
             return MarketRegimeResponse(
                 current_regime=signal.regime,
@@ -241,7 +271,7 @@ class MarketService:
             if df.empty:
                 raise ValueError("Empty OHLCV dataframe")
             signal = await asyncio.get_event_loop().run_in_executor(
-                None, self.signal_generator.generate, df
+                None, self.signal_generator.generate_signal, df
             )
             direction_labels = {1: "UP", 0: "FLAT", -1: "DOWN"}
             return PredictionResponse(
