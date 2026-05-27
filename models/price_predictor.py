@@ -559,9 +559,16 @@ class PriceDirectionPredictor:
 
         df_proc = df_recent.copy()
 
+        # Replace NaN/Inf in features before scaling to prevent NaN propagation
+        df_proc[feature_cols] = df_proc[feature_cols].replace(
+            [np.inf, -np.inf], np.nan
+        ).fillna(0.0)
+
         # Scale features with trained scaler
         df_proc[feature_cols] = self.scaler.transform(df_proc[feature_cols])
         feat_arr = df_proc[feature_cols].values.astype(np.float32)
+        # Final NaN guard after scaling
+        feat_arr = np.nan_to_num(feat_arr, nan=0.0, posinf=0.0, neginf=0.0)
 
         # Take the last `lookback` rows
         seq = feat_arr[-self.lookback:]          # (lookback, features)
@@ -587,6 +594,13 @@ class PriceDirectionPredictor:
             lstm_probs, xgb_probs, lgbm_probs, self.weights
         )  # (1, 3)
         probs = combined[0]  # shape (3,)
+
+        # Sanitize NaN/Inf from ensemble output (can occur when LSTM receives all-zero inputs)
+        if not np.all(np.isfinite(probs)):
+            logger.warning(
+                "price_predictor: NaN/Inf in ensemble probs — falling back to uniform distribution"
+            )
+            probs = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float32)
 
         # Predicted class index (0=down, 1=flat, 2=up)
         pred_class = int(np.argmax(probs))

@@ -245,11 +245,14 @@ class MarketService:
             if signal_gen is None:
                 raise ValueError("Signal generator not available")
             signal = await loop.run_in_executor(None, signal_gen.generate_signal, df)
-            probs = signal.regime_probs or {}
+            import math
+            raw_probs = signal.regime_probs or {}
+            safe_probs = {k: (v if v is not None and math.isfinite(v) else 0.25) for k, v in raw_probs.items()}
+            safe_conf = max(safe_probs.values()) if safe_probs else 0.5
             return MarketRegimeResponse(
                 current_regime=signal.regime,
-                confidence=max(probs.values()) if probs else 0.5,
-                regime_probabilities=probs,
+                confidence=safe_conf,
+                regime_probabilities=safe_probs,
                 timestamp=_now_ist(),
             )
         except Exception as e:
@@ -283,11 +286,18 @@ class MarketService:
                 raise ValueError("Signal generator not available")
             signal = await loop.run_in_executor(None, signal_gen.generate_signal, df)
             direction_labels = {1: "UP", 0: "FLAT", -1: "DOWN"}
+            import math
+            # Sanitize NaN — Python float('nan') is not valid JSON and causes HTTP 500
+            safe_conf = signal.confidence if signal.confidence is not None and math.isfinite(signal.confidence) else 0.5
+            raw_probs = signal.direction_probs or {}
+            safe_probs = {k: (v if v is not None and math.isfinite(v) else 1/3) for k, v in raw_probs.items()}
+            if not safe_probs:
+                safe_probs = {"up": 0.33, "flat": 0.34, "down": 0.33}
             return PredictionResponse(
                 direction=signal.direction,
                 direction_label=direction_labels.get(signal.direction, "FLAT"),
-                confidence=signal.confidence,
-                direction_probabilities=signal.direction_probs,
+                confidence=safe_conf,
+                direction_probabilities=safe_probs,
                 timestamp=_now_ist(),
             )
         except Exception as e:
