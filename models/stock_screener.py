@@ -122,43 +122,54 @@ class StockScreener:
     # Public API
     # ------------------------------------------------------------------
 
-    def scan_swing(self, universe: list) -> List[StockSignal]:
+    def scan_swing(self, universe: list, filters: Optional[dict] = None) -> tuple:
         """
-        Scan every stock in *universe* and return actionable BUY signals,
-        sorted by confidence descending.
+        Scan every stock in *universe* and return (signals, regime_info).
 
         Parameters
         ----------
         universe : list of dict
             Each dict: {"symbol": str, "name": str, "sector": str, "yf": str}
+        filters : dict with optional keys:
+            regime_filter : bool  — warn when Nifty < 200-EMA (default True)
+            rs_filter     : bool  — apply RS vs Nifty scoring factor (default True)
 
         Returns
         -------
-        List[StockSignal]  — only BUY signals with confidence >= min_confidence
+        (List[StockSignal], dict)  — signals + regime metadata
         """
-        import yfinance as yf
+        if filters is None:
+            filters = {}
+        regime_filter = filters.get("regime_filter", True)
+        rs_filter     = filters.get("rs_filter", True)
 
-        # ── Gate 1: Nifty market regime ──────────────────────────────
-        # Only take stock longs when Nifty50 itself is in an uptrend
-        # (close > 200-day EMA). Avoids buying individual stocks in a
-        # broad bear market.
-        nifty_bullish, nifty_20d_ret = self._get_nifty_regime()
-        if not nifty_bullish:
-            logger.warning(
-                "[Screener] Nifty50 is BELOW its 200-day EMA — "
-                "broad market is bearish. Skipping swing scan."
-            )
-            return []
-        logger.info(
-            f"[Screener] Nifty regime: BULLISH (20d return={nifty_20d_ret:+.1f}%). "
-            "Proceeding with stock scan."
-        )
+        # ── Nifty regime check (warn only — never blocks the scan) ───
+        regime_info = {"bullish": True, "nifty_20d_ret": 0.0, "warning": ""}
+        if regime_filter:
+            nifty_bullish, nifty_20d_ret = self._get_nifty_regime()
+            regime_info["bullish"]       = nifty_bullish
+            regime_info["nifty_20d_ret"] = round(nifty_20d_ret, 2)
+            if not nifty_bullish:
+                regime_info["warning"] = (
+                    "⚠️ Nifty50 is BELOW its 200-day EMA — broad market is bearish. "
+                    "Signals carry higher risk in a downtrend."
+                )
+                logger.warning(f"[Screener] {regime_info['warning']}")
+            else:
+                logger.info(
+                    f"[Screener] Nifty regime: BULLISH "
+                    f"(20d return={nifty_20d_ret:+.1f}%)"
+                )
+        else:
+            _, nifty_20d_ret = self._get_nifty_regime()
+            regime_info["nifty_20d_ret"] = round(nifty_20d_ret, 2)
+
+        nifty_20d_ret = regime_info["nifty_20d_ret"]
 
         signals: List[StockSignal] = []
-
         for stock in universe:
             try:
-                sig = self._scan_stock(stock, nifty_20d_ret)
+                sig = self._scan_stock(stock, nifty_20d_ret if rs_filter else 0.0)
                 if sig is not None and sig.action == "BUY" and sig.confidence >= self.min_confidence:
                     signals.append(sig)
             except Exception as exc:
@@ -169,7 +180,7 @@ class StockScreener:
             f"[Screener] Scan complete. {len(universe)} stocks scanned, "
             f"{len(signals)} BUY signals found."
         )
-        return signals
+        return signals, regime_info
 
     # ------------------------------------------------------------------
     # Nifty regime & relative strength helpers

@@ -92,17 +92,46 @@ function ConfirmModal({ title, body, onConfirm, onCancel }: ConfirmModalProps) {
   );
 }
 
+// ── Filter toggle button ───────────────────────────────────────────────────
+function FilterToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+      style={{
+        background: value ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.04)',
+        border:     value ? '1px solid rgba(0,229,255,0.5)' : '1px solid rgba(255,255,255,0.15)',
+        color:      value ? '#00e5ff' : '#8aa5c0',
+      }}
+    >
+      <span
+        className="inline-block w-2 h-2 rounded-full transition-all"
+        style={{ background: value ? '#00e5ff' : '#444', boxShadow: value ? '0 0 6px #00e5ff' : 'none' }}
+      />
+      {label}
+    </button>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 export function StocksView() {
-  const [signals,   setSignals]   = useState<StockSignal[]>([]);
-  const [positions, setPositions] = useState<SwingPosition[]>([]);
-  const [scanning,  setScanning]  = useState(false);
-  const [scanTime,  setScanTime]  = useState<string | null>(null);
-  const [error,     setError]     = useState<string | null>(null);
-  const [execMode,  setExecMode]  = useState<'paper' | 'live'>('paper');
-  const [executing, setExecuting] = useState<string | null>(null);   // symbol being executed
-  const [confirm,   setConfirm]   = useState<{ symbol: string; auto?: boolean } | null>(null);
-  const [toast,     setToast]     = useState<string | null>(null);
+  const [signals,       setSignals]       = useState<StockSignal[]>([]);
+  const [positions,     setPositions]     = useState<SwingPosition[]>([]);
+  const [scanning,      setScanning]      = useState(false);
+  const [scanTime,      setScanTime]      = useState<string | null>(null);
+  const [error,         setError]         = useState<string | null>(null);
+  const [execMode,      setExecMode]      = useState<'paper' | 'live'>('paper');
+  const [executing,     setExecuting]     = useState<string | null>(null);
+  const [confirm,       setConfirm]       = useState<{ symbol: string; auto?: boolean } | null>(null);
+  const [toast,         setToast]         = useState<string | null>(null);
+  // Filter state
+  const [universe,      setUniverse]      = useState<'nifty50' | 'nifty100'>('nifty50');
+  const [regimeFilter,  setRegimeFilter]  = useState(true);
+  const [rsFilter,      setRsFilter]      = useState(true);
+  const [regimeWarning, setRegimeWarning] = useState<string>('');
+  const [niftyBullish,  setNiftyBullish]  = useState<boolean | null>(null);
+  const [niftyReturn,   setNiftyReturn]   = useState<number>(0);
+  const [universeSize,  setUniverseSize]  = useState<number>(0);
   const [capital,   setCapital]   = useState<number>(() => {
     const stored = localStorage.getItem('swing_capital');
     return stored ? Math.max(1000, parseInt(stored, 10)) : 150000;
@@ -155,10 +184,16 @@ export function StocksView() {
   const handleScan = async () => {
     setScanning(true);
     setError(null);
+    setRegimeWarning('');
     try {
-      const res = await stocksApi.scan();
-      const sigs = Array.isArray(res.data) ? res.data : [];
+      const res = await stocksApi.scan({ universe, regime_filter: regimeFilter, rs_filter: rsFilter });
+      const data = res.data as any;
+      const sigs = Array.isArray(data.signals) ? data.signals : (Array.isArray(data) ? data : []);
       setSignals(sigs);
+      setRegimeWarning(data.regime_warning ?? '');
+      setNiftyBullish(data.nifty_bullish ?? null);
+      setNiftyReturn(data.nifty_20d_return ?? 0);
+      setUniverseSize(data.universe_size ?? sigs.length);
       if (sigs.length > 0) setScanTime(sigs[0].scan_time);
       else setScanTime(new Date().toISOString());
       showToast(`Scan complete — ${sigs.length} BUY signal${sigs.length !== 1 ? 's' : ''} found`);
@@ -248,7 +283,7 @@ export function StocksView() {
             Stock Screener — Swing Trade
           </h2>
           <p className="text-xs text-jarvis-text-secondary mt-1">
-            Nifty50 daily scan · Entry / SL / Target for 2–10 day delivery trades
+            {universe === 'nifty100' ? 'Nifty100 (Nifty50 + Next50)' : 'Nifty50'} daily scan · Entry / SL / Target for 2–10 day delivery trades
           </p>
         </div>
 
@@ -315,9 +350,101 @@ export function StocksView() {
         </div>
       </div>
 
+      {/* ── Filter Controls ── */}
+      <div className="glass-panel p-4 rounded-xl" style={{ border: '1px solid rgba(0,229,255,0.15)' }}>
+        <div className="flex items-center gap-4 flex-wrap">
+          <span className="text-xs font-bold uppercase tracking-widest text-jarvis-text-secondary">Filters:</span>
+
+          {/* Universe selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">Universe:</span>
+            {([['nifty50', 'Nifty 50'], ['nifty100', 'Nifty 100']] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setUniverse(val)}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg transition-all"
+                style={{
+                  background: universe === val ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.04)',
+                  border:     universe === val ? '1px solid rgba(0,229,255,0.5)' : '1px solid rgba(255,255,255,0.12)',
+                  color:      universe === val ? '#00e5ff' : '#8aa5c0',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-5 bg-white/15 hidden sm:block" />
+
+          {/* Regime filter toggle */}
+          <div className="flex items-center gap-2">
+            <FilterToggle
+              label="Nifty Regime"
+              value={regimeFilter}
+              onChange={setRegimeFilter}
+            />
+            <span className="text-xs text-jarvis-text-secondary hidden sm:inline">
+              (warns if Nifty below 200-EMA)
+            </span>
+          </div>
+
+          {/* RS filter toggle */}
+          <div className="flex items-center gap-2">
+            <FilterToggle
+              label="Rel. Strength"
+              value={rsFilter}
+              onChange={setRsFilter}
+            />
+            <span className="text-xs text-jarvis-text-secondary hidden sm:inline">
+              (scores stocks vs Nifty 20d return)
+            </span>
+          </div>
+
+          {/* Nifty return badge */}
+          {niftyBullish !== null && (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-jarvis-text-secondary">Nifty 20d:</span>
+              <span
+                className="text-xs font-mono font-bold px-2 py-0.5 rounded"
+                style={{
+                  background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,82,82,0.12)',
+                  color:      niftyBullish ? '#00e676' : '#ff5252',
+                }}
+              >
+                {niftyReturn >= 0 ? '+' : ''}{niftyReturn.toFixed(1)}%
+              </span>
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded"
+                style={{
+                  background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,214,0,0.12)',
+                  color:      niftyBullish ? '#00e676' : '#ffd600',
+                  border:     `1px solid ${niftyBullish ? 'rgba(0,230,118,0.3)' : 'rgba(255,214,0,0.3)'}`,
+                }}
+              >
+                {niftyBullish ? '▲ Above 200-EMA' : '▼ Below 200-EMA'}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Regime Warning Banner ── */}
+      {regimeWarning && (
+        <div
+          className="glass-panel p-4 rounded-xl text-sm font-semibold"
+          style={{ border: '1px solid rgba(255,214,0,0.4)', background: 'rgba(255,214,0,0.06)', color: '#ffd600' }}
+        >
+          {regimeWarning}
+          <span className="block text-xs font-normal mt-1 text-jarvis-text-secondary">
+            Signals still shown — use your discretion. Only the strongest setups with high RS scores are advisable in a downtrend.
+          </span>
+        </div>
+      )}
+
       {scanTime && (
         <p className="text-xs text-jarvis-text-secondary">
           Last scan: {formatScanTime(scanTime)} · {signals.length} BUY signal{signals.length !== 1 ? 's' : ''}
+          {universeSize > 0 && ` · scanned ${universe === 'nifty100' ? '~100' : '50'} stocks`}
         </p>
       )}
 
@@ -395,16 +522,18 @@ export function StocksView() {
         <div className="flex flex-col items-center justify-center py-16 gap-4">
           <div className="w-10 h-10 border-4 border-jarvis-primary border-t-transparent rounded-full animate-spin" />
           <div className="text-jarvis-primary font-semibold uppercase tracking-widest text-sm">
-            Scanning 50 Nifty50 stocks…
+            Scanning {universe === 'nifty100' ? '~100 Nifty100' : '50 Nifty50'} stocks…
           </div>
-          <div className="text-jarvis-text-secondary text-xs">Fetching daily OHLCV + computing indicators (~15s)</div>
+          <div className="text-jarvis-text-secondary text-xs">
+            Fetching daily OHLCV + computing indicators (~{universe === 'nifty100' ? '30' : '15'}s)
+          </div>
         </div>
       ) : signals.length === 0 ? (
         <Card title="Swing Signals">
           <div className="text-center py-12 text-jarvis-text-secondary">
             <div className="text-4xl mb-4">🔍</div>
             <div className="font-semibold">No signals yet</div>
-            <div className="text-xs mt-2">Click "Run Scan" to scan Nifty50 for swing trade setups</div>
+            <div className="text-xs mt-2">Click "Run Scan" to scan {universe === 'nifty100' ? 'Nifty100' : 'Nifty50'} for swing trade setups</div>
           </div>
         </Card>
       ) : (

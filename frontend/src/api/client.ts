@@ -116,9 +116,16 @@ export const trainingApi = {
 
 // Stock screener / swing trade endpoints
 export const stocksApi = {
-  getWatchlist: () => api.get<{ symbol: string; name: string; sector: string }[]>('/api/stocks/watchlist'),
+  getWatchlist: (universe = 'nifty50') => api.get<{ symbol: string; name: string; sector: string }[]>(`/api/stocks/watchlist?universe=${universe}`),
   getSignals:   () => api.get<StockSignal[]>('/api/stocks/signals'),
-  scan:         () => api.get<StockSignal[]>('/api/stocks/scan', { timeout: 60000 }),
+  scan: (params: { universe?: string; regime_filter?: boolean; rs_filter?: boolean } = {}) => {
+    const q = new URLSearchParams({ universe: params.universe || 'nifty50' });
+    if (params.regime_filter !== undefined) q.set('regime_filter', String(params.regime_filter));
+    if (params.rs_filter     !== undefined) q.set('rs_filter',     String(params.rs_filter));
+    return api.get<{ signals: StockSignal[]; regime_warning: string; nifty_bullish: boolean; nifty_20d_return: number; universe_size: number }>(
+      `/api/stocks/scan?${q.toString()}`, { timeout: 90000 }
+    );
+  },
   getPositions: () => api.get<SwingPosition[]>('/api/stocks/positions'),
   execute:      (symbol: string, mode: 'paper' | 'live', capital?: number) =>
     api.post(`/api/stocks/signals/${symbol}/execute`, { mode, capital }),

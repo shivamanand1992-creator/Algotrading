@@ -58,20 +58,25 @@ class SwingTradeService:
     # Scan
     # ------------------------------------------------------------------
 
-    async def run_scan(self) -> List[StockSignal]:
+    async def run_scan(self, universe: str = "nifty50", filters: Optional[dict] = None) -> tuple:
         """
-        Fetch daily OHLCV for all 50 stocks and return ranked BUY signals.
-        Runs the sync screener in a thread executor (~15 seconds).
+        Fetch daily OHLCV and return (signals, regime_info).
+        universe: "nifty50" | "nifty100"
+        filters:  {"regime_filter": bool, "rs_filter": bool}
+        Runs the sync screener in a thread executor (~15s for 50 stocks, ~30s for 100).
         """
+        from data.nifty50_universe import NIFTY50_UNIVERSE, NIFTY100_UNIVERSE
+        stock_list = NIFTY100_UNIVERSE if universe == "nifty100" else NIFTY50_UNIVERSE
+        n = len(stock_list)
         loop = asyncio.get_event_loop()
-        logger.info("[SwingService] Starting Nifty50 swing scan…")
-        signals = await loop.run_in_executor(
-            None, self._screener.scan_swing, NIFTY50_UNIVERSE
+        logger.info(f"[SwingService] Starting swing scan — universe={universe} ({n} stocks)…")
+        signals, regime_info = await loop.run_in_executor(
+            None, self._screener.scan_swing, stock_list, filters or {}
         )
         self._last_signals   = signals
         self._last_scan_time = datetime.now(_IST)
         logger.info(f"[SwingService] Scan complete. {len(signals)} BUY signals found.")
-        return signals
+        return signals, regime_info
 
     def get_last_signals(self) -> List[StockSignal]:
         return self._last_signals

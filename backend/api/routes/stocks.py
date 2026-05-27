@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
@@ -23,7 +23,7 @@ from backend.api.models.responses import StockSignalResponse, SwingPositionRespo
 from backend.config import config, DEMO_MODE
 from backend.dependencies import get_angel_client
 from backend.services.swing_trade_service import get_swing_service, SwingTradeService
-from data.nifty50_universe import NIFTY50_UNIVERSE
+from data.nifty50_universe import NIFTY50_UNIVERSE, NIFTY100_UNIVERSE
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
@@ -129,9 +129,10 @@ class AutoExecuteRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/watchlist")
-async def get_watchlist():
-    """Return the Nifty50 stock universe list."""
-    return [{"symbol": s["symbol"], "name": s["name"], "sector": s["sector"]} for s in NIFTY50_UNIVERSE]
+async def get_watchlist(universe: str = Query("nifty50", enum=["nifty50", "nifty100"])):
+    """Return the stock universe list."""
+    src = NIFTY100_UNIVERSE if universe == "nifty100" else NIFTY50_UNIVERSE
+    return [{"symbol": s["symbol"], "name": s["name"], "sector": s["sector"]} for s in src]
 
 
 @router.get("/signals", response_model=List[StockSignalResponse])
@@ -142,17 +143,36 @@ async def get_signals(svc: SwingTradeService = Depends(_get_svc)):
     return [StockSignalResponse(**s.to_dict()) for s in svc.get_last_signals()]
 
 
-@router.get("/scan", response_model=List[StockSignalResponse])
-async def run_scan(svc: SwingTradeService = Depends(_get_svc)):
+@router.get("/scan")
+async def run_scan(
+    universe:      str  = Query("nifty50", enum=["nifty50", "nifty100"]),
+    regime_filter: bool = Query(True),
+    rs_filter:     bool = Query(True),
+    svc: SwingTradeService = Depends(_get_svc),
+):
     """
-    Run a fresh Nifty50 swing scan.  Takes ~15 seconds (50 yfinance downloads).
-    Returns ranked BUY signals sorted by confidence.
+    Run a fresh swing scan.
+    universe=nifty50|nifty100 · regime_filter=true|false · rs_filter=true|false
+    Returns {signals, regime_warning, nifty_bullish, nifty_20d_return, universe_size}
     """
     if DEMO_MODE:
-        return [StockSignalResponse(**d) for d in _DEMO_SIGNALS]
+        return {
+            "signals": [StockSignalResponse(**d).model_dump() for d in _DEMO_SIGNALS],
+            "regime_warning": "",
+            "nifty_bullish": True,
+            "nifty_20d_return": 1.2,
+            "universe_size": len(_DEMO_SIGNALS),
+        }
 
-    signals = await svc.run_scan()
-    return [StockSignalResponse(**s.to_dict()) for s in signals]
+    filters = {"regime_filter": regime_filter, "rs_filter": rs_filter}
+    signals, regime_info = await svc.run_scan(universe=universe, filters=filters)
+    return {
+        "signals":        [StockSignalResponse(**s.to_dict()).model_dump() for s in signals],
+        "regime_warning": regime_info.get("warning", ""),
+        "nifty_bullish":  regime_info.get("bullish", True),
+        "nifty_20d_return": regime_info.get("nifty_20d_ret", 0.0),
+        "universe_size":  len(signals),
+    }
 
 
 @router.get("/positions", response_model=List[SwingPositionResponse])
