@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { systemApi } from '../../api/client';
 
@@ -126,18 +127,20 @@ export function ModeToggle({ currentMode, onModeChange }: ModeToggleProps) {
         </AnimatePresence>
       </div>
 
-      {/* Live mode confirmation modal */}
-      <AnimatePresence>
-        {confirm && (
+      {/* Live mode confirmation modal — rendered via portal to escape header's CSS transform context */}
+      {confirm && ReactDOM.createPortal(
+        <AnimatePresence>
           <motion.div
-            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            className="fixed inset-0 flex items-center justify-center"
+            style={{ zIndex: 99999 }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setConfirm(null)} />
             <motion.div
-              className="glass-panel neon-border p-8 max-w-md w-full mx-4 relative z-10"
+              className="glass-panel neon-border p-8 max-w-md w-full mx-4 relative"
+              style={{ zIndex: 100000 }}
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -171,8 +174,9 @@ export function ModeToggle({ currentMode, onModeChange }: ModeToggleProps) {
               </div>
             </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </>
   );
 }
