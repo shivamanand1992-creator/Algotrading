@@ -141,11 +141,23 @@ async def start_training(days: int = 252, force: bool = False, angel_client=Depe
 @router.get("/train/status")
 async def get_training_status():
     """Poll the current ML model training status."""
-    return {
-        "status": _train_status,
-        "progress": _train_progress,
-        "error": _train_error,
-    }
+    import os
+    from pathlib import Path as _Path
+
+    status = _train_status
+    progress = _train_progress
+    error = _train_error
+
+    # After a restart, _train_status resets to "idle" even if model files exist
+    # on the Volume. Check the files so the dashboard shows Ready correctly.
+    if status == "idle":
+        _default = str(_Path(__file__).parent.parent.parent.parent / "trained_models")
+        model_dir = _Path(os.getenv("MODEL_SAVE_PATH", _default))
+        if (model_dir / "regime_classifier_meta.pkl").exists():
+            status = "complete"
+            progress = "Models loaded from disk (previous training session)."
+
+    return {"status": status, "progress": progress, "error": error}
 
 
 @router.post("/squareoff")
