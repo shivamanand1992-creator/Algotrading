@@ -82,6 +82,45 @@ async def _eod_squareoff_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Morning auto-retrain — runs at 08:30 IST every weekday
+# ---------------------------------------------------------------------------
+
+async def _morning_retrain_loop() -> None:
+    """Background task: retrain ML models at 08:30 IST on trading days."""
+    last_retrain_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (8, 30)
+            not_done_today = last_retrain_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_retrain_date = today
+                logger.info("Morning 08:30 — scheduled model retrain starting.")
+
+                try:
+                    from backend.api.routes.system import _run_training
+                    from backend.dependencies import get_angel_client
+                    angel_client = get_angel_client()
+                    if angel_client is None:
+                        logger.warning("Morning retrain skipped — broker not connected.")
+                    else:
+                        asyncio.create_task(_run_training(angel_client, days=60))
+                        logger.info("Morning retrain task launched (60 days, ~10–15 min).")
+                except Exception as exc:
+                    logger.error(f"Morning retrain error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_morning_retrain_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)  # check every minute
+
+
+# ---------------------------------------------------------------------------
 # Auth middleware — protects all /api/* paths except public endpoints
 # ---------------------------------------------------------------------------
 _PUBLIC_API_PATHS = {
@@ -124,6 +163,7 @@ async def lifespan(app: FastAPI):
         ws_manager.start_periodic_updates(get_position_service(), get_market_service())
     )
     asyncio.create_task(_eod_squareoff_loop())
+    asyncio.create_task(_morning_retrain_loop())
     yield
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()
