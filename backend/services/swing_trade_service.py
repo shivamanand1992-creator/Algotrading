@@ -288,6 +288,17 @@ class SwingTradeService:
             logger.error("[SwingService] Angel One client not available for live order.")
             return None
 
+        # NSE cash equity session: 09:15–15:30 IST
+        now_ist = datetime.now(_IST).time()
+        market_open  = datetime.strptime("09:15", "%H:%M").time()
+        market_close = datetime.strptime("15:30", "%H:%M").time()
+        if not (market_open <= now_ist <= market_close):
+            logger.warning(
+                f"[SwingService] Market is closed ({now_ist.strftime('%H:%M')} IST). "
+                f"Live CNC order for {sig.symbol} skipped. Try during 09:15–15:30."
+            )
+            return None
+
         token = await self._resolve_token(sig.symbol)
         if not token or token == "0":
             logger.error(f"[SwingService] Could not resolve token for {sig.symbol} — skipping live order.")

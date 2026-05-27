@@ -476,12 +476,15 @@ class AngelOneClient:
             f"Placing order: {transaction_type} {qty}x {symbol} "
             f"@ {price} [{order_type}/{variety}]"
         )
-        resp = self._smart.placeOrder(order_params)
+        # SmartConnect.placeOrder() does resp['data']['orderid'] directly and crashes
+        # when Angel One returns an error with data as a string. Bypass it and use
+        # _postRequest directly so we control response parsing.
+        resp = self._smart._postRequest("api.order.place", order_params)
         _assert_ok(resp, "placeOrder")
-        # SmartConnect v1.3+ returns data as a dict {"orderid": "..."};
-        # older versions return the order ID string directly.
         data = resp.get("data") or {}
         order_id = data if isinstance(data, str) else str(data.get("orderid", ""))
+        if not order_id:
+            raise RuntimeError(f"placeOrder: order_id empty in response: {resp}")
         logger.success(f"Order placed successfully. order_id={order_id}")
         return order_id
 
