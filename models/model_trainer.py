@@ -686,7 +686,7 @@ class ModelTrainer:
                         y,
                         np.argmax(
                             self.price_predictor._ensemble_predict(
-                                *_batch_lstm_predict(
+                                _batch_lstm_predict(
                                     self.price_predictor, X_lstm
                                 ),
                                 self.price_predictor.xgb_model.predict_proba(X_tab),
