@@ -382,16 +382,20 @@ class StrategyService:
             logger.warning(f"[{name}] Signal generation failed: {e}")
             return
 
+        action = getattr(signal, 'action', 'NO_TRADE')
+
         if name in self.running_strategies:
             self.running_strategies[name]['signals_count'] += 1
 
-        logger.info(f"[{name}] Signal: action={getattr(signal, 'action', 'none')} confidence={getattr(signal, 'confidence', 0):.2f}")
+        logger.info(f"[{name}] Signal: action={action} confidence={getattr(signal, 'confidence', 0):.2f}")
 
-        # Execute if not paper (paper mode skips real orders but still logs)
-        if mode == 'live' and self.order_manager and signal and getattr(signal, 'action', 'none') != 'none':
+        # Execute for both paper and live modes.
+        # OrderManager.paper_trading flag controls whether real broker orders are placed.
+        if self.order_manager and action not in ('NO_TRADE', 'EXIT', 'none', None):
+            self.order_manager.paper_trading = (mode == 'paper')
             try:
                 await loop.run_in_executor(None, self.order_manager.execute_signal, signal)
-                logger.info(f"[{name}] Live order executed.")
+                logger.info(f"[{name}] {'Paper' if mode == 'paper' else 'Live'} order recorded.")
             except Exception as e:
                 logger.error(f"[{name}] Order execution failed: {e}")
 

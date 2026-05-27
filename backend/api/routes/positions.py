@@ -3,7 +3,7 @@ from typing import List
 
 from backend.api.models.responses import PositionResponse, PortfolioSummary
 from backend.api.models.requests import ClosePositionRequest
-from backend.dependencies import get_position_manager
+from backend.dependencies import get_position_manager, get_order_manager
 from backend.services.position_service import PositionService
 from backend.config import config, DEMO_MODE
 
@@ -17,7 +17,8 @@ def get_position_service():
     global _position_service
     if _position_service is None:
         position_manager = get_position_manager()
-        _position_service = PositionService(position_manager, config.trading_config)
+        order_manager = get_order_manager()
+        _position_service = PositionService(position_manager, order_manager, config.trading_config)
     return _position_service
 
 
