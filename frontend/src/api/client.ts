@@ -10,6 +10,8 @@ import type {
   SystemStatus,
   OHLCVCandle,
   TrainStatus,
+  StockSignal,
+  SwingPosition,
 } from '../types/api';
 
 // In production (Railway) frontend is served by the same server, so use relative URLs.
@@ -110,4 +112,17 @@ export const tradesApi = {
 export const trainingApi = {
   getStatus: () => api.get<TrainStatus>('/api/system/train/status'),
   start: (days = 60) => api.post(`/api/system/train?days=${days}`),
+};
+
+// Stock screener / swing trade endpoints
+export const stocksApi = {
+  getWatchlist: () => api.get<{ symbol: string; name: string; sector: string }[]>('/api/stocks/watchlist'),
+  getSignals:   () => api.get<StockSignal[]>('/api/stocks/signals'),
+  scan:         () => api.get<StockSignal[]>('/api/stocks/scan', { timeout: 60000 }),
+  getPositions: () => api.get<SwingPosition[]>('/api/stocks/positions'),
+  execute:      (symbol: string, mode: 'paper' | 'live') =>
+    api.post(`/api/stocks/signals/${symbol}/execute`, { mode }),
+  autoExecute:  (mode: 'paper' | 'live', max_signals = 3) =>
+    api.post('/api/stocks/auto-execute', { mode, max_signals }),
+  closePosition: (symbol: string) => api.delete(`/api/stocks/positions/${symbol}`),
 };

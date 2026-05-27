@@ -11,6 +11,7 @@ const navItems: NavItem[] = [
   { id: 'strategies', label: 'Strategies', icon: '⚡' },
   { id: 'portfolio', label: 'Portfolio', icon: '💼' },
   { id: 'market', label: 'Market', icon: '📈' },
+  { id: 'stocks', label: 'Stock Screener', icon: '🔍' },
   { id: 'risk', label: 'Risk', icon: '🛡️' },
 ];
 

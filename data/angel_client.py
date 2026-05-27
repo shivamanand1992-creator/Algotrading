@@ -17,6 +17,7 @@ import pandas as pd
 import pytz
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Optional
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -271,6 +272,33 @@ class AngelOneClient:
         ltp = resp.get("data", {}).get("ltp", 0.0)
         logger.debug(f"LTP [{symbol}] = {ltp}")
         return float(ltp)
+
+    def search_scrip(self, exchange: str, symbol: str) -> Optional[str]:
+        """
+        Resolve the Angel One instrument token for a cash equity symbol.
+
+        Parameters
+        ----------
+        exchange : str  e.g. "NSE"
+        symbol   : str  trading symbol e.g. "RELIANCE"
+
+        Returns
+        -------
+        str  instrument token, or None if not found / client not connected
+        """
+        if self._smart is None:
+            return None
+        try:
+            result = self._smart.searchScrip(exchange, symbol)
+            if result and result.get("status"):
+                for item in result.get("data", []):
+                    if str(item.get("tradingsymbol", "")).upper() == symbol.upper():
+                        token = str(item["token"])
+                        logger.debug(f"searchScrip: {symbol} → token={token}")
+                        return token
+        except Exception as exc:
+            logger.warning(f"searchScrip({exchange}, {symbol}) failed: {exc}")
+        return None
 
     @_retry(max_attempts=3)
     def get_option_chain(

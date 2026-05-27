@@ -174,3 +174,55 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     timestamp: datetime
+
+
+# ---------------------------------------------------------------------------
+# Stock Screener / Swing Trade models
+# ---------------------------------------------------------------------------
+
+class StockSignalResponse(BaseModel):
+    symbol: str
+    name: str
+    sector: str
+    yf_ticker: str
+    action: str           # "BUY" | "HOLD"
+    close: float
+    entry_price: float
+    stop_loss: float
+    target1: float
+    target2: float
+    sl_pct: float
+    risk_reward: float
+    confidence: float
+    regime: str
+    reasons: List[str]
+    rsi: float
+    adx: float
+    atr: float
+    volume_ratio: float
+    macd_hist: float
+    ema9: float
+    ema21: float
+    ema50: float
+    scan_time: str
+
+
+class SwingPositionResponse(BaseModel):
+    order_id: str
+    symbol: str
+    name: str
+    sector: str
+    yf_ticker: str
+    entry_price: float
+    current_price: float
+    qty: int
+    stop_loss: float
+    target1: float
+    target2: float
+    entry_date: str
+    unrealized_pnl: float
+    pnl_pct: float
+    status: str           # "open" | "closed_sl" | "closed_target"
+    mode: str             # "paper" | "live"
+    confidence: float
+    regime: str

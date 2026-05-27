@@ -112,3 +112,51 @@ export interface TrainStatus {
   progress: string;
   error: string;
 }
+
+export interface StockSignal {
+  symbol: string;
+  name: string;
+  sector: string;
+  yf_ticker: string;
+  action: 'BUY' | 'HOLD';
+  close: number;
+  entry_price: number;
+  stop_loss: number;
+  target1: number;
+  target2: number;
+  sl_pct: number;
+  risk_reward: number;
+  confidence: number;
+  regime: string;
+  reasons: string[];
+  rsi: number;
+  adx: number;
+  atr: number;
+  volume_ratio: number;
+  macd_hist: number;
+  ema9: number;
+  ema21: number;
+  ema50: number;
+  scan_time: string;
+}
+
+export interface SwingPosition {
+  order_id: string;
+  symbol: string;
+  name: string;
+  sector: string;
+  yf_ticker: string;
+  entry_price: number;
+  current_price: number;
+  qty: number;
+  stop_loss: number;
+  target1: number;
+  target2: number;
+  entry_date: string;
+  unrealized_pnl: number;
+  pnl_pct: number;
+  status: 'open' | 'closed_sl' | 'closed_target';
+  mode: 'paper' | 'live';
+  confidence: number;
+  regime: string;
+}

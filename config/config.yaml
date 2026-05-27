@@ -164,6 +164,15 @@ database:
   url: "sqlite:///logs/trades.db"
   log_every_tick: false              # Set true for detailed logging (large storage)
 
+# --- Stock Screener (Swing Trade) ---
+stocks:
+  universe: "nifty50"
+  swing_scan_hour: 16               # IST hour to auto-monitor positions (post close)
+  min_confidence: 0.55              # Minimum score to show signal in UI
+  auto_execute_min_confidence: 0.70 # Minimum score to auto-execute
+  max_swing_positions: 5            # Max simultaneous swing positions
+  risk_per_trade_pct: 2.0           # % of capital to risk per swing trade
+
 # --- Logging ---
 logging:
   level: "INFO"

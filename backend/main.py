@@ -23,6 +23,7 @@ from backend.api.routes import (
     trades,
     market_data,
     risk,
+    stocks,
 )
 from backend.api.routes import auth as auth_routes
 from backend.auth import verify_token
@@ -79,6 +80,39 @@ async def _eod_squareoff_loop() -> None:
             logger.error(f"_eod_squareoff_loop unexpected error: {exc}")
 
         await asyncio.sleep(60)  # check every minute
+
+
+# ---------------------------------------------------------------------------
+# Swing position monitor — runs at 16:00 IST every weekday after market close
+# ---------------------------------------------------------------------------
+
+async def _swing_monitor_loop() -> None:
+    """Update MTM prices and check SL/target for open swing positions daily."""
+    last_monitor_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (16, 0)
+            not_done_today = last_monitor_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_monitor_date = today
+                logger.info("16:00 IST — swing position monitor triggered.")
+                try:
+                    from backend.api.routes.stocks import _get_svc
+                    svc = _get_svc()
+                    await svc.monitor_positions()
+                except Exception as exc:
+                    logger.error(f"Swing monitor error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_swing_monitor_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +198,7 @@ async def lifespan(app: FastAPI):
     )
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
+    asyncio.create_task(_swing_monitor_loop())
     yield
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()
@@ -196,6 +231,7 @@ app.include_router(positions.router)
 app.include_router(trades.router)
 app.include_router(market_data.router)
 app.include_router(risk.router)
+app.include_router(stocks.router)
 
 
 @app.get("/health")
