@@ -26,6 +26,7 @@ high_volatility  | down (-1)  | ≥ 0.65     | BUY_PE  (ATM only, small size)
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -38,6 +39,43 @@ from scipy.stats import norm
 
 from models.price_predictor import PriceDirectionPredictor
 from models.regime_classifier import MarketRegimeClassifier
+
+# ---------------------------------------------------------------------------
+# Module-level India VIX cache (1-hour TTL) — avoids repeated yfinance calls
+# ---------------------------------------------------------------------------
+_vix_cache: dict = {"series": None, "ts": 0.0}
+_VIX_CACHE_TTL = 3600  # seconds
+
+
+def _get_vix_percentile() -> Optional[float]:
+    """
+    Fetch 1 year of India VIX (^INDIAVIX) from Yahoo Finance and return
+    the percentile rank of the latest reading vs the full history.
+    Returns None on any failure.
+    """
+    global _vix_cache
+    try:
+        now = time.time()
+        if _vix_cache["series"] is not None and (now - _vix_cache["ts"]) < _VIX_CACHE_TTL:
+            vix_series = _vix_cache["series"]
+        else:
+            import yfinance as yf
+            df = yf.Ticker("^INDIAVIX").history(period="365d", interval="1d")
+            if df is None or df.empty:
+                return None
+            vix_series = df["Close"].dropna()
+            if len(vix_series) < 20:
+                return None
+            _vix_cache["series"] = vix_series
+            _vix_cache["ts"] = now
+
+        current_vix = float(vix_series.iloc[-1])
+        percentile = float((vix_series < current_vix).mean() * 100)
+        logger.debug(f"India VIX: {current_vix:.2f} → percentile={percentile:.1f}%")
+        return percentile
+    except Exception as e:
+        logger.debug(f"VIX percentile fetch failed: {e}")
+        return None
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -627,7 +665,16 @@ class SignalGenerator:
         Falls back to False if no options data is available.
         """
         if options_data is None or options_data.empty:
-            logger.debug("No options data available — assuming IV is not high.")
+            # Fall back to India VIX percentile as a proxy for overall IV level
+            vix_pct = _get_vix_percentile()
+            if vix_pct is not None:
+                is_high = vix_pct >= self.high_iv_percentile
+                logger.debug(
+                    f"No options chain — using India VIX percentile={vix_pct:.1f}% "
+                    f"(threshold={self.high_iv_percentile:.0f}%) → high_iv={is_high}"
+                )
+                return is_high
+            logger.debug("No options data and VIX fetch failed — assuming IV is not high.")
             return False
 
         chain = options_data.copy()
