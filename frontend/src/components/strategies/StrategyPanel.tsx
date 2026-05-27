@@ -8,6 +8,15 @@ import { formatDuration } from '../../utils/formatters';
 export function StrategyPanel() {
   const [strategies, setStrategies] = useState<StrategyStatus[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
+  const [optionsEnabled, setOptionsEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('options_trading_enabled') !== 'false';
+  });
+
+  const toggleOptions = () => {
+    const next = !optionsEnabled;
+    setOptionsEnabled(next);
+    localStorage.setItem('options_trading_enabled', String(next));
+  };
 
   useEffect(() => {
     fetchStrategies();
@@ -52,9 +61,48 @@ export function StrategyPanel() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-bold text-jarvis-primary glow-text">
-        Strategy Control
-      </h2>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <h2 className="text-3xl font-bold text-jarvis-primary glow-text">
+          Strategy Control
+        </h2>
+
+        {/* Options trading master toggle */}
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-jarvis-text-secondary">Nifty Options Trading</span>
+          <button
+            onClick={toggleOptions}
+            className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none"
+            style={{
+              background: optionsEnabled ? 'rgba(0,229,255,0.3)' : 'rgba(255,255,255,0.1)',
+              border: optionsEnabled ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.2)',
+            }}
+            title={optionsEnabled ? 'Click to disable Nifty options trading' : 'Click to enable Nifty options trading'}
+          >
+            <span
+              className="inline-block h-4 w-4 rounded-full transition-transform"
+              style={{
+                background: optionsEnabled ? '#00e5ff' : '#8aa5c0',
+                transform: optionsEnabled ? 'translateX(24px)' : 'translateX(4px)',
+              }}
+            />
+          </button>
+          <span
+            className="text-xs font-bold uppercase"
+            style={{ color: optionsEnabled ? '#00e5ff' : '#8aa5c0' }}
+          >
+            {optionsEnabled ? 'ON' : 'OFF'}
+          </span>
+        </div>
+      </div>
+
+      {!optionsEnabled && (
+        <div
+          className="p-4 rounded-lg text-sm font-semibold"
+          style={{ background: 'rgba(255,214,0,0.08)', border: '1px solid rgba(255,214,0,0.3)', color: '#ffd600' }}
+        >
+          ⚠ Nifty options trading is disabled. Strategies cannot be started. Toggle above to re-enable.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {strategies.map((strategy) => (
@@ -145,7 +193,8 @@ export function StrategyPanel() {
                     variant="primary"
                     className="w-full"
                     onClick={() => handleStart(strategy.name)}
-                    disabled={loading === strategy.name}
+                    disabled={loading === strategy.name || !optionsEnabled}
+                    title={!optionsEnabled ? 'Options trading is disabled' : undefined}
                   >
                     {loading === strategy.name ? 'Starting...' : 'Start (Paper)'}
                   </Button>

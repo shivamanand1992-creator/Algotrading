@@ -103,6 +103,23 @@ export function StocksView() {
   const [executing, setExecuting] = useState<string | null>(null);   // symbol being executed
   const [confirm,   setConfirm]   = useState<{ symbol: string; auto?: boolean } | null>(null);
   const [toast,     setToast]     = useState<string | null>(null);
+  const [capital,   setCapital]   = useState<number>(() => {
+    const stored = localStorage.getItem('swing_capital');
+    return stored ? Math.max(1000, parseInt(stored, 10)) : 150000;
+  });
+  const [capitalInput, setCapitalInput] = useState<string>(() => {
+    const stored = localStorage.getItem('swing_capital');
+    return stored ?? '150000';
+  });
+
+  const handleCapitalChange = (val: string) => {
+    setCapitalInput(val);
+    const num = parseInt(val.replace(/,/g, ''), 10);
+    if (!isNaN(num) && num >= 1000) {
+      setCapital(num);
+      localStorage.setItem('swing_capital', String(num));
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -167,11 +184,11 @@ export function StocksView() {
     setExecuting(isAuto ? '__auto__' : confirm.symbol);
     try {
       if (isAuto) {
-        const res = await stocksApi.autoExecute(execMode, 3);
+        const res = await stocksApi.autoExecute(execMode, 3, capital);
         const count = res.data.count ?? 0;
         showToast(`Auto-executed ${count} ${execMode} order${count !== 1 ? 's' : ''}`);
       } else {
-        await stocksApi.execute(confirm.symbol, execMode);
+        await stocksApi.execute(confirm.symbol, execMode, capital);
         showToast(`${execMode === 'paper' ? 'Paper' : 'Live'} order placed for ${confirm.symbol}`);
       }
       await fetchPositions();
@@ -236,6 +253,21 @@ export function StocksView() {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Capital input */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">Capital:</span>
+            <div className="flex items-center glass-panel rounded-lg px-3 py-1.5 gap-1" style={{ border: '1px solid rgba(0,229,255,0.25)' }}>
+              <span className="text-xs text-jarvis-text-secondary">₹</span>
+              <input
+                type="text"
+                value={capitalInput}
+                onChange={e => handleCapitalChange(e.target.value)}
+                className="bg-transparent text-xs font-mono text-jarvis-primary outline-none w-24 text-right"
+                placeholder="150000"
+              />
+            </div>
+          </div>
+
           {/* Mode toggle */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-jarvis-text-secondary">Mode:</span>

@@ -50,8 +50,9 @@ class SwingTradeService:
         self._max_positions      = int(stocks_cfg.get("max_swing_positions", 5))
         self._risk_pct           = float(stocks_cfg.get("risk_per_trade_pct", 2.0))
         self._auto_exec_min_conf = float(stocks_cfg.get("auto_execute_min_confidence", 0.70))
-        total_cap                = float(config.get("risk", {}).get("total_capital", 500000))
-        self._total_capital      = total_cap
+        # Default capital: use stocks.capital if set, else risk.total_capital, else 150000
+        default_cap              = float(stocks_cfg.get("capital", config.get("risk", {}).get("total_capital", 150000)))
+        self._total_capital      = default_cap
 
     # ------------------------------------------------------------------
     # Scan
@@ -82,7 +83,7 @@ class SwingTradeService:
     # Execute
     # ------------------------------------------------------------------
 
-    async def execute_signal(self, symbol: str, mode: str) -> Optional[str]:
+    async def execute_signal(self, symbol: str, mode: str, capital_override: Optional[float] = None) -> Optional[str]:
         """
         Place a swing trade order for *symbol* from the last scan results.
 
@@ -109,7 +110,8 @@ class SwingTradeService:
             logger.warning(f"[SwingService] No signal found for {symbol}.")
             return None
 
-        qty = self._calculate_qty(sig.entry_price, sig.stop_loss)
+        capital = capital_override if capital_override and capital_override > 0 else self._total_capital
+        qty = self._calculate_qty(sig.entry_price, sig.stop_loss, capital)
         if qty <= 0:
             logger.warning(f"[SwingService] {symbol}: calculated qty=0 — not enough capital.")
             return None
@@ -119,7 +121,7 @@ class SwingTradeService:
         else:
             return await self._place_live_order(sig, qty)
 
-    async def auto_execute_top_signals(self, mode: str, max_signals: int = 3) -> List[str]:
+    async def auto_execute_top_signals(self, mode: str, max_signals: int = 3, capital_override: Optional[float] = None) -> List[str]:
         """Execute top N signals (confidence >= auto_execute_min_conf) automatically."""
         order_ids: List[str] = []
         eligible = [
@@ -128,7 +130,7 @@ class SwingTradeService:
             and s.symbol not in self._swing_positions
         ]
         for sig in eligible[:max_signals]:
-            oid = await self.execute_signal(sig.symbol, mode)
+            oid = await self.execute_signal(sig.symbol, mode, capital_override=capital_override)
             if oid:
                 order_ids.append(oid)
         return order_ids

@@ -120,9 +120,9 @@ export const stocksApi = {
   getSignals:   () => api.get<StockSignal[]>('/api/stocks/signals'),
   scan:         () => api.get<StockSignal[]>('/api/stocks/scan', { timeout: 60000 }),
   getPositions: () => api.get<SwingPosition[]>('/api/stocks/positions'),
-  execute:      (symbol: string, mode: 'paper' | 'live') =>
-    api.post(`/api/stocks/signals/${symbol}/execute`, { mode }),
-  autoExecute:  (mode: 'paper' | 'live', max_signals = 3) =>
-    api.post('/api/stocks/auto-execute', { mode, max_signals }),
+  execute:      (symbol: string, mode: 'paper' | 'live', capital?: number) =>
+    api.post(`/api/stocks/signals/${symbol}/execute`, { mode, capital }),
+  autoExecute:  (mode: 'paper' | 'live', max_signals = 3, capital?: number) =>
+    api.post('/api/stocks/auto-execute', { mode, max_signals, capital }),
   closePosition: (symbol: string) => api.delete(`/api/stocks/positions/${symbol}`),
 };

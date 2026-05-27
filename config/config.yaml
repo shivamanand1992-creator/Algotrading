@@ -167,6 +167,7 @@ database:
 # --- Stock Screener (Swing Trade) ---
 stocks:
   universe: "nifty50"
+  capital: 150000                     # ₹1,50,000 for swing trades (editable in UI)
   swing_scan_hour: 16               # IST hour to auto-monitor positions (post close)
   min_confidence: 0.55              # Minimum score to show signal in UI
   auto_execute_min_confidence: 0.70 # Minimum score to auto-execute

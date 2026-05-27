@@ -115,11 +115,13 @@ def _get_svc() -> SwingTradeService:
 
 class ExecuteRequest(BaseModel):
     mode: str = "paper"   # "paper" | "live"
+    capital: Optional[float] = None
 
 
 class AutoExecuteRequest(BaseModel):
     mode: str = "paper"
     max_signals: int = 3
+    capital: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +176,7 @@ async def execute_signal(
     if req.mode == "live" and get_angel_client() is None:
         raise HTTPException(status_code=503, detail="Broker not connected — cannot place live order")
 
-    order_id = await svc.execute_signal(symbol, req.mode)
+    order_id = await svc.execute_signal(symbol, req.mode, capital_override=req.capital)
     if order_id is None:
         raise HTTPException(status_code=400, detail=f"Could not execute {symbol} — check logs for reason")
 
@@ -193,7 +195,7 @@ async def auto_execute(
     if req.mode == "live" and get_angel_client() is None:
         raise HTTPException(status_code=503, detail="Broker not connected — cannot place live orders")
 
-    order_ids = await svc.auto_execute_top_signals(req.mode, req.max_signals)
+    order_ids = await svc.auto_execute_top_signals(req.mode, req.max_signals, capital_override=req.capital)
     return {
         "success": True,
         "executed": order_ids,
