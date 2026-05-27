@@ -227,12 +227,13 @@ class SwingTradeService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _calculate_qty(self, entry: float, sl: float) -> int:
+    def _calculate_qty(self, entry: float, sl: float, capital: Optional[float] = None) -> int:
         """Fixed-fraction sizing: risk 2% of capital per trade."""
         if entry <= 0 or sl <= 0 or entry <= sl:
             return 0
         risk_per_share = entry - sl
-        risk_capital   = (self._risk_pct / 100) * self._total_capital
+        cap            = capital if capital and capital > 0 else self._total_capital
+        risk_capital   = (self._risk_pct / 100) * cap
         qty            = math.floor(risk_capital / risk_per_share)
         return max(qty, 1)
 
