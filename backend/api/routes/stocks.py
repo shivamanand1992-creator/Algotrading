@@ -124,6 +124,13 @@ class AutoExecuteRequest(BaseModel):
     capital: Optional[float] = None
 
 
+class AutopilotConfig(BaseModel):
+    enabled: bool
+    mode: str = "paper"
+    capital_per_trade: float = 1000.0
+    max_trades: int = 3
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -234,3 +241,43 @@ async def close_position(symbol: str, svc: SwingTradeService = Depends(_get_svc)
     if not closed:
         raise HTTPException(status_code=404, detail=f"No open position found for {symbol}")
     return {"success": True, "message": f"{symbol} position closed"}
+
+
+@router.get("/autopilot")
+async def get_autopilot(svc: SwingTradeService = Depends(_get_svc)):
+    """Return current autopilot configuration and last run result."""
+    if DEMO_MODE:
+        return {
+            "enabled": False, "mode": "paper",
+            "capital_per_trade": 1000.0, "max_trades": 3,
+            "last_run": None, "last_result": {},
+        }
+    return svc.get_autopilot_config()
+
+
+@router.post("/autopilot")
+async def set_autopilot(cfg: AutopilotConfig, svc: SwingTradeService = Depends(_get_svc)):
+    """Enable / disable autopilot and update its configuration."""
+    if DEMO_MODE:
+        return {"success": True, "config": cfg.model_dump()}
+    svc.set_autopilot(cfg.enabled, cfg.mode, cfg.capital_per_trade, cfg.max_trades)
+    return {"success": True, "config": svc.get_autopilot_config()}
+
+
+@router.post("/autopilot/run-now")
+async def run_autopilot_now(svc: SwingTradeService = Depends(_get_svc)):
+    """Manually trigger an autopilot scan + execute cycle immediately."""
+    if DEMO_MODE:
+        return {
+            "skipped": False, "signals_found": 5, "executed_count": 3,
+            "executed": [
+                {"symbol": "RELIANCE", "qty": 1, "entry": 2980.55, "invested": 2980.55, "confidence": 0.82},
+                {"symbol": "TCS",      "qty": 1, "entry": 3850.20, "invested": 3850.20, "confidence": 0.77},
+                {"symbol": "HDFCBANK", "qty": 1, "entry": 1742.80, "invested": 1742.80, "confidence": 0.73},
+            ],
+            "regime_warning": "", "nifty_bullish": True,
+        }
+    if not svc._autopilot_enabled:
+        raise HTTPException(status_code=400, detail="Autopilot is disabled — enable it first")
+    result = await svc.run_autopilot()
+    return result

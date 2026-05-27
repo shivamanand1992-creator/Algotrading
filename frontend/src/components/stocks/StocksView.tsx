@@ -140,6 +140,16 @@ export function StocksView() {
     const stored = localStorage.getItem('swing_capital');
     return stored ?? '150000';
   });
+  // Autopilot state
+  const [autopilotEnabled,     setAutopilotEnabled]     = useState(false);
+  const [autopilotMode,        setAutopilotMode]        = useState<'paper' | 'live'>('paper');
+  const [autopilotCapital,     setAutopilotCapital]     = useState(1000);
+  const [autopilotCapitalInput,setAutopilotCapitalInput]= useState('1000');
+  const [autopilotMaxTrades,   setAutopilotMaxTrades]   = useState(3);
+  const [autopilotLastRun,     setAutopilotLastRun]     = useState<string | null>(null);
+  const [autopilotLastResult,  setAutopilotLastResult]  = useState<Record<string, any>>({});
+  const [autopilotSaving,      setAutopilotSaving]      = useState(false);
+  const [autopilotRunning,     setAutopilotRunning]     = useState(false);
 
   const handleCapitalChange = (val: string) => {
     setCapitalInput(val);
@@ -162,24 +172,65 @@ export function StocksView() {
     } catch { /* silent */ }
   }, []);
 
-  // Load cached signals and positions on mount
+  // Load cached signals, positions, and autopilot config on mount
   useEffect(() => {
     const init = async () => {
       try {
-        const [sigRes, posRes] = await Promise.all([
+        const [sigRes, posRes, apRes] = await Promise.all([
           stocksApi.getSignals(),
           stocksApi.getPositions(),
+          stocksApi.getAutopilot(),
         ]);
         const sigs = Array.isArray(sigRes.data) ? sigRes.data : [];
         setSignals(sigs);
         if (sigs.length > 0) setScanTime(sigs[0].scan_time);
         setPositions(Array.isArray(posRes.data) ? posRes.data : []);
+        const ap = apRes.data;
+        setAutopilotEnabled(ap.enabled);
+        setAutopilotMode(ap.mode as 'paper' | 'live');
+        setAutopilotCapital(ap.capital_per_trade);
+        setAutopilotCapitalInput(String(ap.capital_per_trade));
+        setAutopilotMaxTrades(ap.max_trades);
+        setAutopilotLastRun(ap.last_run);
+        setAutopilotLastResult(ap.last_result ?? {});
       } catch { /* backend may not have scanned yet — that's fine */ }
     };
     init();
     const iv = setInterval(fetchPositions, 30000);
     return () => clearInterval(iv);
   }, [fetchPositions]);
+
+  const saveAutopilot = async (overrides?: Partial<{ enabled: boolean; mode: string; capital: number; max_trades: number }>) => {
+    setAutopilotSaving(true);
+    try {
+      const res = await stocksApi.setAutopilot({
+        enabled:           overrides?.enabled           ?? autopilotEnabled,
+        mode:              overrides?.mode              ?? autopilotMode,
+        capital_per_trade: overrides?.capital           ?? autopilotCapital,
+        max_trades:        overrides?.max_trades        ?? autopilotMaxTrades,
+      });
+      const cfg = (res.data as any).config ?? {};
+      setAutopilotEnabled(cfg.enabled ?? autopilotEnabled);
+      showToast(cfg.enabled ? '🤖 Autopilot ON — will trade daily at 15:35 IST' : 'Autopilot disabled');
+    } catch { showToast('Failed to save autopilot settings'); }
+    finally { setAutopilotSaving(false); }
+  };
+
+  const handleRunNow = async () => {
+    if (!autopilotEnabled) { showToast('Enable autopilot first'); return; }
+    setAutopilotRunning(true);
+    try {
+      const res = await stocksApi.runAutopilotNow();
+      const result = res.data as any;
+      setAutopilotLastResult(result);
+      setAutopilotLastRun(new Date().toISOString());
+      const n = result.executed_count ?? result.executed?.length ?? 0;
+      showToast(`Autopilot ran: ${n} trade${n !== 1 ? 's' : ''} executed (${result.signals_found ?? 0} signals found)`);
+      await fetchPositions();
+    } catch (err: any) {
+      showToast(`Autopilot failed: ${err?.response?.data?.detail ?? err?.message}`);
+    } finally { setAutopilotRunning(false); }
+  };
 
   const handleScan = async () => {
     setScanning(true);
@@ -426,6 +477,163 @@ export function StocksView() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Autopilot Panel ── */}
+      <div
+        className="glass-panel p-4 rounded-xl"
+        style={{
+          border: autopilotEnabled
+            ? '1px solid rgba(0,230,118,0.5)'
+            : '1px solid rgba(255,255,255,0.1)',
+          background: autopilotEnabled ? 'rgba(0,230,118,0.04)' : undefined,
+        }}
+      >
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Autopilot header + master toggle */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-black uppercase tracking-widest" style={{ color: autopilotEnabled ? '#00e676' : '#8aa5c0' }}>
+              🤖 Autopilot
+            </span>
+            <button
+              onClick={() => {
+                const next = !autopilotEnabled;
+                setAutopilotEnabled(next);
+                saveAutopilot({ enabled: next });
+              }}
+              disabled={autopilotSaving}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-all"
+              style={{
+                background: autopilotEnabled ? 'rgba(0,230,118,0.6)' : 'rgba(255,255,255,0.1)',
+                border: autopilotEnabled ? '1px solid rgba(0,230,118,0.8)' : '1px solid rgba(255,255,255,0.2)',
+              }}
+            >
+              <span
+                className="inline-block h-4 w-4 rounded-full transition-transform"
+                style={{
+                  background: autopilotEnabled ? '#00e676' : '#8aa5c0',
+                  transform: autopilotEnabled ? 'translateX(22px)' : 'translateX(3px)',
+                  boxShadow: autopilotEnabled ? '0 0 8px #00e676' : 'none',
+                }}
+              />
+            </button>
+            {autopilotEnabled && (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(0,230,118,0.12)', color: '#00e676' }}>
+                Active — scans daily at 15:35 IST
+              </span>
+            )}
+          </div>
+
+          {/* Capital per trade */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">₹ per trade:</span>
+            <div className="flex items-center glass-panel rounded-lg px-2 py-1 gap-1" style={{ border: '1px solid rgba(0,229,255,0.2)' }}>
+              <span className="text-xs text-jarvis-text-secondary">₹</span>
+              <input
+                type="text"
+                value={autopilotCapitalInput}
+                onChange={e => {
+                  setAutopilotCapitalInput(e.target.value);
+                  const n = parseInt(e.target.value.replace(/,/g, ''), 10);
+                  if (!isNaN(n) && n >= 100) setAutopilotCapital(n);
+                }}
+                onBlur={() => saveAutopilot({ capital: autopilotCapital })}
+                className="bg-transparent text-xs font-mono text-jarvis-primary outline-none w-16 text-right"
+                placeholder="1000"
+              />
+            </div>
+          </div>
+
+          {/* Max trades */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">Max trades:</span>
+            {[1, 2, 3, 5].map(n => (
+              <button
+                key={n}
+                onClick={() => { setAutopilotMaxTrades(n); saveAutopilot({ max_trades: n }); }}
+                className="w-7 h-7 text-xs font-bold rounded-lg transition-all"
+                style={{
+                  background: autopilotMaxTrades === n ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.05)',
+                  border:     autopilotMaxTrades === n ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                  color:      autopilotMaxTrades === n ? '#00e5ff' : '#8aa5c0',
+                }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          {/* Mode */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">Mode:</span>
+            {(['paper', 'live'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => { setAutopilotMode(m); saveAutopilot({ mode: m }); }}
+                className="px-2.5 py-1 text-xs font-bold uppercase rounded-lg transition-all"
+                style={{
+                  background: autopilotMode === m ? (m === 'live' ? 'rgba(255,23,68,0.2)' : 'rgba(0,229,255,0.15)') : 'transparent',
+                  border:     autopilotMode === m ? (m === 'live' ? '1px solid rgba(255,23,68,0.6)' : '1px solid rgba(0,229,255,0.5)') : '1px solid rgba(255,255,255,0.1)',
+                  color:      autopilotMode === m ? (m === 'live' ? '#ff1744' : '#00e5ff') : '#8aa5c0',
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+
+          {/* Run Now button */}
+          <button
+            onClick={handleRunNow}
+            disabled={autopilotRunning || !autopilotEnabled}
+            className="ml-auto px-4 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+            style={{
+              background: autopilotEnabled ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.05)',
+              border:     autopilotEnabled ? '1px solid rgba(0,230,118,0.5)' : '1px solid rgba(255,255,255,0.1)',
+              color:      autopilotEnabled ? '#00e676' : '#8aa5c0',
+              opacity:    autopilotRunning ? 0.6 : 1,
+            }}
+          >
+            {autopilotRunning ? (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: '#00e676', borderTopColor: 'transparent' }} />
+                Running…
+              </span>
+            ) : '▶ Run Now'}
+          </button>
+        </div>
+
+        {/* Last run result */}
+        {autopilotLastRun && (
+          <div className="mt-3 pt-3 border-t border-white/10 flex items-start gap-4 flex-wrap text-xs">
+            <span className="text-jarvis-text-secondary">
+              Last run: <span className="text-jarvis-primary font-mono">{formatScanTime(autopilotLastRun)}</span>
+            </span>
+            {autopilotLastResult.executed_count !== undefined && (
+              <span className="text-jarvis-text-secondary">
+                Executed: <span style={{ color: '#00e676' }} className="font-bold">{autopilotLastResult.executed_count}</span>
+                {' '}/ {autopilotLastResult.signals_found ?? '?'} signals
+              </span>
+            )}
+            {Array.isArray(autopilotLastResult.executed) && autopilotLastResult.executed.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                {autopilotLastResult.executed.map((t: any) => (
+                  <span
+                    key={t.symbol}
+                    className="px-2 py-0.5 rounded text-xs font-mono font-bold"
+                    style={{ background: 'rgba(0,229,255,0.1)', color: '#00e5ff', border: '1px solid rgba(0,229,255,0.3)' }}
+                  >
+                    {t.symbol} × {t.qty} @ ₹{t.entry?.toFixed(0)} (₹{t.invested?.toFixed(0)})
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="mt-2 text-xs text-jarvis-text-secondary">
+          Scans Nifty50, picks top {autopilotMaxTrades} BUY signal{autopilotMaxTrades !== 1 ? 's' : ''} by confidence · Allocates ₹{autopilotCapital.toLocaleString()} per trade · Exits automatically on SL or Target2 hit at EOD.
+        </p>
       </div>
 
       {/* ── Regime Warning Banner ── */}

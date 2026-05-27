@@ -83,6 +83,46 @@ async def _eod_squareoff_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Swing autopilot — scan + auto-execute top 3 at 15:35 IST every weekday
+# ---------------------------------------------------------------------------
+
+async def _swing_autopilot_loop() -> None:
+    """Daily 15:35 IST: run scan and auto-execute top N signals if autopilot is enabled."""
+    last_autopilot_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (15, 35)
+            not_done_today = last_autopilot_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_autopilot_date = today
+                try:
+                    from backend.api.routes.stocks import _get_svc
+                    svc = _get_svc()
+                    if svc._autopilot_enabled:
+                        logger.info("15:35 IST — Swing autopilot triggered.")
+                        result = await svc.run_autopilot()
+                        logger.info(
+                            f"[SwingAutopilot] {result.get('executed_count', 0)} trades executed "
+                            f"from {result.get('signals_found', 0)} signals."
+                        )
+                    else:
+                        logger.debug("15:35 IST — Swing autopilot disabled, skipping.")
+                except Exception as exc:
+                    logger.error(f"Swing autopilot error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_swing_autopilot_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)
+
+
+# ---------------------------------------------------------------------------
 # Swing position monitor — runs at 16:00 IST every weekday after market close
 # ---------------------------------------------------------------------------
 
@@ -198,6 +238,7 @@ async def lifespan(app: FastAPI):
     )
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
+    asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
     yield
     print("Shutting down FastAPI backend...")

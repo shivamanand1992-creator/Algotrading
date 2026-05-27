@@ -54,6 +54,14 @@ class SwingTradeService:
         default_cap              = float(stocks_cfg.get("capital", config.get("risk", {}).get("total_capital", 150000)))
         self._total_capital      = default_cap
 
+        # Autopilot settings (controlled via API / UI)
+        self._autopilot_enabled           = False
+        self._autopilot_mode              = "paper"
+        self._autopilot_capital_per_trade = 1000.0   # ₹ to invest per trade
+        self._autopilot_max_trades        = 3
+        self._autopilot_last_run: Optional[datetime] = None
+        self._autopilot_last_result: dict             = {}
+
     # ------------------------------------------------------------------
     # Scan
     # ------------------------------------------------------------------
@@ -88,7 +96,13 @@ class SwingTradeService:
     # Execute
     # ------------------------------------------------------------------
 
-    async def execute_signal(self, symbol: str, mode: str, capital_override: Optional[float] = None) -> Optional[str]:
+    async def execute_signal(
+        self,
+        symbol: str,
+        mode: str,
+        capital_override: Optional[float] = None,
+        position_value: Optional[float] = None,
+    ) -> Optional[str]:
         """
         Place a swing trade order for *symbol* from the last scan results.
 
@@ -115,8 +129,11 @@ class SwingTradeService:
             logger.warning(f"[SwingService] No signal found for {symbol}.")
             return None
 
-        capital = capital_override if capital_override and capital_override > 0 else self._total_capital
-        qty = self._calculate_qty(sig.entry_price, sig.stop_loss, capital)
+        if position_value and position_value > 0:
+            qty = self._calculate_qty_by_capital(sig.entry_price, position_value)
+        else:
+            capital = capital_override if capital_override and capital_override > 0 else self._total_capital
+            qty = self._calculate_qty(sig.entry_price, sig.stop_loss, capital)
         if qty <= 0:
             logger.warning(f"[SwingService] {symbol}: calculated qty=0 — not enough capital.")
             return None
@@ -126,7 +143,13 @@ class SwingTradeService:
         else:
             return await self._place_live_order(sig, qty)
 
-    async def auto_execute_top_signals(self, mode: str, max_signals: int = 3, capital_override: Optional[float] = None) -> List[str]:
+    async def auto_execute_top_signals(
+        self,
+        mode: str,
+        max_signals: int = 3,
+        capital_override: Optional[float] = None,
+        position_value: Optional[float] = None,
+    ) -> List[str]:
         """Execute top N signals (confidence >= auto_execute_min_conf) automatically."""
         order_ids: List[str] = []
         eligible = [
@@ -135,10 +158,106 @@ class SwingTradeService:
             and s.symbol not in self._swing_positions
         ]
         for sig in eligible[:max_signals]:
-            oid = await self.execute_signal(sig.symbol, mode, capital_override=capital_override)
+            oid = await self.execute_signal(
+                sig.symbol, mode,
+                capital_override=capital_override,
+                position_value=position_value,
+            )
             if oid:
                 order_ids.append(oid)
         return order_ids
+
+    # ------------------------------------------------------------------
+    # Autopilot
+    # ------------------------------------------------------------------
+
+    def get_autopilot_config(self) -> dict:
+        return {
+            "enabled":           self._autopilot_enabled,
+            "mode":              self._autopilot_mode,
+            "capital_per_trade": self._autopilot_capital_per_trade,
+            "max_trades":        self._autopilot_max_trades,
+            "last_run":          self._autopilot_last_run.isoformat() if self._autopilot_last_run else None,
+            "last_result":       self._autopilot_last_result,
+        }
+
+    def set_autopilot(
+        self,
+        enabled: bool,
+        mode: str,
+        capital_per_trade: float,
+        max_trades: int = 3,
+    ) -> None:
+        self._autopilot_enabled           = enabled
+        self._autopilot_mode              = mode if mode in ("paper", "live") else "paper"
+        self._autopilot_capital_per_trade = max(100.0, float(capital_per_trade))
+        self._autopilot_max_trades        = max(1, min(int(max_trades), 10))
+        logger.info(
+            f"[SwingAutopilot] Config: enabled={enabled}, mode={self._autopilot_mode}, "
+            f"₹{self._autopilot_capital_per_trade:.0f} × {self._autopilot_max_trades} trades"
+        )
+
+    async def run_autopilot(self) -> dict:
+        """
+        Scan + auto-execute top N signals with fixed per-trade capital.
+        Called daily at 15:35 IST by the scheduler (or manually via API).
+        """
+        if not self._autopilot_enabled:
+            return {"skipped": True, "reason": "autopilot disabled"}
+
+        logger.info(
+            f"[SwingAutopilot] Starting — mode={self._autopilot_mode}, "
+            f"₹{self._autopilot_capital_per_trade:.0f} × {self._autopilot_max_trades} trades"
+        )
+
+        signals, regime_info = await self.run_scan(
+            universe="nifty50",
+            filters={"regime_filter": True, "rs_filter": True},
+        )
+
+        executed = []
+        eligible = [s for s in signals if s.symbol not in self._swing_positions]
+        for sig in eligible[:self._autopilot_max_trades]:
+            qty = self._calculate_qty_by_capital(sig.entry_price, self._autopilot_capital_per_trade)
+            if qty <= 0:
+                continue
+            if self._autopilot_mode == "paper":
+                oid = self._open_paper_position(sig, qty)
+            else:
+                oid = await self._place_live_order(sig, qty)
+            if oid:
+                invested = round(qty * sig.entry_price, 2)
+                executed.append({
+                    "symbol":     sig.symbol,
+                    "order_id":   oid,
+                    "qty":        qty,
+                    "entry":      sig.entry_price,
+                    "sl":         sig.stop_loss,
+                    "target1":    sig.target1,
+                    "target2":    sig.target2,
+                    "invested":   invested,
+                    "confidence": sig.confidence,
+                })
+                logger.info(
+                    f"[SwingAutopilot] {sig.symbol}: qty={qty}, "
+                    f"entry=₹{sig.entry_price:.2f}, invested=₹{invested:.2f}"
+                )
+
+        self._autopilot_last_run = datetime.now(_IST)
+        self._autopilot_last_result = {
+            "run_time":       self._autopilot_last_run.isoformat(),
+            "signals_found":  len(signals),
+            "executed_count": len(executed),
+            "executed":       executed,
+            "regime_warning": regime_info.get("warning", ""),
+            "nifty_bullish":  regime_info.get("bullish", True),
+        }
+        logger.info(
+            f"[SwingAutopilot] Complete — "
+            f"{len(executed)}/{self._autopilot_max_trades} trades executed, "
+            f"{len(signals)} signals found."
+        )
+        return self._autopilot_last_result
 
     # ------------------------------------------------------------------
     # Position management
@@ -247,7 +366,7 @@ class SwingTradeService:
             if pos and pos.get("mode") == "live" and self.angel_client:
                 await self._place_exit_order(pos)
             # Remove closed positions from active dict
-            if symbol in self._swing_positions and self._swing_positions[symbol].get("status") in ("closed_sl", "closed_target"):
+            if symbol in self._swing_positions and self._swing_positions[symbol].get("status") in ("closed_sl", "closed_target", "closed_trail"):
                 self._swing_positions.pop(symbol, None)
 
     # ------------------------------------------------------------------
@@ -263,6 +382,12 @@ class SwingTradeService:
         risk_capital   = (self._risk_pct / 100) * cap
         qty            = math.floor(risk_capital / risk_per_share)
         return max(qty, 1)
+
+    def _calculate_qty_by_capital(self, entry: float, capital_per_trade: float) -> int:
+        """Position-value sizing: invest capital_per_trade in one stock."""
+        if entry <= 0 or capital_per_trade <= 0:
+            return 0
+        return max(1, math.floor(capital_per_trade / entry))
 
     def _open_paper_position(self, sig: StockSignal, qty: int) -> str:
         """Record a paper swing position in memory."""

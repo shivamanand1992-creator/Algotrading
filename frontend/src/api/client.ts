@@ -132,4 +132,11 @@ export const stocksApi = {
   autoExecute:  (mode: 'paper' | 'live', max_signals = 3, capital?: number) =>
     api.post('/api/stocks/auto-execute', { mode, max_signals, capital }),
   closePosition: (symbol: string) => api.delete(`/api/stocks/positions/${symbol}`),
+  getAutopilot: () => api.get<{
+    enabled: boolean; mode: string; capital_per_trade: number; max_trades: number;
+    last_run: string | null; last_result: Record<string, any>;
+  }>('/api/stocks/autopilot'),
+  setAutopilot: (cfg: { enabled: boolean; mode: string; capital_per_trade: number; max_trades: number }) =>
+    api.post('/api/stocks/autopilot', cfg),
+  runAutopilotNow: () => api.post('/api/stocks/autopilot/run-now', {}, { timeout: 120000 }),
 };
