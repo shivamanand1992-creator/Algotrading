@@ -228,23 +228,28 @@ class MarketService:
     # ------------------------------------------------------------------
 
     async def get_market_regime(self) -> MarketRegimeResponse:
-        if not self.angel_client or not self.signal_generator:
-            return MarketRegimeResponse(
-                current_regime="ranging", confidence=0.5,
-                regime_probabilities={"trending_up": 0.2, "trending_down": 0.2, "ranging": 0.5, "high_volatility": 0.1},
-                timestamp=_now_ist(),
-            )
         try:
             df = await self._get_ohlcv_dataframe()
             if df.empty:
                 raise ValueError("Empty OHLCV dataframe")
-            signal = await asyncio.get_event_loop().run_in_executor(
-                None, self.signal_generator.generate_signal, df
-            )
+            loop = asyncio.get_event_loop()
+            # Enrich with full feature pipeline (technical + time + VIX + daily context)
+            try:
+                from backend.services.strategy_service import _enrich_features
+                df = await loop.run_in_executor(None, _enrich_features, df)
+            except Exception as enrich_err:
+                logger.warning(f"get_market_regime: feature enrichment failed: {enrich_err}")
+            # Always use fresh signal generator to avoid stale reference after model reload
+            from backend.dependencies import get_signal_generator
+            signal_gen = get_signal_generator()
+            if signal_gen is None:
+                raise ValueError("Signal generator not available")
+            signal = await loop.run_in_executor(None, signal_gen.generate_signal, df)
+            probs = signal.regime_probs or {}
             return MarketRegimeResponse(
                 current_regime=signal.regime,
-                confidence=max(signal.regime_probs.values()),
-                regime_probabilities=signal.regime_probs,
+                confidence=max(probs.values()) if probs else 0.5,
+                regime_probabilities=probs,
                 timestamp=_now_ist(),
             )
         except Exception as e:
@@ -260,19 +265,23 @@ class MarketService:
     # ------------------------------------------------------------------
 
     async def get_predictions(self) -> PredictionResponse:
-        if not self.signal_generator:
-            return PredictionResponse(
-                direction=0, direction_label="FLAT", confidence=0.5,
-                direction_probabilities={"UP": 0.33, "FLAT": 0.34, "DOWN": 0.33},
-                timestamp=_now_ist(),
-            )
         try:
             df = await self._get_ohlcv_dataframe()
             if df.empty:
                 raise ValueError("Empty OHLCV dataframe")
-            signal = await asyncio.get_event_loop().run_in_executor(
-                None, self.signal_generator.generate_signal, df
-            )
+            loop = asyncio.get_event_loop()
+            # Enrich with full feature pipeline (technical + time + VIX + daily context)
+            try:
+                from backend.services.strategy_service import _enrich_features
+                df = await loop.run_in_executor(None, _enrich_features, df)
+            except Exception as enrich_err:
+                logger.warning(f"get_predictions: feature enrichment failed: {enrich_err}")
+            # Always use fresh signal generator to avoid stale reference after model reload
+            from backend.dependencies import get_signal_generator
+            signal_gen = get_signal_generator()
+            if signal_gen is None:
+                raise ValueError("Signal generator not available")
+            signal = await loop.run_in_executor(None, signal_gen.generate_signal, df)
             direction_labels = {1: "UP", 0: "FLAT", -1: "DOWN"}
             return PredictionResponse(
                 direction=signal.direction,

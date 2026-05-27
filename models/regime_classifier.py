@@ -170,8 +170,10 @@ class MarketRegimeClassifier:
         self.learning_rate: float = float(regime_cfg.get("learning_rate", 0.05))
         self.regimes: List[str] = regime_cfg.get("regimes", REGIME_LABELS)
 
+        # Env var takes priority so Railway Volume path overrides config.yaml value
         save_path = (
-            config.get("ml", {})
+            os.getenv("MODEL_SAVE_PATH")
+            or config.get("ml", {})
             .get("training", {})
             .get("model_save_path", str(self._DEFAULT_SAVE_DIR))
         )

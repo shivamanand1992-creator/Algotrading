@@ -55,7 +55,9 @@ def _enrich_features(df) -> "pd.DataFrame":
     try:
         vix = yf.Ticker("^INDIAVIX").history(period="10d", interval="15m")
         if vix is not None and not vix.empty:
-            vix.index = pd.to_datetime(vix.index).tz_localize(None)
+            vix.index = pd.to_datetime(vix.index)
+            if vix.index.tz is not None:
+                vix.index = vix.index.tz_convert(None)
             vix = vix[["Close"]].rename(columns={"Close": "vix_close"})
             df = df.merge(vix, left_index=True, right_index=True, how="left")
             df["vix_close"]    = df["vix_close"].ffill().bfill()
@@ -68,6 +70,57 @@ def _enrich_features(df) -> "pd.DataFrame":
         df["vix_change_5"] = 0.0
         df["vix_is_high"]  = 0
         df["vix_is_low"]   = 0
+
+    # 5. Daily context features — same multi-timeframe columns used during training.
+    # The price predictor expects daily_ema_20/50/200, daily_rsi, daily_above_200ema,
+    # daily_trend, daily_weekly_ret.  Fetch 2yr daily NSEI from Yahoo Finance and
+    # forward-fill onto each intraday bar by date.
+    _daily_cols = [
+        "daily_ema_20", "daily_ema_50", "daily_ema_200",
+        "daily_rsi", "daily_above_200ema", "daily_trend", "daily_weekly_ret",
+    ]
+    try:
+        raw_daily = yf.Ticker("^NSEI").history(period="730d", interval="1d")
+        if raw_daily is not None and not raw_daily.empty:
+            raw_daily.index = pd.to_datetime(raw_daily.index)
+            if raw_daily.index.tz is not None:
+                raw_daily.index = raw_daily.index.tz_convert(None)
+            raw_daily.index = raw_daily.index.normalize()
+            c = raw_daily["Close"]
+            raw_daily["daily_ema_20"]  = c.ewm(span=20,  adjust=False).mean()
+            raw_daily["daily_ema_50"]  = c.ewm(span=50,  adjust=False).mean()
+            raw_daily["daily_ema_200"] = c.ewm(span=200, adjust=False).mean()
+            delta = c.diff()
+            gain  = delta.clip(lower=0).rolling(14).mean()
+            loss  = (-delta.clip(upper=0)).rolling(14).mean()
+            raw_daily["daily_rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+            raw_daily["daily_above_200ema"] = (c > raw_daily["daily_ema_200"]).astype(int)
+            ema_diff = (raw_daily["daily_ema_20"] - raw_daily["daily_ema_50"]) / raw_daily["daily_ema_50"]
+            raw_daily["daily_trend"] = np.where(ema_diff > 0.003, 1,
+                                       np.where(ema_diff < -0.003, -1, 0)).astype(int)
+            raw_daily["daily_weekly_ret"] = c.pct_change(5)
+            daily_ctx = raw_daily[_daily_cols].ffill().bfill()
+            # Align daily values onto intraday bars by matching midnight date
+            bar_dates = df.index.normalize()
+            aligned = daily_ctx.reindex(bar_dates, method="ffill")
+            aligned.index = df.index
+            df = df.join(aligned, how="left", rsuffix="_daily_tmp")
+            for col in _daily_cols:
+                if col + "_daily_tmp" in df.columns:
+                    df.drop(columns=[col + "_daily_tmp"], inplace=True)
+            df[_daily_cols] = df[_daily_cols].ffill().bfill()
+    except Exception:
+        pass  # fill defaults below
+
+    # Ensure all daily columns exist with neutral fallbacks
+    for col in _daily_cols:
+        if col not in df.columns or df[col].isna().all():
+            if col in ("daily_ema_20", "daily_ema_50", "daily_ema_200"):
+                df[col] = df["close"] if "close" in df.columns else 0.0
+            elif col == "daily_rsi":
+                df[col] = 50.0
+            else:
+                df[col] = 0
 
     return df
 
