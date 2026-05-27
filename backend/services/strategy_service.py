@@ -167,6 +167,59 @@ def _seconds_until_next_open() -> int:
     return max(1, int((candidate - now).total_seconds()))
 
 
+def _make_trade_signal(signal, strategy_name: str, lot_size: int):
+    """
+    Convert a Signal (models.signal_generator.Signal) into a TradeSignal
+    (strategies.base_strategy.TradeSignal) that OrderManager.execute_signal() expects.
+
+    Signal carries high-level intent (action, strike, expiry, option_type).
+    TradeSignal carries broker-ready fields (symbol, token, exchange, transaction_type…).
+    Paper mode doesn't validate symbol/token against Angel One, so "0" is fine for token.
+    """
+    from strategies.base_strategy import TradeSignal
+
+    # Build Angel One-style NSE F&O symbol: NIFTY{DD}{MMM}{YY}{STRIKE}{CE|PE}
+    # e.g. expiry "29-MAY-2026", strike 24500, CE → "NIFTY29MAY2624500CE"
+    expiry_str = signal.expiry or ""
+    try:
+        parts = expiry_str.replace("-", " ").split()   # ["29", "MAY", "2026"]
+        day   = parts[0].zfill(2)
+        mon   = parts[1][:3].upper()
+        yr    = parts[2][-2:]                           # "26" from "2026"
+        expiry_compact = f"{day}{mon}{yr}"              # "29MAY26"
+    except Exception:
+        expiry_compact = expiry_str.replace("-", "")
+
+    opt_type = signal.option_type   # "CE" or "PE" via Signal property
+    symbol   = f"NIFTY{expiry_compact}{signal.strike}{opt_type}"
+    qty      = max(signal.position_size, 1) * lot_size
+
+    # Simple SL/target estimates: 50 % stop, 80 % profit on premium
+    premium = signal.estimated_premium or 50.0
+    sl_price     = round(premium * 0.50, 2)
+    target_price = round(premium * 1.80, 2)
+
+    return TradeSignal(
+        action           = signal.action,
+        symbol           = symbol,
+        token            = "0",       # paper mode — no broker validation needed
+        exchange         = "NFO",
+        qty              = qty,
+        transaction_type = "BUY",     # BUY_CE and BUY_PE are always buy transactions
+        order_type       = "MARKET",
+        price            = premium,   # used as paper fill price when > 0
+        strike           = signal.strike,
+        option_type      = opt_type,
+        expiry           = signal.expiry,
+        confidence       = signal.confidence,
+        strategy_name    = strategy_name,
+        reasons          = list(signal.reasons),
+        sl_price         = sl_price,
+        target_price     = target_price,
+        timestamp        = signal.timestamp,
+    )
+
+
 class StrategyService:
     def __init__(self, config, order_manager, signal_generator):
         self.config           = config
@@ -394,7 +447,13 @@ class StrategyService:
         if self.order_manager and action not in ('NO_TRADE', 'EXIT', 'none', None):
             self.order_manager.paper_trading = (mode == 'paper')
             try:
-                await loop.run_in_executor(None, self.order_manager.execute_signal, signal)
+                lot_size = int(self.config.get('lot_size', 50))
+                trade_signal = _make_trade_signal(signal, name, lot_size)
+                logger.info(
+                    f"[{name}] Executing TradeSignal: symbol={trade_signal.symbol} "
+                    f"qty={trade_signal.qty} premium=₹{trade_signal.price:.2f}"
+                )
+                await loop.run_in_executor(None, self.order_manager.execute_signal, trade_signal)
                 logger.info(f"[{name}] {'Paper' if mode == 'paper' else 'Live'} order recorded.")
             except Exception as e:
                 logger.error(f"[{name}] Order execution failed: {e}")
