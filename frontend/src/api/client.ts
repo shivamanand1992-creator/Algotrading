@@ -79,8 +79,8 @@ export const positionsApi = {
 export const marketApi = {
   getCurrent: () => api.get<MarketData>('/api/market/current'),
   getOptionsChain: () => api.get('/api/market/options_chain'),
-  getRegime: () => api.get<MarketRegime>('/api/market/regime'),
-  getPredictions: () => api.get<Prediction>('/api/market/predictions'),
+  getRegime: () => api.get<MarketRegime>('/api/market/regime', { timeout: 35000 }),
+  getPredictions: () => api.get<Prediction>('/api/market/predictions', { timeout: 35000 }),
   getOHLCV: (interval = 'FIFTEEN_MINUTE', days = 5) =>
     api.get<OHLCVCandle[]>(`/api/market/ohlcv?interval=${interval}&days=${days}`),
   getVIX: (interval = 'FIFTEEN_MINUTE', days = 5) =>

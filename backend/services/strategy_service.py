@@ -1,11 +1,18 @@
 import sys
 import asyncio
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
+
+# ── Daily context cache ──────────────────────────────────────────────────────
+# Yahoo Finance daily data (2yr NSEI) is fetched once and reused for 1 hour.
+# Eliminates repeated 3–5s HTTP calls on every regime/predictions request.
+_daily_ctx_cache: dict = {"df": None, "ts": 0.0}
+_DAILY_CTX_TTL = 3600  # seconds
 
 from strategies.trend_strategy import TrendFollowingStrategy
 from strategies.premium_strategy import PremiumSellingStrategy
@@ -80,26 +87,36 @@ def _enrich_features(df) -> "pd.DataFrame":
         "daily_rsi", "daily_above_200ema", "daily_trend", "daily_weekly_ret",
     ]
     try:
-        raw_daily = yf.Ticker("^NSEI").history(period="730d", interval="1d")
-        if raw_daily is not None and not raw_daily.empty:
-            raw_daily.index = pd.to_datetime(raw_daily.index)
-            if raw_daily.index.tz is not None:
-                raw_daily.index = raw_daily.index.tz_convert(None)
-            raw_daily.index = raw_daily.index.normalize()
-            c = raw_daily["Close"]
-            raw_daily["daily_ema_20"]  = c.ewm(span=20,  adjust=False).mean()
-            raw_daily["daily_ema_50"]  = c.ewm(span=50,  adjust=False).mean()
-            raw_daily["daily_ema_200"] = c.ewm(span=200, adjust=False).mean()
-            delta = c.diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            raw_daily["daily_rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
-            raw_daily["daily_above_200ema"] = (c > raw_daily["daily_ema_200"]).astype(int)
-            ema_diff = (raw_daily["daily_ema_20"] - raw_daily["daily_ema_50"]) / raw_daily["daily_ema_50"]
-            raw_daily["daily_trend"] = np.where(ema_diff > 0.003, 1,
-                                       np.where(ema_diff < -0.003, -1, 0)).astype(int)
-            raw_daily["daily_weekly_ret"] = c.pct_change(5)
-            daily_ctx = raw_daily[_daily_cols].ffill().bfill()
+        # Use cached daily data when fresh (avoids 3–5s Yahoo Finance fetch on every call)
+        now_ts = time.time()
+        if _daily_ctx_cache["df"] is not None and (now_ts - _daily_ctx_cache["ts"]) < _DAILY_CTX_TTL:
+            daily_ctx = _daily_ctx_cache["df"]
+        else:
+            raw_daily = yf.Ticker("^NSEI").history(period="730d", interval="1d")
+            if raw_daily is not None and not raw_daily.empty:
+                raw_daily.index = pd.to_datetime(raw_daily.index)
+                if raw_daily.index.tz is not None:
+                    raw_daily.index = raw_daily.index.tz_convert(None)
+                raw_daily.index = raw_daily.index.normalize()
+                c = raw_daily["Close"]
+                raw_daily["daily_ema_20"]  = c.ewm(span=20,  adjust=False).mean()
+                raw_daily["daily_ema_50"]  = c.ewm(span=50,  adjust=False).mean()
+                raw_daily["daily_ema_200"] = c.ewm(span=200, adjust=False).mean()
+                delta = c.diff()
+                gain  = delta.clip(lower=0).rolling(14).mean()
+                loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                raw_daily["daily_rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+                raw_daily["daily_above_200ema"] = (c > raw_daily["daily_ema_200"]).astype(int)
+                ema_diff = (raw_daily["daily_ema_20"] - raw_daily["daily_ema_50"]) / raw_daily["daily_ema_50"]
+                raw_daily["daily_trend"] = np.where(ema_diff > 0.003, 1,
+                                           np.where(ema_diff < -0.003, -1, 0)).astype(int)
+                raw_daily["daily_weekly_ret"] = c.pct_change(5)
+                daily_ctx = raw_daily[_daily_cols].ffill().bfill()
+                _daily_ctx_cache["df"] = daily_ctx
+                _daily_ctx_cache["ts"] = now_ts
+            else:
+                daily_ctx = None
+        if daily_ctx is not None:
             # Align daily values onto intraday bars by matching midnight date
             bar_dates = df.index.normalize()
             aligned = daily_ctx.reindex(bar_dates, method="ffill")
