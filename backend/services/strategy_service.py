@@ -230,9 +230,18 @@ class StrategyService:
             logger.debug(f"[{name}] No market data — skipping cycle.")
             return
 
+        # Fetch signal generator fresh each cycle — picks up newly trained models
+        # after reload_ml_models() is called post-training (avoids stale reference).
+        try:
+            from backend.dependencies import get_signal_generator
+            signal_gen = get_signal_generator()
+        except Exception as e:
+            logger.warning(f"[{name}] Could not get signal generator: {e}")
+            return
+
         # Generate signal (sync call, run in executor)
         try:
-            signal = await loop.run_in_executor(None, self.signal_generator.generate_signal, df)
+            signal = await loop.run_in_executor(None, signal_gen.generate_signal, df)
         except Exception as e:
             logger.warning(f"[{name}] Signal generation failed: {e}")
             return
