@@ -15,6 +15,62 @@ from backend.api.models.responses import StrategyStatus, TradeSignalResponse
 # How often (seconds) each strategy loop checks for signals
 STRATEGY_INTERVAL = 300   # 5 minutes
 
+
+def _enrich_features(df) -> "pd.DataFrame":
+    """
+    Enrich a raw OHLCV DataFrame with the same features used during training:
+      1. Technical indicators (EMA, RSI, MACD, ATR, Bollinger, etc.)
+      2. Time-of-day features (hour, minute, minutes_since_open, …)
+      3. India VIX features (vix_close, vix_change_5, vix_is_high, vix_is_low)
+    Called synchronously in a thread executor so it doesn't block the event loop.
+    """
+    import numpy as np
+    import pandas as pd
+    import yfinance as yf
+    from features.technical_indicators import TechnicalFeatureEngine
+
+    # 1. Technical indicators
+    engine = TechnicalFeatureEngine()
+    df = engine.compute_all(df)
+
+    # 2. Ensure a datetime index for time features
+    if "timestamp" in df.columns:
+        df = df.set_index("timestamp")
+    df.index = pd.to_datetime(df.index)
+    # Strip timezone so arithmetic works cleanly
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+
+    # 3. Time features
+    df["hour"]               = df.index.hour
+    df["minute"]             = df.index.minute
+    df["minutes_since_open"] = (df.index.hour - 9) * 60 + df.index.minute - 15
+    df["minutes_to_close"]   = (15 * 60 + 30) - (df.index.hour * 60 + df.index.minute)
+    df["is_first_30min"]     = (df["minutes_since_open"] <= 30).astype(int)
+    df["is_last_30min"]      = (df["minutes_to_close"]   <= 30).astype(int)
+    df["day_of_week"]        = df.index.dayofweek
+    df["is_expiry_day"]      = (df.index.dayofweek == 3).astype(int)  # Thursday
+
+    # 4. India VIX features
+    try:
+        vix = yf.Ticker("^INDIAVIX").history(period="10d", interval="15m")
+        if vix is not None and not vix.empty:
+            vix.index = pd.to_datetime(vix.index).tz_localize(None)
+            vix = vix[["Close"]].rename(columns={"Close": "vix_close"})
+            df = df.merge(vix, left_index=True, right_index=True, how="left")
+            df["vix_close"]    = df["vix_close"].ffill().bfill()
+            df["vix_change_5"] = df["vix_close"].pct_change(5)
+            df["vix_is_high"]  = (df["vix_close"] > 20).astype(int)
+            df["vix_is_low"]   = (df["vix_close"] < 12).astype(int)
+    except Exception:
+        # VIX unavailable — fill with neutral defaults so model still runs
+        df["vix_close"]    = 15.0
+        df["vix_change_5"] = 0.0
+        df["vix_is_high"]  = 0
+        df["vix_is_low"]   = 0
+
+    return df
+
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -228,6 +284,16 @@ class StrategyService:
 
         if df.empty:
             logger.debug(f"[{name}] No market data — skipping cycle.")
+            return
+
+        # Enrich raw OHLCV with technical features, time features, and VIX
+        # (same pipeline used during model training — without this the price
+        # predictor receives raw bars and returns 0% confidence on every signal)
+        try:
+            df = await loop.run_in_executor(None, _enrich_features, df)
+            logger.debug(f"[{name}] Features computed: {len(df.columns)} cols, {len(df)} rows")
+        except Exception as e:
+            logger.warning(f"[{name}] Feature enrichment failed: {e}")
             return
 
         # Fetch signal generator fresh each cycle — picks up newly trained models
