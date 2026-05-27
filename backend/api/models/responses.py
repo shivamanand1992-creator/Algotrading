@@ -204,6 +204,7 @@ class StockSignalResponse(BaseModel):
     ema9: float
     ema21: float
     ema50: float
+    rs_vs_nifty: float = 0.0
     scan_time: str
 
 
@@ -222,7 +223,8 @@ class SwingPositionResponse(BaseModel):
     entry_date: str
     unrealized_pnl: float
     pnl_pct: float
-    status: str           # "open" | "closed_sl" | "closed_target"
+    status: str           # "open" | "closed_sl" | "closed_target" | "closed_trail"
     mode: str             # "paper" | "live"
     confidence: float
     regime: str
+    trailing_active: bool = False

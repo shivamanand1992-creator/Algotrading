@@ -137,6 +137,7 @@ export interface StockSignal {
   ema9: number;
   ema21: number;
   ema50: number;
+  rs_vs_nifty: number;
   scan_time: string;
 }
 
@@ -155,8 +156,9 @@ export interface SwingPosition {
   entry_date: string;
   unrealized_pnl: number;
   pnl_pct: number;
-  status: 'open' | 'closed_sl' | 'closed_target';
+  status: 'open' | 'closed_sl' | 'closed_target' | 'closed_trail';
   mode: 'paper' | 'live';
   confidence: number;
   regime: string;
+  trailing_active?: boolean;
 }

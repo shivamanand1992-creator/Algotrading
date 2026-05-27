@@ -338,6 +338,7 @@ export function StocksView() {
                   <th className="pb-2 text-right">P&L</th>
                   <th className="pb-2 text-right">SL</th>
                   <th className="pb-2 text-right">Target</th>
+                  <th className="pb-2 text-center">Trail</th>
                   <th className="pb-2 text-center">Mode</th>
                   <th className="pb-2 text-center">Action</th>
                 </tr>
@@ -353,7 +354,18 @@ export function StocksView() {
                     <td className="py-2.5 text-right font-mono">{formatPrice(pos.current_price)}</td>
                     <td className="py-2.5 text-right"><PnLBadge value={pos.pnl_pct} /></td>
                     <td className="py-2.5 text-right font-mono text-red-400">{formatPrice(pos.stop_loss)}</td>
-                    <td className="py-2.5 text-right font-mono text-green-400">{formatPrice(pos.target1)}</td>
+                    <td className="py-2.5 text-right font-mono text-green-400">
+                      {pos.trailing_active
+                        ? <span title="Riding to T2">{formatPrice(pos.target2)} <span style={{color:'#ffd600',fontSize:'10px'}}>T2</span></span>
+                        : formatPrice(pos.target1)
+                      }
+                    </td>
+                    <td className="py-2.5 text-center">
+                      {pos.trailing_active
+                        ? <span title="T1 hit — trailing stop at breakeven" style={{color:'#ffd600',fontSize:'16px'}}>🔒</span>
+                        : <span style={{color:'#8aa5c0'}}>—</span>
+                      }
+                    </td>
                     <td className="py-2.5 text-center">
                       <span className="text-xs px-1.5 py-0.5 rounded" style={{
                         background: pos.mode === 'live' ? 'rgba(255,23,68,0.15)' : 'rgba(0,229,255,0.1)',
@@ -413,6 +425,7 @@ export function StocksView() {
                   <th className="pb-3 text-center">RSI</th>
                   <th className="pb-3 text-center">ADX</th>
                   <th className="pb-3 text-center">Vol×</th>
+                  <th className="pb-3 text-center" title="20-day return vs Nifty50">RS</th>
                   <th className="pb-3 text-center">Action</th>
                 </tr>
               </thead>
@@ -470,6 +483,16 @@ export function StocksView() {
                       <td className="py-3 text-center">
                         <span style={{ color: sig.volume_ratio >= 1.5 ? '#00e676' : sig.volume_ratio >= 1.2 ? '#ffd600' : '#8aa5c0' }}>
                           {sig.volume_ratio.toFixed(1)}×
+                        </span>
+                      </td>
+                      <td className="py-3 text-center font-mono text-xs">
+                        <span style={{
+                          color: (sig.rs_vs_nifty ?? 0) >= 3 ? '#00e676'
+                               : (sig.rs_vs_nifty ?? 0) >= 1 ? '#69f0ae'
+                               : (sig.rs_vs_nifty ?? 0) < -2 ? '#ff5252'
+                               : '#8aa5c0'
+                        }}>
+                          {(sig.rs_vs_nifty ?? 0) >= 0 ? '+' : ''}{(sig.rs_vs_nifty ?? 0).toFixed(1)}%
                         </span>
                       </td>
 

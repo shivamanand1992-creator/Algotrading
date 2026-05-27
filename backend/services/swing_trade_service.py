@@ -186,29 +186,51 @@ class SwingTradeService:
                 )
                 pos["last_updated"]   = datetime.now(_IST).isoformat()
 
+                trailing = pos.get("trailing_active", False)
+
                 # SL hit check (intraday low ≤ SL)
                 if today_low <= pos["stop_loss"]:
-                    pnl = (pos["stop_loss"] - pos["entry_price"]) * pos["qty"]
-                    logger.warning(f"[SwingMonitor] {symbol} SL HIT — loss ₹{pnl:.2f}")
-                    pos["status"]       = "closed_sl"
-                    pos["exit_price"]   = pos["stop_loss"]
+                    exit_px = pos["stop_loss"]
+                    pnl     = (exit_px - pos["entry_price"]) * pos["qty"]
+                    if trailing:
+                        logger.info(
+                            f"[SwingMonitor] {symbol} TRAILING SL HIT @ ₹{exit_px:.2f} "
+                            f"— locked profit ₹{pnl:.2f}"
+                        )
+                        pos["status"] = "closed_trail"
+                    else:
+                        logger.warning(f"[SwingMonitor] {symbol} SL HIT — loss ₹{pnl:.2f}")
+                        pos["status"] = "closed_sl"
+                    pos["exit_price"]   = exit_px
                     pos["realized_pnl"] = pnl
                     symbols_to_close.append(symbol)
 
-                # Target1 hit check (intraday high ≥ target1)
-                elif today_high >= pos["target1"]:
-                    pnl = (pos["target1"] - pos["entry_price"]) * pos["qty"]
-                    logger.info(f"[SwingMonitor] {symbol} TARGET1 HIT — profit ₹{pnl:.2f}")
+                # Target1 hit: activate trailing stop at breakeven, ride to Target2
+                elif not trailing and today_high >= pos["target1"]:
+                    new_sl = pos["entry_price"]   # trail SL to breakeven
+                    pos["stop_loss"]       = new_sl
+                    pos["trailing_active"] = True
+                    logger.info(
+                        f"[SwingMonitor] {symbol} TARGET1 HIT ✓ — "
+                        f"trailing SL moved to breakeven ₹{new_sl:.2f}, "
+                        f"riding toward T2=₹{pos['target2']:.2f}"
+                    )
+
+                # Target2 hit: close with full profit
+                elif today_high >= pos["target2"]:
+                    pnl = (pos["target2"] - pos["entry_price"]) * pos["qty"]
+                    logger.info(f"[SwingMonitor] {symbol} TARGET2 HIT 🎯 — profit ₹{pnl:.2f}")
                     pos["status"]       = "closed_target"
-                    pos["exit_price"]   = pos["target1"]
+                    pos["exit_price"]   = pos["target2"]
                     pos["realized_pnl"] = pnl
                     symbols_to_close.append(symbol)
 
                 else:
+                    t_tag = " [trailing]" if trailing else ""
                     logger.debug(
-                        f"[SwingMonitor] {symbol} | close={today_close:.2f} "
+                        f"[SwingMonitor] {symbol}{t_tag} | close={today_close:.2f} "
                         f"P&L={pos['pnl_pct']:.2f}% | "
-                        f"SL={pos['stop_loss']:.2f} T1={pos['target1']:.2f}"
+                        f"SL={pos['stop_loss']:.2f} T2={pos['target2']:.2f}"
                     )
 
             except Exception as exc:

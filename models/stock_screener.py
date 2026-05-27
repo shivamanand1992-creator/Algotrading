@@ -68,6 +68,7 @@ class StockSignal:
     ema9: float = 0.0
     ema21: float = 0.0
     ema50: float = 0.0
+    rs_vs_nifty: float = 0.0   # stock 20d return minus Nifty 20d return (%)
     scan_time: datetime = field(default_factory=lambda: datetime.now(IST))
 
     def to_dict(self) -> dict:
@@ -95,6 +96,7 @@ class StockSignal:
             "ema9":          round(self.ema9, 2),
             "ema21":         round(self.ema21, 2),
             "ema50":         round(self.ema50, 2),
+            "rs_vs_nifty":   round(self.rs_vs_nifty, 2),
             "scan_time":     self.scan_time.isoformat(),
         }
 
@@ -134,11 +136,29 @@ class StockScreener:
         -------
         List[StockSignal]  — only BUY signals with confidence >= min_confidence
         """
+        import yfinance as yf
+
+        # ── Gate 1: Nifty market regime ──────────────────────────────
+        # Only take stock longs when Nifty50 itself is in an uptrend
+        # (close > 200-day EMA). Avoids buying individual stocks in a
+        # broad bear market.
+        nifty_bullish, nifty_20d_ret = self._get_nifty_regime()
+        if not nifty_bullish:
+            logger.warning(
+                "[Screener] Nifty50 is BELOW its 200-day EMA — "
+                "broad market is bearish. Skipping swing scan."
+            )
+            return []
+        logger.info(
+            f"[Screener] Nifty regime: BULLISH (20d return={nifty_20d_ret:+.1f}%). "
+            "Proceeding with stock scan."
+        )
+
         signals: List[StockSignal] = []
 
         for stock in universe:
             try:
-                sig = self._scan_stock(stock)
+                sig = self._scan_stock(stock, nifty_20d_ret)
                 if sig is not None and sig.action == "BUY" and sig.confidence >= self.min_confidence:
                     signals.append(sig)
             except Exception as exc:
@@ -152,10 +172,41 @@ class StockScreener:
         return signals
 
     # ------------------------------------------------------------------
+    # Nifty regime & relative strength helpers
+    # ------------------------------------------------------------------
+
+    def _get_nifty_regime(self) -> tuple[bool, float]:
+        """
+        Fetch ^NSEI daily data and return:
+          - bullish: True if close > 200-day EMA
+          - nifty_20d_ret: Nifty's 20-day return (%) used for RS comparison
+        Returns (True, 0.0) on fetch failure so a data glitch doesn't
+        block all trading.
+        """
+        import yfinance as yf
+        try:
+            df = yf.download("^NSEI", period="250d", interval="1d",
+                             progress=False, auto_adjust=True)
+            if df is None or len(df) < 50:
+                return True, 0.0
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [c.lower() for c in df.columns]
+            close = df["close"].dropna()
+            ema200 = close.ewm(span=200, adjust=False).mean().iloc[-1]
+            bullish = float(close.iloc[-1]) > float(ema200)
+            # 20-day return for relative strength comparison
+            nifty_20d_ret = (float(close.iloc[-1]) / float(close.iloc[-21]) - 1) * 100 if len(close) > 21 else 0.0
+            return bullish, nifty_20d_ret
+        except Exception as exc:
+            logger.warning(f"[Screener] Nifty regime fetch failed: {exc} — assuming bullish")
+            return True, 0.0
+
+    # ------------------------------------------------------------------
     # Per-stock logic
     # ------------------------------------------------------------------
 
-    def _scan_stock(self, stock: dict) -> Optional[StockSignal]:
+    def _scan_stock(self, stock: dict, nifty_20d_ret: float = 0.0) -> Optional[StockSignal]:
         """Fetch daily OHLCV, compute features, score, return StockSignal or None."""
         import yfinance as yf
 
@@ -182,12 +233,21 @@ class StockScreener:
         # Compute all technical features
         df = self._feature_engine.compute_all(df)
 
-        return self._score_signal(stock, df)
+        return self._score_signal(stock, df, nifty_20d_ret)
 
-    def _score_signal(self, stock: dict, df: pd.DataFrame) -> StockSignal:
+    def _score_signal(self, stock: dict, df: pd.DataFrame, nifty_20d_ret: float = 0.0) -> StockSignal:
         """
-        Apply the 7-factor scoring model to the latest bar of *df*.
+        Apply the 8-factor scoring model to the latest bar of *df*.
         Returns a StockSignal (action may be "HOLD" if score < threshold).
+
+        Factors (total weight = 1.10 before normalisation):
+          1. Trend alignment EMA9/21/50       — 0.35
+          2. Trend strength ADX               — 0.15
+          3. RSI momentum zone                — 0.15
+          4. MACD histogram positive/rising   — 0.15
+          5. Volume confirmation              — 0.10
+          6. Bullish candlestick pattern      — 0.10
+          7. Relative strength vs Nifty       — 0.10 (NEW)
         """
         row  = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else row
@@ -206,6 +266,12 @@ class StockScreener:
         vol_ratio = volume / avg_vol if avg_vol > 0 else 1.0
         bull_eng = bool(row.get("pattern_bull_engulfing", 0))
         hammer   = bool(row.get("pattern_hammer", 0))
+
+        # ── Relative strength: stock 20-day return vs Nifty ──────────
+        stock_20d_ret = 0.0
+        if len(df) > 21:
+            close_series = df["close"].dropna()
+            stock_20d_ret = (float(close_series.iloc[-1]) / float(close_series.iloc[-21]) - 1) * 100
 
         score   = 0.0
         reasons = []
@@ -259,6 +325,21 @@ class StockScreener:
             pat = "Bull Engulfing" if bull_eng else "Hammer"
             reasons.append(f"Candlestick: {pat}")
 
+        # ── 7. Relative strength vs Nifty50 (10%) ───────────────────
+        # Stock outperforming Nifty over the last 20 days means
+        # institutional/smart money is rotating into this name.
+        rs_diff = stock_20d_ret - nifty_20d_ret
+        if rs_diff >= 3.0:
+            score += 0.10
+            reasons.append(f"RS vs Nifty: +{rs_diff:.1f}% outperformance (strong)")
+        elif rs_diff >= 1.0:
+            score += 0.05
+            reasons.append(f"RS vs Nifty: +{rs_diff:.1f}% outperformance")
+        elif rs_diff < -2.0:
+            # Underperforming the index — penalise
+            score -= 0.05
+            reasons.append(f"RS vs Nifty: {rs_diff:.1f}% (lagging index)")
+
         # ── Regime label ─────────────────────────────────────────────
         if ema9 > ema21 > ema50 and adx > 20:
             regime = "uptrend"
@@ -291,7 +372,7 @@ class StockScreener:
             target2     = target2,
             sl_pct      = sl_pct,
             risk_reward = 2.0,
-            confidence  = round(min(score, 1.0), 4),
+            confidence  = round(min(max(score, 0.0), 1.0), 4),
             regime      = regime,
             reasons     = reasons,
             rsi         = rsi,
@@ -302,4 +383,5 @@ class StockScreener:
             ema9        = round(ema9, 2),
             ema21       = round(ema21, 2),
             ema50       = round(ema50, 2),
+            rs_vs_nifty = round(stock_20d_ret - nifty_20d_ret, 2),
         )
