@@ -126,8 +126,10 @@ class SwingTradeService:
 
         sig = next((s for s in self._last_signals if s.symbol == symbol), None)
         if sig is None:
-            logger.warning(f"[SwingService] No signal found for {symbol}.")
-            return None
+            logger.info(f"[SwingService] {symbol} not in last scan — fetching on-demand signal…")
+            sig = await self._fetch_signal_on_demand(symbol)
+            if sig is None:
+                return None
 
         if position_value and position_value > 0:
             qty = self._calculate_qty_by_capital(sig.entry_price, position_value)
@@ -401,6 +403,85 @@ class SwingTradeService:
         if entry <= 0 or capital_per_trade <= 0:
             return 0
         return max(1, math.floor(capital_per_trade / entry))
+
+    async def _fetch_signal_on_demand(self, symbol: str) -> Optional[StockSignal]:
+        """
+        Build a minimal StockSignal for *symbol* by fetching live yfinance data.
+        Used when the user executes a stock that was not in the last scan results
+        (e.g. after a server restart or without running a scan first).
+        Entry = last daily close; SL = entry − 1.5×ATR14; T1/T2 from 1:2/1:3 R:R.
+        """
+        from data.nifty50_universe import NIFTY100_UNIVERSE
+        import yfinance as yf
+
+        sym_upper = symbol.upper()
+        stock_info = next((s for s in NIFTY100_UNIVERSE if s["symbol"] == sym_upper), None)
+        if stock_info is None:
+            logger.warning(
+                f"[SwingService] {sym_upper} not found in Nifty100 universe — "
+                f"cannot build on-demand signal."
+            )
+            return None
+
+        yf_ticker = stock_info["yf"]
+        try:
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                None,
+                lambda: yf.download(yf_ticker, period="90d", interval="1d",
+                                    progress=False, auto_adjust=True)
+            )
+            if df is None or df.empty or len(df) < 15:
+                logger.warning(f"[SwingService] Insufficient yfinance data for {sym_upper}.")
+                return None
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [c.lower() for c in df.columns]
+
+            # ATR14: true range rolling mean
+            pc = df["close"].shift(1)
+            tr = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - pc).abs(),
+                (df["low"]  - pc).abs(),
+            ], axis=1).max(axis=1)
+            atr14 = float(tr.rolling(14).mean().iloc[-1])
+
+            entry  = round(float(df["close"].iloc[-1]), 2)
+            sl     = round(entry - 1.5 * atr14, 2)
+            risk   = entry - sl
+            t1     = round(entry + 2.0 * risk, 2)
+            t2     = round(entry + 3.0 * risk, 2)
+            sl_pct = round((risk / entry) * 100, 2) if entry > 0 else 0.0
+
+            logger.info(
+                f"[SwingService] On-demand signal for {sym_upper}: "
+                f"entry=₹{entry:.2f} SL=₹{sl:.2f} T1=₹{t1:.2f} T2=₹{t2:.2f}"
+            )
+            return StockSignal(
+                symbol       = sym_upper,
+                name         = stock_info["name"],
+                sector       = stock_info.get("sector", ""),
+                yf_ticker    = yf_ticker,
+                action       = "BUY",
+                close        = entry,
+                entry_price  = entry,
+                stop_loss    = sl,
+                target1      = t1,
+                target2      = t2,
+                sl_pct       = sl_pct,
+                confidence   = 0.5,
+                regime       = "ranging",
+                reasons      = ["manual execution — on-demand"],
+                rsi          = 0.0,
+                adx          = 0.0,
+                atr          = atr14,
+                volume_ratio = 0.0,
+            )
+        except Exception as exc:
+            logger.error(f"[SwingService] On-demand signal fetch failed for {sym_upper}: {exc}")
+            return None
 
     def _open_paper_position(self, sig: StockSignal, qty: int) -> str:
         """Record a paper swing position in memory."""
