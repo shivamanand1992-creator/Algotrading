@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -21,6 +22,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 import pytz
 from loguru import logger
+from sqlalchemy import Column, String, Integer, Float, create_engine, text
+from sqlalchemy.orm import DeclarativeBase, Session
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -31,6 +34,38 @@ _IST = pytz.timezone("Asia/Kolkata")
 
 _STATE_FILE   = Path(__file__).parent.parent.parent / "logs" / "swing_state.json"
 _LEDGER_FILE  = Path(__file__).parent.parent.parent / "logs" / "swing_orders_ledger.json"
+
+
+# ---------------------------------------------------------------------------
+# SQLAlchemy model — swing orders ledger (survives redeployments via Postgres)
+# ---------------------------------------------------------------------------
+
+class _LedgerBase(DeclarativeBase):
+    pass
+
+
+class _SwingLedgerRow(_LedgerBase):
+    __tablename__ = "swing_orders_ledger"
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    symbol      = Column(String(32),  nullable=False, index=True)
+    order_id    = Column(String(64),  nullable=False)
+    date        = Column(String(16),  nullable=False)   # YYYY-MM-DD
+    qty         = Column(Integer,     nullable=False)
+    entry_price = Column(Float,       nullable=False)
+    mode        = Column(String(16),  nullable=False)
+
+
+def _get_ledger_engine():
+    """Return an SQLAlchemy engine using DATABASE_URL (Postgres on Railway, SQLite locally)."""
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url:
+        logs_dir = Path(__file__).parent.parent.parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        db_url = f"sqlite:///{logs_dir}/trades.db"
+    # SQLAlchemy requires 'postgresql://' not 'postgres://'
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    return create_engine(db_url, echo=False, future=True, pool_pre_ping=True)
 
 
 class SwingTradeService:
@@ -128,18 +163,58 @@ class SwingTradeService:
             logger.warning(f"[SwingService] Could not load saved state: {exc}")
 
     def _load_ledger(self) -> None:
-        """Load the append-only orders ledger from disk."""
+        """
+        Load orders ledger — tries database first (survives Railway redeploys),
+        then falls back to the JSON file for local dev / first-run.
+        """
+        try:
+            engine = _get_ledger_engine()
+            _LedgerBase.metadata.create_all(engine, checkfirst=True)
+            with Session(engine) as s:
+                rows = s.query(_SwingLedgerRow).all()
+            if rows:
+                self._orders_ledger = [
+                    {"symbol": r.symbol, "order_id": r.order_id, "date": r.date,
+                     "qty": r.qty, "entry_price": r.entry_price, "mode": r.mode}
+                    for r in rows
+                ]
+                logger.info(f"[SwingService] Ledger loaded from DB — {len(rows)} orders.")
+                return
+        except Exception as exc:
+            logger.warning(f"[SwingService] DB ledger load failed, falling back to JSON: {exc}")
+
+        # JSON fallback
         if not _LEDGER_FILE.exists():
             return
         try:
             self._orders_ledger = json.loads(_LEDGER_FILE.read_text())
-            logger.info(f"[SwingService] Ledger loaded — {len(self._orders_ledger)} historical orders.")
+            logger.info(f"[SwingService] Ledger loaded from JSON — {len(self._orders_ledger)} orders.")
+            # Migrate JSON entries into DB so future restarts use DB
+            self._migrate_json_ledger_to_db()
         except Exception as exc:
             logger.warning(f"[SwingService] Could not load orders ledger: {exc}")
 
+    def _migrate_json_ledger_to_db(self) -> None:
+        """One-time migration: write JSON ledger entries into the database."""
+        try:
+            engine = _get_ledger_engine()
+            _LedgerBase.metadata.create_all(engine, checkfirst=True)
+            with Session(engine) as s:
+                existing = {r.order_id for r in s.query(_SwingLedgerRow).all()}
+                for e in self._orders_ledger:
+                    if e["order_id"] not in existing:
+                        s.add(_SwingLedgerRow(
+                            symbol=e["symbol"], order_id=e["order_id"], date=e["date"],
+                            qty=int(e["qty"]), entry_price=float(e["entry_price"]), mode=e["mode"]
+                        ))
+                s.commit()
+            logger.info(f"[SwingService] Migrated {len(self._orders_ledger)} JSON ledger entries to DB.")
+        except Exception as exc:
+            logger.warning(f"[SwingService] JSON→DB ledger migration failed: {exc}")
+
     def _append_to_ledger(self, symbol: str, order_id: str, qty: int,
                           entry_price: float, mode: str) -> None:
-        """Append a new order entry to the on-disk ledger (never overwritten, only appended)."""
+        """Append a new order entry to database AND JSON file."""
         entry = {
             "symbol":      symbol,
             "order_id":    order_id,
@@ -149,11 +224,22 @@ class SwingTradeService:
             "mode":        mode,
         }
         self._orders_ledger.append(entry)
+
+        # Write to database (primary, survives redeploys)
+        try:
+            engine = _get_ledger_engine()
+            with Session(engine) as s:
+                s.add(_SwingLedgerRow(**entry))
+                s.commit()
+        except Exception as exc:
+            logger.warning(f"[SwingService] DB ledger write failed: {exc}")
+
+        # Write to JSON file (secondary, local dev backup)
         try:
             _LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
             _LEDGER_FILE.write_text(json.dumps(self._orders_ledger, indent=2, default=str))
         except Exception as exc:
-            logger.warning(f"[SwingService] Could not write orders ledger: {exc}")
+            logger.warning(f"[SwingService] JSON ledger write failed: {exc}")
 
     def _ledger_symbols(self) -> set:
         """Return the set of all symbols ever ordered by the system."""
@@ -411,7 +497,10 @@ class SwingTradeService:
 
         # 1. Symbols the system has ever ordered (ledger is the source of truth)
         system_symbols = self._ledger_symbols()
-        logger.info(f"[SwingSync] Ledger contains {len(system_symbols)} system-ordered symbol(s): {system_symbols or 'none'}")
+        fresh_deploy   = len(system_symbols) == 0 and len(self._swing_positions) == 0
+        logger.info(
+            f"[SwingSync] Ledger: {len(system_symbols)} symbol(s) | fresh_deploy={fresh_deploy}"
+        )
 
         # 2. Holdings → current qty / avg price from demat
         try:
@@ -429,7 +518,17 @@ class SwingTradeService:
         imported, updated, skipped, orphaned = [], [], [], []
 
         # 3. Candidates = already tracked + anything in ledger that's still in demat
-        candidates = set(self._swing_positions.keys()) | (system_symbols & set(holdings_map.keys()))
+        # On a fresh deploy (empty ledger + empty state), import ALL Nifty universe
+        # holdings so the user isn't left stranded — they can manually close any
+        # personal portfolio stocks that shouldn't be here.
+        if fresh_deploy:
+            candidates = set(holdings_map.keys()) & set(universe_symbols.keys())
+            logger.warning(
+                f"[SwingSync] Fresh deploy — ledger empty. Importing all "
+                f"{len(candidates)} Nifty-universe holding(s) as system positions."
+            )
+        else:
+            candidates = set(self._swing_positions.keys()) | (system_symbols & set(holdings_map.keys()))
         for symbol in candidates:
             if symbol not in universe_symbols:
                 continue
@@ -503,11 +602,12 @@ class SwingTradeService:
             self._save_state()
 
         return {
-            "imported":  imported,
-            "updated":   updated,
-            "orphaned":  orphaned,
-            "skipped":   skipped,
-            "message":   "",
+            "imported":     imported,
+            "updated":      updated,
+            "orphaned":     orphaned,
+            "skipped":      skipped,
+            "fresh_deploy": fresh_deploy,
+            "message":      "",
         }
 
     async def refresh_position_prices(self) -> None:
