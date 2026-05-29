@@ -11,11 +11,19 @@ export function StrategyPanel() {
   const [optionsEnabled, setOptionsEnabled] = useState<boolean>(() => {
     return localStorage.getItem('options_trading_enabled') !== 'false';
   });
+  const [execMode, setExecMode] = useState<'paper' | 'live'>(() => {
+    return (localStorage.getItem('options_exec_mode') as 'paper' | 'live') || 'paper';
+  });
 
   const toggleOptions = () => {
     const next = !optionsEnabled;
     setOptionsEnabled(next);
     localStorage.setItem('options_trading_enabled', String(next));
+  };
+
+  const toggleExecMode = (m: 'paper' | 'live') => {
+    setExecMode(m);
+    localStorage.setItem('options_exec_mode', m);
   };
 
   useEffect(() => {
@@ -36,7 +44,7 @@ export function StrategyPanel() {
   const handleStart = async (name: string) => {
     setLoading(name);
     try {
-      await strategiesApi.start(name, 'paper');
+      await strategiesApi.start(name, execMode);
       await fetchStrategies();
     } catch (error) {
       console.error(`Failed to start strategy ${name}:`, error);
@@ -62,22 +70,58 @@ export function StrategyPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <h2 className="text-3xl font-bold text-jarvis-primary glow-text">
-          Strategy Control
-        </h2>
+        <div>
+          <h2 className="text-3xl font-bold text-jarvis-primary glow-text">
+            Nifty Options
+          </h2>
+          <p className="text-xs text-jarvis-text-secondary mt-1 tracking-wider">
+            Intraday F&amp;O strategies — Trend / Premium / Scalping
+          </p>
+        </div>
 
-        {/* Options trading master toggle */}
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-jarvis-text-secondary">Nifty Options Trading</span>
-          <button
-            onClick={toggleOptions}
-            className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none"
-            style={{
-              background: optionsEnabled ? 'rgba(0,229,255,0.3)' : 'rgba(255,255,255,0.1)',
-              border: optionsEnabled ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.2)',
-            }}
-            title={optionsEnabled ? 'Click to disable Nifty options trading' : 'Click to enable Nifty options trading'}
-          >
+        <div className="flex items-center gap-5 flex-wrap">
+          {/* Paper / Live mode selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary uppercase tracking-wider">Mode:</span>
+            <div className="flex rounded overflow-hidden border border-jarvis-primary/30">
+              <button
+                onClick={() => toggleExecMode('paper')}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                  execMode === 'paper'
+                    ? 'bg-jarvis-primary/20 text-jarvis-primary'
+                    : 'text-jarvis-text-secondary hover:text-jarvis-primary'
+                }`}
+              >
+                Paper
+              </button>
+              <button
+                onClick={() => toggleExecMode('live')}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                  execMode === 'live'
+                    ? 'bg-red-500/20 text-red-400 border-l border-red-500/30'
+                    : 'text-jarvis-text-secondary hover:text-red-400 border-l border-jarvis-primary/30'
+                }`}
+              >
+                Live
+              </button>
+            </div>
+            {execMode === 'live' && (
+              <span className="text-[10px] text-red-400 font-bold tracking-wider">REAL ORDERS</span>
+            )}
+          </div>
+
+          {/* Enable/disable options trading */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-jarvis-text-secondary">Enable Trading</span>
+            <button
+              onClick={toggleOptions}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none"
+              style={{
+                background: optionsEnabled ? 'rgba(0,229,255,0.3)' : 'rgba(255,255,255,0.1)',
+                border: optionsEnabled ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.2)',
+              }}
+              title={optionsEnabled ? 'Click to disable Nifty options trading' : 'Click to enable Nifty options trading'}
+            >
             <span
               className="inline-block h-4 w-4 rounded-full transition-transform"
               style={{
@@ -92,8 +136,9 @@ export function StrategyPanel() {
           >
             {optionsEnabled ? 'ON' : 'OFF'}
           </span>
-        </div>
-      </div>
+          </div>
+        </div>{/* end flex items-center gap-5 */}
+      </div>{/* end header row */}
 
       {!optionsEnabled && (
         <div
@@ -196,7 +241,7 @@ export function StrategyPanel() {
                     disabled={loading === strategy.name || !optionsEnabled}
                     title={!optionsEnabled ? 'Options trading is disabled' : undefined}
                   >
-                    {loading === strategy.name ? 'Starting...' : 'Start (Paper)'}
+                    {loading === strategy.name ? 'Starting...' : `Start (${execMode === 'live' ? 'Live' : 'Paper'})`}
                   </Button>
                 )}
               </div>

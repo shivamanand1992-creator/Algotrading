@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { systemApi } from '../../api/client';
-import { ModeToggle } from '../ui/ModeToggle';
 import type { SystemStatus } from '../../types/api';
 
 function STSLogo() {
@@ -36,7 +35,6 @@ interface HeaderProps {
 export function Header({ onLogout }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-  const [mode, setMode] = useState<string>('demo');
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -48,7 +46,6 @@ export function Header({ onLogout }: HeaderProps) {
       try {
         const res = await systemApi.getStatus();
         setSystemStatus(res.data);
-        setMode(res.data.current_mode || 'demo');
       } catch (e) {
         console.error('Failed to fetch system status:', e);
       }
@@ -115,8 +112,6 @@ export function Header({ onLogout }: HeaderProps) {
               </span>
             </div>
           </div>
-          <div className="w-px h-8 bg-jarvis-primary/20" />
-          <ModeToggle currentMode={mode} onModeChange={setMode} />
           {onLogout && (
             <>
               <div className="w-px h-8 bg-jarvis-primary/20" />

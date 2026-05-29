@@ -342,10 +342,10 @@ export function StocksView() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-xl font-black text-jarvis-primary glow-text uppercase tracking-widest">
-            Stock Screener — Swing Trade
+            Equity Swing
           </h2>
           <p className="text-xs text-jarvis-text-secondary mt-1">
-            {universe === 'nifty100' ? 'Nifty100 (Nifty50 + Next50)' : 'Nifty50'} daily scan · Entry / SL / Target for 2–10 day delivery trades
+            CNC delivery trades · 2–10 day holds · Entry / Stop-Loss / Target
           </p>
         </div>
 

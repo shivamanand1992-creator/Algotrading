@@ -62,7 +62,10 @@ export function PortfolioView() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">Portfolio</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">F&amp;O Portfolio</h2>
+          <p className="text-xs text-jarvis-text-secondary mt-1 tracking-wider">Open Nifty options positions · Capital allocation</p>
+        </div>
         <div className="flex items-center gap-4">
           {squareOffMsg && (
             <span className={`text-xs font-mono tracking-wider ${squareOffMsg.ok ? 'text-green-400' : 'text-red-400'}`}>

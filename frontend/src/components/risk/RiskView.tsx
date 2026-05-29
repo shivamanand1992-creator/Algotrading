@@ -128,7 +128,10 @@ export function RiskView() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">Risk Management</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-jarvis-primary tracking-widest uppercase">F&amp;O Risk Management</h2>
+          <p className="text-xs text-jarvis-text-secondary mt-1 tracking-wider">Daily loss limit and per-trade risk controls for Nifty options</p>
+        </div>
         <div className="flex items-center gap-4">
           {saveMsg && (
             <span className={`text-xs font-mono tracking-wider ${saveMsg.ok ? 'text-green-400' : 'text-red-400'}`}>

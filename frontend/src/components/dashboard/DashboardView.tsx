@@ -360,7 +360,7 @@ export function DashboardView() {
 
       {/* Active Positions */}
       <motion.div variants={staggerItem}>
-        <Card title={`Active Positions ${positions.length > 0 ? `(${positions.length})` : ''}`} scanLine>
+        <Card title={`F&O Positions ${positions.length > 0 ? `(${positions.length})` : ''}`} scanLine>
           {positions.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="data-table">
@@ -425,7 +425,7 @@ export function DashboardView() {
                 No active positions
               </p>
               <p className="text-jarvis-text-secondary/50 text-xs mt-1">
-                Start a strategy to begin trading
+                Start an options strategy to place F&amp;O trades
               </p>
             </motion.div>
           )}
