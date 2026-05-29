@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import pytz
 from loguru import logger
-from sqlalchemy import Column, String, Integer, Float, create_engine, text
+from sqlalchemy import Column, String, Integer, Float, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -53,6 +53,14 @@ class _SwingLedgerRow(_LedgerBase):
     qty         = Column(Integer,     nullable=False)
     entry_price = Column(Float,       nullable=False)
     mode        = Column(String(16),  nullable=False)
+
+
+class _SwingStateRow(_LedgerBase):
+    """Key-value store for swing service state — persists across Railway redeploys."""
+    __tablename__ = "swing_service_state"
+    key        = Column(String(64), primary_key=True)
+    value_json = Column(Text,       nullable=False, default="{}")
+    updated_at = Column(String(32), nullable=False, default="")
 
 
 def _get_ledger_engine():
@@ -117,48 +125,88 @@ class SwingTradeService:
     # ------------------------------------------------------------------
 
     def _save_state(self) -> None:
-        """Persist positions and autopilot config to disk so restarts don't lose them."""
+        """Persist positions and autopilot config — DB primary (survives Railway redeploys), file secondary."""
+        state = {
+            "positions": self._swing_positions,
+            "autopilot": {
+                "enabled":           self._autopilot_enabled,
+                "mode":              self._autopilot_mode,
+                "capital_per_trade": self._autopilot_capital_per_trade,
+                "max_trades":        self._autopilot_max_trades,
+            },
+        }
+        state_json = json.dumps(state, default=str)
+
+        # Primary: PostgreSQL — survives Railway container replacement
+        try:
+            engine = _get_ledger_engine()
+            _LedgerBase.metadata.create_all(engine, checkfirst=True)
+            with Session(engine) as s:
+                s.merge(_SwingStateRow(
+                    key        = "swing_state",
+                    value_json = state_json,
+                    updated_at = datetime.now(_IST).isoformat(),
+                ))
+                s.commit()
+        except Exception as exc:
+            logger.warning(f"[SwingService] DB state save failed: {exc}")
+
+        # Secondary: file on disk (local dev / fallback)
         try:
             _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            state = {
-                "positions": self._swing_positions,
-                "autopilot": {
-                    "enabled":           self._autopilot_enabled,
-                    "mode":              self._autopilot_mode,
-                    "capital_per_trade": self._autopilot_capital_per_trade,
-                    "max_trades":        self._autopilot_max_trades,
-                },
-            }
-            _STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+            _STATE_FILE.write_text(state_json)
         except Exception as exc:
-            logger.warning(f"[SwingService] Could not save state: {exc}")
+            logger.warning(f"[SwingService] File state save failed: {exc}")
+
+    def _apply_state(self, state: dict) -> None:
+        """Apply a loaded state dict to instance fields."""
+        positions = state.get("positions", {})
+        if isinstance(positions, dict):
+            self._swing_positions = positions
+            if positions:
+                logger.info(
+                    f"[SwingService] Restored {len(positions)} swing position(s): "
+                    + ", ".join(positions.keys())
+                )
+        ap = state.get("autopilot", {})
+        if ap.get("enabled") is not None:
+            self._autopilot_enabled           = bool(ap["enabled"])
+            self._autopilot_mode              = ap.get("mode", "paper")
+            self._autopilot_capital_per_trade = float(ap.get("capital_per_trade", 1000.0))
+            self._autopilot_max_trades        = int(ap.get("max_trades", 3))
+            if self._autopilot_enabled:
+                logger.info(
+                    f"[SwingService] Restored autopilot: enabled={self._autopilot_enabled}, "
+                    f"mode={self._autopilot_mode}, ₹{self._autopilot_capital_per_trade:.0f} "
+                    f"× {self._autopilot_max_trades} trades"
+                )
 
     def _load_state(self) -> None:
-        """Restore positions and autopilot config from disk on startup."""
+        """Restore positions and autopilot config — DB first (Railway-safe), then file fallback."""
+        # Primary: database (PostgreSQL on Railway, SQLite locally)
+        try:
+            engine = _get_ledger_engine()
+            _LedgerBase.metadata.create_all(engine, checkfirst=True)
+            db_json = None
+            with Session(engine) as s:
+                row = s.get(_SwingStateRow, "swing_state")
+                if row is not None:
+                    db_json = row.value_json   # capture inside session to avoid DetachedInstanceError
+            if db_json:
+                state = json.loads(db_json)
+                self._apply_state(state)
+                logger.info("[SwingService] State loaded from database.")
+                return
+        except Exception as exc:
+            logger.warning(f"[SwingService] DB state load failed, trying file: {exc}")
+
+        # Fallback: local file (ephemeral on Railway, useful for local dev)
         if not _STATE_FILE.exists():
             return
         try:
             state = json.loads(_STATE_FILE.read_text())
-            positions = state.get("positions", {})
-            if isinstance(positions, dict):
-                self._swing_positions = positions
-                if positions:
-                    logger.info(
-                        f"[SwingService] Restored {len(positions)} swing position(s) from disk: "
-                        + ", ".join(positions.keys())
-                    )
-            ap = state.get("autopilot", {})
-            if ap.get("enabled") is not None:
-                self._autopilot_enabled           = bool(ap["enabled"])
-                self._autopilot_mode              = ap.get("mode", "paper")
-                self._autopilot_capital_per_trade = float(ap.get("capital_per_trade", 1000.0))
-                self._autopilot_max_trades        = int(ap.get("max_trades", 3))
-                if self._autopilot_enabled:
-                    logger.info(
-                        f"[SwingService] Restored autopilot: enabled={self._autopilot_enabled}, "
-                        f"mode={self._autopilot_mode}, ₹{self._autopilot_capital_per_trade:.0f} "
-                        f"× {self._autopilot_max_trades} trades"
-                    )
+            self._apply_state(state)
+            logger.info("[SwingService] State loaded from file (migrating to DB on next save).")
         except Exception as exc:
             logger.warning(f"[SwingService] Could not load saved state: {exc}")
 
