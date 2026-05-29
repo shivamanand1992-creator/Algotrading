@@ -209,6 +209,35 @@ class LiveFeed:
             self._callback = callback
         logger.info("Tick callback registered.")
 
+    def add_symbols(self, symbols: List[Dict]) -> None:
+        """
+        Dynamically subscribe to additional instruments after the feed is running.
+        Also appends to _initial_symbols so they are re-subscribed on reconnect.
+        """
+        if not symbols:
+            return
+        # Keep initial_symbols in sync for reconnect
+        existing_tokens = {s["token"] for s in self._initial_symbols}
+        for s in symbols:
+            if s["token"] not in existing_tokens:
+                self._initial_symbols.append(s)
+
+        with self._ws_lock:
+            if self._ws is None or not self._connected.is_set():
+                logger.info(
+                    "add_symbols: feed not connected yet — tokens queued for next connect."
+                )
+                return
+            try:
+                v2_tokens = [
+                    {"exchangeType": s["exchange_type"], "tokens": [s["token"]]}
+                    for s in symbols
+                ]
+                self._ws.subscribe("livefeed", 2, v2_tokens)
+                logger.info(f"[LiveFeed] Subscribed to {len(symbols)} new token(s).")
+            except Exception as exc:
+                logger.error(f"[LiveFeed] add_symbols subscription failed: {exc}")
+
     def unsubscribe(self, symbols: List[Dict]) -> None:
         """
         Unsubscribe a list of symbols from the live feed.

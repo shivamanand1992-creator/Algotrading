@@ -159,6 +159,81 @@ async def _swing_monitor_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Real-time intraday SL / target monitor — checks every 10s, 09:15–15:30 IST
+# ---------------------------------------------------------------------------
+
+async def _swing_intraday_sl_loop() -> None:
+    """
+    Every 10 seconds during market hours, check open swing positions against
+    their stop-loss and targets using live WebSocket ticks (with REST fallback).
+    Creates one LiveFeed per trading day; tears it down after market close.
+    """
+    _live_feed = None
+    _feed_attached = False
+    last_reset_date = None
+
+    while True:
+        try:
+            now_ist    = datetime.now(_IST)
+            is_weekday = now_ist.weekday() < 5
+            hm         = (now_ist.hour, now_ist.minute)
+            in_hours   = (9, 15) <= hm <= (15, 30)
+
+            if is_weekday and in_hours:
+                from backend.api.routes.stocks import _get_svc
+                from backend.dependencies import get_angel_client
+                svc = _get_svc()
+
+                # Reset daily "already triggered" guard at market open
+                today = now_ist.date()
+                if last_reset_date != today:
+                    svc._sl_triggered.clear()
+                    last_reset_date = today
+
+                if svc._swing_positions:
+                    angel_client = get_angel_client()
+
+                    # Create & start live feed once per day
+                    if _live_feed is None and angel_client is not None:
+                        try:
+                            from data.live_feed import LiveFeed
+                            _live_feed    = LiveFeed(angel_client, symbols=[])
+                            _live_feed.start()
+                            _feed_attached = False
+                            logger.info("[SLLoop] LiveFeed started — real-time SL monitoring active.")
+                        except Exception as exc:
+                            logger.warning(f"[SLLoop] LiveFeed creation failed: {exc}")
+
+                    if _live_feed is not None:
+                        if not _feed_attached:
+                            await svc.attach_live_feed(_live_feed)
+                            _feed_attached = True
+                        else:
+                            # Subscribe any positions opened since last cycle
+                            await svc._subscribe_open_positions()
+
+                        triggered = await svc.check_sl_realtime()
+                        if triggered:
+                            logger.info(f"[SLLoop] Intraday exits triggered: {triggered}")
+
+            else:
+                # Outside market hours — stop feed, free resources
+                if _live_feed is not None:
+                    try:
+                        _live_feed.stop()
+                        logger.info("[SLLoop] LiveFeed stopped (outside market hours).")
+                    except Exception:
+                        pass
+                    _live_feed     = None
+                    _feed_attached = False
+
+        except Exception as exc:
+            logger.error(f"_swing_intraday_sl_loop error: {exc}")
+
+        await asyncio.sleep(10)
+
+
+# ---------------------------------------------------------------------------
 # Morning auto-retrain — runs at 08:30 IST every weekday
 # ---------------------------------------------------------------------------
 
@@ -244,6 +319,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
+    asyncio.create_task(_swing_intraday_sl_loop())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
     yield

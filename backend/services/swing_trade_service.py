@@ -71,6 +71,12 @@ class SwingTradeService:
         self._load_state()
         self._load_ledger()
 
+        # Real-time intraday SL monitoring via Angel One WebSocket
+        self._live_feed = None
+        self._realtime_ltps: Dict[str, float] = {}   # token → live LTP
+        self._token_to_symbol: Dict[str, str] = {}   # token → symbol
+        self._sl_triggered: set = set()              # symbols with exits already placed today
+
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
@@ -766,6 +772,124 @@ class SwingTradeService:
         except Exception as exc:
             logger.error(f"[SwingService] On-demand signal fetch failed for {sym_upper}: {exc}")
             return None
+
+    # ------------------------------------------------------------------
+    # Real-time intraday SL monitoring
+    # ------------------------------------------------------------------
+
+    async def attach_live_feed(self, feed) -> None:
+        """Wire up a LiveFeed instance for real-time tick updates."""
+        self._live_feed = feed
+        feed.subscribe(self._on_swing_tick)
+        await self._subscribe_open_positions()
+        logger.info("[SwingService] Live feed attached for intraday SL monitoring.")
+
+    def _on_swing_tick(self, tick: dict) -> None:
+        """Callback invoked by LiveFeed on every incoming tick (runs in WS thread)."""
+        token = str(tick.get("token", ""))
+        ltp   = float(tick.get("ltp", 0) or 0)
+        if token and ltp > 0:
+            self._realtime_ltps[token] = ltp
+
+    async def _subscribe_open_positions(self) -> None:
+        """Subscribe all open swing positions to the live feed."""
+        if self._live_feed is None:
+            return
+        to_subscribe = []
+        for symbol, pos in list(self._swing_positions.items()):
+            token = pos.get("token") or await self._resolve_token(symbol)
+            if token and token != "0":
+                pos["token"] = token
+                self._token_to_symbol[token] = symbol
+                to_subscribe.append({"exchange_type": 1, "token": token})  # 1 = NSE CM
+        if to_subscribe:
+            self._live_feed.add_symbols(to_subscribe)
+            logger.info(f"[SwingService] Subscribed {len(to_subscribe)} position token(s) to live feed.")
+
+    async def check_sl_realtime(self) -> List[str]:
+        """
+        Check all open positions against SL / targets using live WebSocket LTP.
+        Falls back to REST get_ltp() if WebSocket data is absent.
+        Returns list of symbols where an exit was triggered.
+        """
+        triggered: List[str] = []
+
+        for symbol, pos in list(self._swing_positions.items()):
+            if symbol in self._sl_triggered:
+                continue
+
+            token = pos.get("token", "")
+            ltp   = self._realtime_ltps.get(token, 0.0)
+
+            # REST fallback when WebSocket hasn't delivered a tick yet
+            if ltp <= 0 and self.angel_client and token:
+                try:
+                    loop  = asyncio.get_event_loop()
+                    eq_sym = f"{symbol}-EQ"
+                    ltp = await loop.run_in_executor(
+                        None,
+                        lambda s=eq_sym, t=token: self.angel_client.get_ltp("NSE", s, t)
+                    ) or 0.0
+                except Exception:
+                    pass
+
+            if ltp <= 0:
+                continue
+
+            # Update live P&L
+            entry = pos["entry_price"]
+            qty   = pos["qty"]
+            pos["current_price"]  = round(ltp, 2)
+            pos["unrealized_pnl"] = round((ltp - entry) * qty, 2)
+            pos["pnl_pct"]        = round((ltp - entry) / entry * 100, 2) if entry > 0 else 0.0
+
+            sl       = pos["stop_loss"]
+            t1       = pos["target1"]
+            t2       = pos["target2"]
+            trailing = pos.get("trailing_active", False)
+
+            def _exit(reason: str, exit_px: float) -> None:
+                pnl = round((exit_px - entry) * qty, 2)
+                logger.warning(
+                    f"[RealtimeSL] {symbol} {reason} — "
+                    f"LTP=₹{ltp:.2f} | exit≈₹{exit_px:.2f} | P&L=₹{pnl:.2f}"
+                )
+                pos["status"]       = "closed_target" if "TARGET" in reason else "closed_sl"
+                pos["exit_price"]   = round(exit_px, 2)
+                pos["realized_pnl"] = pnl
+                self._sl_triggered.add(symbol)
+                triggered.append(symbol)
+
+            if ltp <= sl:
+                _exit("TRAILING_SL HIT" if trailing else "SL HIT", ltp)
+            elif ltp >= t2:
+                _exit("TARGET2 HIT 🎯", t2)
+            elif not trailing and ltp >= t1:
+                pos["stop_loss"]       = entry   # trail SL to breakeven
+                pos["trailing_active"] = True
+                logger.info(
+                    f"[RealtimeSL] {symbol} TARGET1 HIT ✓ — "
+                    f"LTP=₹{ltp:.2f} ≥ T1=₹{t1:.2f} — trailing SL → ₹{entry:.2f} (breakeven)"
+                )
+                self._save_state()
+                continue
+
+            if symbol in self._sl_triggered:
+                # Place live exit order if applicable
+                if pos.get("mode") == "live" and self.angel_client:
+                    await self._place_exit_order(pos)
+                # Remove from active positions
+                self._swing_positions.pop(symbol, None)
+                # Unsubscribe token from live feed
+                if self._live_feed and token:
+                    try:
+                        self._live_feed.unsubscribe([{"exchange_type": 1, "token": token}])
+                    except Exception:
+                        pass
+                self._token_to_symbol.pop(token, None)
+                self._save_state()
+
+        return triggered
 
     def _open_paper_position(self, sig: StockSignal, qty: int) -> str:
         """Record a paper swing position in memory."""
