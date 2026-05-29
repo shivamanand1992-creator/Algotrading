@@ -294,6 +294,17 @@ export function StocksView() {
     } catch { showToast('Failed to close position'); }
   };
 
+  const handleSyncFromBroker = async () => {
+    try {
+      showToast('Syncing holdings from Angel One…');
+      const res = await stocksApi.syncFromBroker();
+      showToast(res.data?.message || 'Sync complete');
+      await fetchPositions();
+    } catch {
+      showToast('Sync failed — check broker connection');
+    }
+  };
+
   const formatPrice = (v: number) => `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatScanTime = (iso: string) => {
     try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
@@ -660,9 +671,32 @@ export function StocksView() {
         <div className="glass-panel p-4 border border-red-500/40 text-red-400 text-sm">{error}</div>
       )}
 
+      {/* ── Sync from Broker (always visible when no positions or as recovery tool) ── */}
+      {positions.length === 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSyncFromBroker}
+            className="text-xs px-4 py-2 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
+            title="Import positions from Angel One demat holdings (use after server restart)"
+          >
+            ⟳ Sync Positions from Broker
+          </button>
+        </div>
+      )}
+
       {/* ── Open Swing Positions ── */}
       {positions.length > 0 && (
-        <Card title={`Open Swing Positions (${positions.length})`}>
+        <Card title={`Open Swing Positions (${positions.length})`}
+          headerAction={
+            <button
+              onClick={handleSyncFromBroker}
+              className="text-xs px-3 py-1 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
+              title="Import missing positions from Angel One demat holdings"
+            >
+              ⟳ Sync from Broker
+            </button>
+          }
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>

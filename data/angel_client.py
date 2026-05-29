@@ -238,6 +238,15 @@ class AngelOneClient:
         return resp.get("data", []) or []
 
     @_retry(max_attempts=3)
+    def get_holdings(self) -> list[dict]:
+        """Return demat holdings (CNC delivery positions held overnight)."""
+        self._ensure_connected()
+        logger.debug("Fetching holdings.")
+        resp = self._smart.holding()
+        _assert_ok(resp, "holding")
+        return resp.get("data", []) or []
+
+    @_retry(max_attempts=3)
     def get_orders(self) -> list[dict]:
         """Return today's order book."""
         self._ensure_connected()

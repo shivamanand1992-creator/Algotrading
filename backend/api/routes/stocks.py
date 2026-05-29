@@ -232,6 +232,30 @@ async def auto_execute(
     }
 
 
+@router.post("/sync-from-broker")
+async def sync_from_broker(svc: SwingTradeService = Depends(_get_svc)):
+    """
+    Fetch actual CNC holdings from Angel One and reconcile with local swing position state.
+    Use after a server restart that lost in-memory positions, or to detect external sells.
+    """
+    if DEMO_MODE:
+        return {"imported": [], "updated": [], "orphaned": [], "total_broker_holdings": 0,
+                "message": "Demo mode — no broker to sync from"}
+    result = await svc.sync_from_broker()
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    msg_parts = []
+    if result["imported"]:
+        msg_parts.append(f"Imported: {', '.join(result['imported'])}")
+    if result["updated"]:
+        msg_parts.append(f"Updated qty: {', '.join(result['updated'])}")
+    if result["orphaned"]:
+        msg_parts.append(f"Orphaned (not on broker): {', '.join(result['orphaned'])}")
+    if not msg_parts:
+        msg_parts.append("Already in sync — no changes needed")
+    return {**result, "message": " | ".join(msg_parts)}
+
+
 @router.delete("/positions/{symbol}")
 async def close_position(symbol: str, svc: SwingTradeService = Depends(_get_svc)):
     """Manually close an open swing position."""

@@ -139,4 +139,8 @@ export const stocksApi = {
   setAutopilot: (cfg: { enabled: boolean; mode: string; capital_per_trade: number; max_trades: number }) =>
     api.post('/api/stocks/autopilot', cfg),
   runAutopilotNow: () => api.post('/api/stocks/autopilot/run-now', {}, { timeout: 120000 }),
+  syncFromBroker: () => api.post<{
+    imported: string[]; updated: string[]; orphaned: string[];
+    total_broker_holdings: number; message: string;
+  }>('/api/stocks/sync-from-broker', {}),
 };

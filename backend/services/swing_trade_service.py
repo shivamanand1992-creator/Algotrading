@@ -345,6 +345,122 @@ class SwingTradeService:
     def get_positions(self) -> List[dict]:
         return list(self._swing_positions.values())
 
+    async def sync_from_broker(self) -> dict:
+        """
+        Fetch actual CNC holdings from Angel One and reconcile with local state.
+        - Holdings NOT in local state → imported (added)
+        - Holdings already in local state → qty updated to match broker
+        - Local state entries NOT found in broker holdings → flagged as orphaned
+        Returns a summary dict for the API response.
+        """
+        if self.angel_client is None:
+            return {"error": "Broker not connected"}
+
+        from data.nifty50_universe import NIFTY100_UNIVERSE
+        universe_symbols = {s["symbol"]: s for s in NIFTY100_UNIVERSE}
+
+        loop = asyncio.get_event_loop()
+        try:
+            holdings = await loop.run_in_executor(None, self.angel_client.get_holdings)
+        except Exception as exc:
+            logger.error(f"[SwingSync] get_holdings failed: {exc}")
+            return {"error": str(exc)}
+
+        imported, updated, orphaned = [], [], []
+
+        for h in (holdings or []):
+            # Angel One holding fields: tradingsymbol, quantity, averageprice, ltp, …
+            raw_sym = h.get("tradingsymbol", "")
+            # Strip "-EQ" suffix if present
+            symbol = raw_sym.replace("-EQ", "").upper()
+            qty    = int(h.get("quantity", 0) or 0)
+            avg_px = float(h.get("averageprice", 0) or 0)
+            ltp    = float(h.get("ltp", avg_px) or avg_px)
+
+            if qty <= 0 or symbol not in universe_symbols:
+                continue  # skip non-Nifty holdings or zero-qty
+
+            stock_info = universe_symbols[symbol]
+
+            if symbol in self._swing_positions:
+                existing = self._swing_positions[symbol]
+                if existing["qty"] != qty:
+                    logger.info(
+                        f"[SwingSync] {symbol}: broker qty={qty}, local qty={existing['qty']} — updating"
+                    )
+                    existing["qty"] = qty
+                    existing["entry_price"] = round(avg_px, 2)
+                    existing["current_price"] = round(ltp, 2)
+                    existing["unrealized_pnl"] = round((ltp - avg_px) * qty, 2)
+                    existing["pnl_pct"] = round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0
+                    updated.append(symbol)
+            else:
+                # Compute ATR-based SL/target via on-demand signal or fallback
+                sig = await self._fetch_signal_on_demand(symbol)
+                if sig:
+                    sl = sig.stop_loss
+                    t1 = sig.target1
+                    t2 = sig.target2
+                else:
+                    risk = avg_px * 0.03  # fallback: 3% SL
+                    sl = round(avg_px - risk, 2)
+                    t1 = round(avg_px + 2 * risk, 2)
+                    t2 = round(avg_px + 3 * risk, 2)
+
+                pos_id = h.get("authorisedquantity") or f"BROKER-{symbol}"
+                self._swing_positions[symbol] = {
+                    "order_id":       str(pos_id),
+                    "symbol":         symbol,
+                    "name":           stock_info["name"],
+                    "sector":         stock_info.get("sector", ""),
+                    "yf_ticker":      stock_info["yf"],
+                    "entry_price":    round(avg_px, 2),
+                    "current_price":  round(ltp, 2),
+                    "qty":            qty,
+                    "stop_loss":      sl,
+                    "target1":        t1,
+                    "target2":        t2,
+                    "entry_date":     datetime.now(_IST).strftime("%Y-%m-%d"),
+                    "unrealized_pnl": round((ltp - avg_px) * qty, 2),
+                    "pnl_pct":        round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0,
+                    "status":         "open",
+                    "mode":           "live",
+                    "confidence":     0.5,
+                    "regime":         "imported",
+                }
+                logger.info(
+                    f"[SwingSync] Imported broker holding: {symbol} qty={qty} avg=₹{avg_px:.2f}"
+                )
+                imported.append(symbol)
+
+        # Check for local positions not found in broker holdings
+        broker_symbols = {
+            h.get("tradingsymbol", "").replace("-EQ", "").upper()
+            for h in (holdings or [])
+            if int(h.get("quantity", 0) or 0) > 0
+        }
+        for symbol in list(self._swing_positions.keys()):
+            pos = self._swing_positions[symbol]
+            if pos.get("mode") == "live" and symbol not in broker_symbols:
+                orphaned.append(symbol)
+                logger.warning(
+                    f"[SwingSync] {symbol} is in local state as 'live' but NOT found "
+                    f"in broker holdings — may have been sold externally."
+                )
+
+        if imported or updated:
+            self._save_state()
+
+        return {
+            "imported":  imported,
+            "updated":   updated,
+            "orphaned":  orphaned,
+            "total_broker_holdings": len([
+                h for h in (holdings or [])
+                if int(h.get("quantity", 0) or 0) > 0
+            ]),
+        }
+
     async def refresh_position_prices(self) -> None:
         """
         Fetch live LTP for every open swing position and update current_price / P&L.
