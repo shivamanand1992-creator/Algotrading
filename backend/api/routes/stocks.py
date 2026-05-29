@@ -260,6 +260,17 @@ async def sync_from_broker(svc: SwingTradeService = Depends(_get_svc)):
     return {**result, "message": " | ".join(msg_parts)}
 
 
+@router.delete("/positions")
+async def close_all_positions(svc: SwingTradeService = Depends(_get_svc)):
+    """Close ALL tracked swing positions (use after manually closing in Angel One)."""
+    if DEMO_MODE:
+        return {"success": True, "closed": [], "message": "Demo mode"}
+    symbols = [p["symbol"] for p in svc.get_positions()]
+    for sym in symbols:
+        svc.close_position(sym, reason="manual_close_all")
+    return {"success": True, "closed": symbols, "message": f"Cleared {len(symbols)} position(s) from tracker"}
+
+
 @router.delete("/positions/{symbol}")
 async def close_position(symbol: str, svc: SwingTradeService = Depends(_get_svc)):
     """Manually close an open swing position."""

@@ -279,6 +279,15 @@ export function StocksView() {
     } catch { showToast('Failed to close position'); }
   };
 
+  const handleCloseAll = async () => {
+    if (!window.confirm('Remove ALL swing positions from the tracker?\n\nThis only clears the system state — make sure you have already closed them in Angel One.')) return;
+    try {
+      const res = await stocksApi.closeAllPositions();
+      showToast((res.data as any).message ?? 'All positions cleared');
+      await fetchPositions();
+    } catch { showToast('Failed to clear positions'); }
+  };
+
   const handleSyncFromBroker = async () => {
     try {
       showToast('Syncing holdings from Angel One…');
@@ -530,13 +539,22 @@ export function StocksView() {
         <Card
           title={`Open Positions (${positions.length})`}
           headerAction={
-            <button
-              onClick={handleSyncFromBroker}
-              className="text-xs px-3 py-1 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
-              title="Import missing positions from Angel One demat holdings"
-            >
-              ⟳ Sync from Broker
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSyncFromBroker}
+                className="text-xs px-3 py-1 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
+                title="Import missing positions from Angel One demat holdings"
+              >
+                ⟳ Sync from Broker
+              </button>
+              <button
+                onClick={handleCloseAll}
+                className="text-xs px-3 py-1 border border-red-500/40 text-red-400 rounded hover:bg-red-500/10 transition-colors"
+                title="Clear all positions from tracker (use after manually closing in Angel One)"
+              >
+                ✕ Close All
+              </button>
+            </div>
           }
         >
           <div className="overflow-x-auto">
