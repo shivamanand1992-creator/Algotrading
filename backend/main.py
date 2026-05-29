@@ -87,7 +87,10 @@ async def _eod_squareoff_loop() -> None:
 # ---------------------------------------------------------------------------
 
 async def _swing_autopilot_loop() -> None:
-    """Daily 15:35 IST: run scan and auto-execute top N signals if autopilot is enabled."""
+    """
+    Daily 09:20 IST: scan Nifty50 (using prev-day EOD data) then immediately
+    place buy orders — market has been open for 5 minutes so orders execute.
+    """
     last_autopilot_date: _date | None = None
 
     while True:
@@ -96,7 +99,7 @@ async def _swing_autopilot_loop() -> None:
             today   = now_ist.date()
 
             is_weekday     = today.weekday() < 5
-            past_cutoff    = (now_ist.hour, now_ist.minute) >= (15, 35)
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (9, 20)
             not_done_today = last_autopilot_date != today
 
             if is_weekday and past_cutoff and not_done_today:
@@ -105,14 +108,14 @@ async def _swing_autopilot_loop() -> None:
                     from backend.api.routes.stocks import _get_svc
                     svc = _get_svc()
                     if svc._autopilot_enabled:
-                        logger.info("15:35 IST — Swing autopilot triggered.")
+                        logger.info("09:20 IST — Swing autopilot triggered (scan + execute).")
                         result = await svc.run_autopilot()
                         logger.info(
                             f"[SwingAutopilot] {result.get('executed_count', 0)} trades executed "
                             f"from {result.get('signals_found', 0)} signals."
                         )
                     else:
-                        logger.debug("15:35 IST — Swing autopilot disabled, skipping.")
+                        logger.debug("09:20 IST — Swing autopilot disabled, skipping.")
                 except Exception as exc:
                     logger.error(f"Swing autopilot error: {exc}")
 
@@ -123,11 +126,11 @@ async def _swing_autopilot_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Swing position monitor — runs at 16:00 IST every weekday after market close
+# Swing position monitor — runs at 15:20 IST (market still open — can exit)
 # ---------------------------------------------------------------------------
 
 async def _swing_monitor_loop() -> None:
-    """Update MTM prices and check SL/target for open swing positions daily."""
+    """Check intraday SL/target for open swing positions and exit before close."""
     last_monitor_date: _date | None = None
 
     while True:
@@ -136,12 +139,12 @@ async def _swing_monitor_loop() -> None:
             today   = now_ist.date()
 
             is_weekday     = today.weekday() < 5
-            past_cutoff    = (now_ist.hour, now_ist.minute) >= (16, 0)
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (15, 20)
             not_done_today = last_monitor_date != today
 
             if is_weekday and past_cutoff and not_done_today:
                 last_monitor_date = today
-                logger.info("16:00 IST — swing position monitor triggered.")
+                logger.info("15:20 IST — swing position monitor triggered (market still open).")
                 try:
                     from backend.api.routes.stocks import _get_svc
                     svc = _get_svc()

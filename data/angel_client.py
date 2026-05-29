@@ -267,11 +267,27 @@ class AngelOneClient:
         """
         self._ensure_connected()
         logger.debug(f"get_ltp: {exchange}:{symbol} token={token}")
-        resp = self._smart.ltpData(exchange, symbol, token)
+        # Bypass self._smart.ltpData() — the SDK catches exceptions internally and
+        # returns them as objects, and also sometimes returns data as a raw string.
+        # Use _postRequest directly for full control over the response.
+        params = {"exchange": exchange, "tradingsymbol": symbol, "symboltoken": token}
+        resp = self._smart._postRequest("api.ltp.data", params)
+        if not isinstance(resp, dict):
+            raise RuntimeError(
+                f"ltpData: response is {type(resp).__name__}: {str(resp)[:80]}"
+            )
         _assert_ok(resp, "ltpData")
-        ltp = resp.get("data", {}).get("ltp", 0.0)
+        data = resp.get("data")
+        if isinstance(data, dict):
+            ltp = float(data.get("ltp", 0.0))
+        elif isinstance(data, (int, float)):
+            ltp = float(data)
+        else:
+            raise RuntimeError(
+                f"ltpData: data is {type(data).__name__}: {str(data)[:80]}"
+            )
         logger.debug(f"LTP [{symbol}] = {ltp}")
-        return float(ltp)
+        return ltp
 
     def search_scrip(self, exchange: str, symbol: str) -> Optional[str]:
         """
@@ -288,30 +304,63 @@ class AngelOneClient:
         """
         if self._smart is None:
             return None
+
+        eq_symbol = f"{symbol.upper()}-EQ"
+        exact     = symbol.upper()
+
+        def _extract_token(result) -> Optional[str]:
+            """Pick best token from a searchScrip response dict."""
+            if not isinstance(result, dict):
+                return None
+            if not result.get("status"):
+                return None
+            best: Optional[str] = None
+            for item in result.get("data") or []:
+                ts  = str(item.get("tradingsymbol", "")).upper()
+                # Angel One returns "symboltoken" for NSE equities (not "token")
+                tok = item.get("symboltoken") or item.get("token")
+                if not tok:
+                    continue
+                tok = str(tok)
+                if ts == eq_symbol:
+                    return tok                        # exact -EQ hit: stop immediately
+                if ts == exact and best is None:
+                    best = tok
+                if best is None and ts.startswith(exact):
+                    best = tok                        # e.g. "YESBANK-EQ" found via prefix
+            return best
+
         try:
-            result = self._smart.searchScrip(exchange, symbol)
-            if result and result.get("status"):
-                # NSE cash equity trading symbols are "SYMBOL-EQ"; match that first,
-                # then fall back to exact match for any other exchange formats.
-                eq_symbol = f"{symbol.upper()}-EQ"
-                exact     = symbol.upper()
-                token = None
-                for item in result.get("data", []):
-                    ts = str(item.get("tradingsymbol", "")).upper()
-                    # Angel One returns "symboltoken" (not "token") for equity scrips
-                    tok = item.get("symboltoken") or item.get("token")
-                    if not tok:
-                        continue
-                    if ts == eq_symbol:
-                        token = str(tok)
-                        break
-                    if ts == exact and token is None:
-                        token = str(tok)
-                if token:
-                    logger.debug(f"searchScrip: {symbol} → token={token}")
-                    return token
+            # First pass: search by the raw symbol (e.g. "YESBANK")
+            r1 = self._smart.searchScrip(exchange, symbol)
+            if not isinstance(r1, dict):
+                # SDK returned an exception object — log and move on
+                logger.debug(
+                    f"searchScrip({exchange}, {symbol}): SDK returned "
+                    f"{type(r1).__name__}: {str(r1)[:80]}"
+                )
+                r1 = None
+            token = _extract_token(r1)
+            if token:
+                logger.debug(f"searchScrip: {symbol} → token={token}")
+                return token
+
+            # Second pass: search by the -EQ trading symbol directly
+            r2 = self._smart.searchScrip(exchange, eq_symbol)
+            if not isinstance(r2, dict):
+                r2 = None
+            token = _extract_token(r2)
+            if token:
+                logger.debug(f"searchScrip (-EQ fallback): {symbol} → token={token}")
+                return token
+
+            logger.warning(
+                f"searchScrip: no token found for {symbol} on {exchange} — "
+                f"r1_status={r1.get('status') if r1 else 'N/A'}, "
+                f"r1_data_len={len((r1 or {}).get('data') or [])}"
+            )
         except Exception as exc:
-            logger.warning(f"searchScrip({exchange}, {symbol}) failed: {exc}")
+            logger.warning(f"searchScrip({exchange}, {symbol}) exception: {exc}")
         return None
 
     @_retry(max_attempts=3)

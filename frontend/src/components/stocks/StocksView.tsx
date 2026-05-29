@@ -211,7 +211,7 @@ export function StocksView() {
       });
       const cfg = (res.data as any).config ?? {};
       setAutopilotEnabled(cfg.enabled ?? autopilotEnabled);
-      showToast(cfg.enabled ? '🤖 Autopilot ON — will trade daily at 15:35 IST' : 'Autopilot disabled');
+      showToast(cfg.enabled ? '🤖 Autopilot ON — will trade daily at 09:20 IST' : 'Autopilot disabled');
     } catch { showToast('Failed to save autopilot settings'); }
     finally { setAutopilotSaving(false); }
   };
@@ -519,7 +519,7 @@ export function StocksView() {
             </button>
             {autopilotEnabled && (
               <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(0,230,118,0.12)', color: '#00e676' }}>
-                Active — scans daily at 15:35 IST
+                Active — scans daily at 09:20 IST
               </span>
             )}
           </div>
@@ -632,7 +632,7 @@ export function StocksView() {
         )}
 
         <p className="mt-2 text-xs text-jarvis-text-secondary">
-          Scans Nifty50, picks top {autopilotMaxTrades} BUY signal{autopilotMaxTrades !== 1 ? 's' : ''} by confidence · Allocates ₹{autopilotCapital.toLocaleString()} per trade · Exits automatically on SL or Target2 hit at EOD.
+          Buys at 09:20 IST (market open) · Checks SL/Target at 15:20 IST (10 min before close) · Allocates ₹{autopilotCapital.toLocaleString()} per trade · {autopilotMaxTrades} stock{autopilotMaxTrades !== 1 ? 's' : ''} max.
         </p>
       </div>
 

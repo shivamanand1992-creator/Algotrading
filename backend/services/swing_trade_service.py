@@ -200,7 +200,7 @@ class SwingTradeService:
     async def run_autopilot(self) -> dict:
         """
         Scan + auto-execute top N signals with fixed per-trade capital.
-        Called daily at 15:35 IST by the scheduler (or manually via API).
+        Called daily at 09:20 IST by the scheduler (or manually via API).
         """
         if not self._autopilot_enabled:
             return {"skipped": True, "reason": "autopilot disabled"}
@@ -288,20 +288,33 @@ class SwingTradeService:
 
         for symbol, pos in self._swing_positions.items():
             try:
-                ticker  = pos.get("yf_ticker", symbol + ".NS")
-                df_day  = yf.download(ticker, period="2d", interval="1d",
-                                      progress=False, auto_adjust=True)
-                if df_day is None or df_day.empty:
-                    continue
+                ticker = pos.get("yf_ticker", symbol + ".NS")
 
-                if isinstance(df_day.columns, pd.MultiIndex):
-                    df_day.columns = df_day.columns.get_level_values(0)
-                df_day.columns = [c.lower() for c in df_day.columns]
+                # Use 5-min intraday bars to get accurate today's high/low
+                # (called at 15:20 IST while market is still open)
+                df_intra = yf.download(ticker, period="1d", interval="5m",
+                                       progress=False, auto_adjust=True)
 
-                today_row  = df_day.iloc[-1]
-                today_low  = float(today_row.get("low",   pos["entry_price"]))
-                today_high = float(today_row.get("high",  pos["entry_price"]))
-                today_close= float(today_row.get("close", pos["entry_price"]))
+                if df_intra is not None and not df_intra.empty:
+                    if isinstance(df_intra.columns, pd.MultiIndex):
+                        df_intra.columns = df_intra.columns.get_level_values(0)
+                    df_intra.columns = [c.lower() for c in df_intra.columns]
+                    today_high  = float(df_intra["high"].max())
+                    today_low   = float(df_intra["low"].min())
+                    today_close = float(df_intra["close"].iloc[-1])
+                else:
+                    # Fallback to daily candle if intraday unavailable
+                    df_day = yf.download(ticker, period="2d", interval="1d",
+                                         progress=False, auto_adjust=True)
+                    if df_day is None or df_day.empty:
+                        continue
+                    if isinstance(df_day.columns, pd.MultiIndex):
+                        df_day.columns = df_day.columns.get_level_values(0)
+                    df_day.columns = [c.lower() for c in df_day.columns]
+                    row = df_day.iloc[-1]
+                    today_high  = float(row.get("high",  pos["entry_price"]))
+                    today_low   = float(row.get("low",   pos["entry_price"]))
+                    today_close = float(row.get("close", pos["entry_price"]))
 
                 pos["current_price"]  = today_close
                 pos["unrealized_pnl"] = (today_close - pos["entry_price"]) * pos["qty"]
