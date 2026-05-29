@@ -81,7 +81,8 @@ async def get_portfolio_summary(service: PositionService = Depends(get_position_
             total_pnl=262.5, total_pnl_percentage=0.05,
             open_positions_count=2, daily_pnl=262.5, daily_pnl_percentage=0.05
         )
-    summary = await service.get_portfolio_summary()
+    from backend.dependencies import get_angel_client
+    summary = await service.get_portfolio_summary(angel_client=get_angel_client())
 
     # Merge in swing positions so dashboard shows combined P&L and position count
     try:

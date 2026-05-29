@@ -104,15 +104,34 @@ class PositionService:
                 return True
         return False
 
-    async def get_portfolio_summary(self) -> PortfolioSummary:
-        total_capital = float(self.config.get('capital', 500000))
-        positions     = await self.get_all_positions()
+    async def get_portfolio_summary(self, angel_client=None) -> PortfolioSummary:
+        import asyncio
+        positions = await self.get_all_positions()
 
         total_unrealized = sum(p.unrealized_pnl for p in positions)
         used_capital     = sum(p.entry_price * p.qty for p in positions)
-        available        = total_capital - used_capital
 
-        total_pnl_pct  = (total_unrealized / total_capital * 100) if total_capital > 0 else 0.0
+        # Use real broker balance when available; fall back to config
+        total_capital = float(self.config.get('capital', 500000))
+        available     = total_capital - used_capital
+
+        if angel_client is not None:
+            try:
+                loop  = asyncio.get_event_loop()
+                funds = await loop.run_in_executor(None, angel_client.get_funds)
+                net   = float(
+                    funds.get("availablecash")
+                    or funds.get("net")
+                    or funds.get("availablebalance")
+                    or 0
+                )
+                if net > 0:
+                    total_capital = net + used_capital   # net = cash still free; total = free + deployed
+                    available     = net
+            except Exception:
+                pass  # keep config fallback silently
+
+        total_pnl_pct = (total_unrealized / total_capital * 100) if total_capital > 0 else 0.0
 
         return PortfolioSummary(
             total_capital        = total_capital,
