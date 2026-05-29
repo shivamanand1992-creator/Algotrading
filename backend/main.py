@@ -236,6 +236,7 @@ async def lifespan(app: FastAPI):
     print("Starting FastAPI backend...")
     from backend.api.routes.positions import get_position_service
     from backend.api.routes.market_data import get_market_service
+    from backend.api.routes.strategies import get_strategy_service
     asyncio.create_task(
         ws_manager.start_periodic_updates(get_position_service(), get_market_service())
     )
@@ -243,6 +244,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
+    # Restore strategies that were running before any restart/redeploy
+    await get_strategy_service().restore_running_strategies()
     yield
     print("Shutting down FastAPI backend...")
     cleanup_dependencies()

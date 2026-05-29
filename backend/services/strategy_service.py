@@ -1,10 +1,13 @@
 import sys
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 from loguru import logger
+
+_STRAT_STATE_FILE = Path(__file__).parent.parent.parent / "logs" / "strategy_state.json"
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -248,6 +251,39 @@ class StrategyService:
         self.running_strategies: Dict[str, dict] = {}
 
     # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _save_state(self) -> None:
+        """Write which strategies are running (and their mode) to disk."""
+        try:
+            _STRAT_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            state = {
+                name: {"mode": info["mode"]}
+                for name, info in self.running_strategies.items()
+            }
+            _STRAT_STATE_FILE.write_text(json.dumps(state, indent=2))
+        except Exception as exc:
+            logger.warning(f"[StrategyService] Could not save state: {exc}")
+
+    async def restore_running_strategies(self) -> None:
+        """On server startup, re-launch any strategies that were running before the restart."""
+        if not _STRAT_STATE_FILE.exists():
+            return
+        try:
+            state = json.loads(_STRAT_STATE_FILE.read_text())
+        except Exception as exc:
+            logger.warning(f"[StrategyService] Could not load strategy state: {exc}")
+            return
+        for name, info in state.items():
+            mode = info.get("mode", "paper")
+            try:
+                await self.start_strategy(name, mode)
+                logger.info(f"[StrategyService] Restored strategy '{name}' in {mode} mode after restart.")
+            except Exception as exc:
+                logger.warning(f"[StrategyService] Could not restore '{name}': {exc}")
+
+    # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
@@ -304,6 +340,7 @@ class StrategyService:
         task.add_done_callback(lambda t: self._on_task_done(name, t))
 
         logger.info(f"Strategy '{name}' started in {mode} mode.")
+        self._save_state()
         return True
 
     async def stop_strategy(self, name: str) -> bool:
@@ -320,6 +357,7 @@ class StrategyService:
                 pass
 
         logger.info(f"Strategy '{name}' stopped.")
+        self._save_state()
         return True
 
     # ------------------------------------------------------------------
@@ -465,6 +503,7 @@ class StrategyService:
             logger.error(f"[{name}] Task ended with exception: {task.exception()}")
         # Clean up from running dict if still there
         self.running_strategies.pop(name, None)
+        self._save_state()
 
     # ------------------------------------------------------------------
     # Config & signals
