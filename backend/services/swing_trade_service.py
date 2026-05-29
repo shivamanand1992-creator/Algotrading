@@ -212,6 +212,26 @@ class SwingTradeService:
             f"₹{self._autopilot_capital_per_trade:.0f} × {self._autopilot_max_trades} trades"
         )
 
+        # Check how many slots are free before scanning
+        current_count = len(self._swing_positions)
+        slots_free = self._autopilot_max_trades - current_count
+        if slots_free <= 0:
+            logger.info(
+                f"[SwingAutopilot] Already holding {current_count}/{self._autopilot_max_trades} "
+                f"positions — no new trades today."
+            )
+            self._autopilot_last_run = datetime.now(_IST)
+            self._autopilot_last_result = {
+                "run_time":       self._autopilot_last_run.isoformat(),
+                "signals_found":  0,
+                "executed_count": 0,
+                "executed":       [],
+                "skipped_reason": f"Max positions reached ({current_count}/{self._autopilot_max_trades})",
+                "regime_warning": "",
+                "nifty_bullish":  True,
+            }
+            return self._autopilot_last_result
+
         signals, regime_info = await self.run_scan(
             universe="nifty50",
             filters={"regime_filter": True, "rs_filter": True},
@@ -219,7 +239,7 @@ class SwingTradeService:
 
         executed = []
         eligible = [s for s in signals if s.symbol not in self._swing_positions]
-        for sig in eligible[:self._autopilot_max_trades]:
+        for sig in eligible[:slots_free]:  # only fill empty slots, not always max_trades
             qty = self._calculate_qty_by_capital(sig.entry_price, self._autopilot_capital_per_trade)
             if qty <= 0:
                 continue
