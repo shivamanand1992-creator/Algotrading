@@ -36,8 +36,8 @@ function SectorChip({ sector }: { sector: string }) {
 }
 
 function ConfidenceBar({ value }: { value: number }) {
-  const pct  = Math.round(value * 100);
-  const col  = value >= 0.75 ? '#00e676' : value >= 0.60 ? '#ffd600' : '#ff6e40';
+  const pct = Math.round(value * 100);
+  const col = value >= 0.75 ? '#00e676' : value >= 0.60 ? '#ffd600' : '#ff6e40';
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -63,36 +63,6 @@ function PnLBadge({ value }: { value: number }) {
   );
 }
 
-// ── Confirmation modal ─────────────────────────────────────────────────────
-interface ConfirmModalProps {
-  title: string;
-  body: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-function ConfirmModal({ title, body, onConfirm, onCancel }: ConfirmModalProps) {
-  return (
-    <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 99999 }}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
-      <div className="glass-panel neon-border p-8 max-w-md w-full mx-4 relative" style={{ zIndex: 100000 }}>
-        <h3 className="text-lg font-bold text-jarvis-primary uppercase tracking-widest mb-3">{title}</h3>
-        <p className="text-jarvis-text-secondary text-sm mb-6">{body}</p>
-        <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 jarvis-button-outline text-center">Cancel</button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-lg font-bold uppercase tracking-wider text-sm"
-            style={{ background: 'rgba(0,229,255,0.15)', border: '1px solid rgba(0,229,255,0.5)', color: '#00e5ff' }}
-          >
-            Confirm
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Filter toggle button ───────────────────────────────────────────────────
 function FilterToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -115,50 +85,45 @@ function FilterToggle({ label, value, onChange }: { label: string; value: boolea
 
 // ── Main component ─────────────────────────────────────────────────────────
 export function StocksView() {
-  const [signals,       setSignals]       = useState<StockSignal[]>([]);
-  const [positions,     setPositions]     = useState<SwingPosition[]>([]);
-  const [scanning,      setScanning]      = useState(false);
-  const [scanTime,      setScanTime]      = useState<string | null>(null);
-  const [error,         setError]         = useState<string | null>(null);
-  const [execMode,      setExecMode]      = useState<'paper' | 'live'>('paper');
-  const [executing,     setExecuting]     = useState<string | null>(null);
-  const [confirm,       setConfirm]       = useState<{ symbol: string; auto?: boolean } | null>(null);
-  const [toast,         setToast]         = useState<string | null>(null);
-  // Filter state
+  const [signals,      setSignals]      = useState<StockSignal[]>([]);
+  const [positions,    setPositions]    = useState<SwingPosition[]>([]);
+  const [scanning,     setScanning]     = useState(false);
+  const [scanTime,     setScanTime]     = useState<string | null>(null);
+  const [error,        setError]        = useState<string | null>(null);
+  const [executing,    setExecuting]    = useState<string | null>(null);
+  const [confirmSym,   setConfirmSym]   = useState<string | null>(null);  // symbol or '__top__'
+  const [toast,        setToast]        = useState<string | null>(null);
+
+  // ── Unified settings (shared by manual execute AND autopilot) ──
+  const [execMode, setExecMode] = useState<'paper' | 'live'>(() =>
+    (localStorage.getItem('swing_exec_mode') as 'paper' | 'live') || 'paper'
+  );
+  const [capital, setCapital]     = useState<number>(() => {
+    const s = localStorage.getItem('swing_capital');
+    return s ? Math.max(500, parseInt(s, 10)) : 1000;
+  });
+  const [capitalInput, setCapitalInput] = useState<string>(() =>
+    localStorage.getItem('swing_capital') ?? '1000'
+  );
+  const [maxTrades, setMaxTrades] = useState<number>(() => {
+    const s = localStorage.getItem('swing_max_trades');
+    return s ? parseInt(s, 10) : 3;
+  });
+
+  // ── Scan filters ──
   const [universe,      setUniverse]      = useState<'nifty50' | 'nifty100'>('nifty50');
   const [regimeFilter,  setRegimeFilter]  = useState(true);
   const [rsFilter,      setRsFilter]      = useState(true);
-  const [regimeWarning, setRegimeWarning] = useState<string>('');
+  const [regimeWarning, setRegimeWarning] = useState('');
   const [niftyBullish,  setNiftyBullish]  = useState<boolean | null>(null);
-  const [niftyReturn,   setNiftyReturn]   = useState<number>(0);
-  const [universeSize,  setUniverseSize]  = useState<number>(0);
-  const [capital,   setCapital]   = useState<number>(() => {
-    const stored = localStorage.getItem('swing_capital');
-    return stored ? Math.max(1000, parseInt(stored, 10)) : 150000;
-  });
-  const [capitalInput, setCapitalInput] = useState<string>(() => {
-    const stored = localStorage.getItem('swing_capital');
-    return stored ?? '150000';
-  });
-  // Autopilot state
-  const [autopilotEnabled,     setAutopilotEnabled]     = useState(false);
-  const [autopilotMode,        setAutopilotMode]        = useState<'paper' | 'live'>('paper');
-  const [autopilotCapital,     setAutopilotCapital]     = useState(1000);
-  const [autopilotCapitalInput,setAutopilotCapitalInput]= useState('1000');
-  const [autopilotMaxTrades,   setAutopilotMaxTrades]   = useState(3);
-  const [autopilotLastRun,     setAutopilotLastRun]     = useState<string | null>(null);
-  const [autopilotLastResult,  setAutopilotLastResult]  = useState<Record<string, any>>({});
-  const [autopilotSaving,      setAutopilotSaving]      = useState(false);
-  const [autopilotRunning,     setAutopilotRunning]     = useState(false);
+  const [niftyReturn,   setNiftyReturn]   = useState(0);
 
-  const handleCapitalChange = (val: string) => {
-    setCapitalInput(val);
-    const num = parseInt(val.replace(/,/g, ''), 10);
-    if (!isNaN(num) && num >= 1000) {
-      setCapital(num);
-      localStorage.setItem('swing_capital', String(num));
-    }
-  };
+  // ── Autopilot ──
+  const [autopilotEnabled,    setAutopilotEnabled]    = useState(false);
+  const [autopilotLastRun,    setAutopilotLastRun]    = useState<string | null>(null);
+  const [autopilotLastResult, setAutopilotLastResult] = useState<Record<string, any>>({});
+  const [autopilotSaving,     setAutopilotSaving]     = useState(false);
+  const [autopilotRunning,    setAutopilotRunning]    = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -172,7 +137,6 @@ export function StocksView() {
     } catch { /* silent */ }
   }, []);
 
-  // Load cached signals, positions, and autopilot config on mount
   useEffect(() => {
     const init = async () => {
       try {
@@ -185,35 +149,67 @@ export function StocksView() {
         setSignals(sigs);
         if (sigs.length > 0) setScanTime(sigs[0].scan_time);
         setPositions(Array.isArray(posRes.data) ? posRes.data : []);
+
+        // Restore autopilot state; pull settings back as source of truth
         const ap = apRes.data;
-        setAutopilotEnabled(ap.enabled);
-        setAutopilotMode(ap.mode as 'paper' | 'live');
-        setAutopilotCapital(ap.capital_per_trade);
-        setAutopilotCapitalInput(String(ap.capital_per_trade));
-        setAutopilotMaxTrades(ap.max_trades);
-        setAutopilotLastRun(ap.last_run);
+        setAutopilotEnabled(ap.enabled ?? false);
+        setAutopilotLastRun(ap.last_run ?? null);
         setAutopilotLastResult(ap.last_result ?? {});
-      } catch { /* backend may not have scanned yet — that's fine */ }
+        // Sync server-persisted settings back into local unified state
+        if (ap.mode)              { setExecMode(ap.mode as 'paper' | 'live'); localStorage.setItem('swing_exec_mode', ap.mode); }
+        if (ap.capital_per_trade) { setCapital(ap.capital_per_trade); setCapitalInput(String(ap.capital_per_trade)); localStorage.setItem('swing_capital', String(ap.capital_per_trade)); }
+        if (ap.max_trades)        { setMaxTrades(ap.max_trades); localStorage.setItem('swing_max_trades', String(ap.max_trades)); }
+      } catch { /* first load — fine */ }
     };
     init();
     const iv = setInterval(fetchPositions, 30000);
     return () => clearInterval(iv);
   }, [fetchPositions]);
 
-  const saveAutopilot = async (overrides?: Partial<{ enabled: boolean; mode: string; capital: number; max_trades: number }>) => {
+  // Save unified settings to server whenever they change
+  const syncAutopilot = useCallback(async (overrides?: Partial<{ enabled: boolean; mode: string; capital: number; max_trades: number }>) => {
     setAutopilotSaving(true);
     try {
       const res = await stocksApi.setAutopilot({
-        enabled:           overrides?.enabled           ?? autopilotEnabled,
-        mode:              overrides?.mode              ?? autopilotMode,
-        capital_per_trade: overrides?.capital           ?? autopilotCapital,
-        max_trades:        overrides?.max_trades        ?? autopilotMaxTrades,
+        enabled:           overrides?.enabled    ?? autopilotEnabled,
+        mode:              overrides?.mode        ?? execMode,
+        capital_per_trade: overrides?.capital     ?? capital,
+        max_trades:        overrides?.max_trades  ?? maxTrades,
       });
       const cfg = (res.data as any).config ?? {};
-      setAutopilotEnabled(cfg.enabled ?? autopilotEnabled);
-      showToast(cfg.enabled ? '🤖 Autopilot ON — will trade daily at 09:20 IST' : 'Autopilot disabled');
-    } catch { showToast('Failed to save autopilot settings'); }
+      if (overrides?.enabled !== undefined) {
+        setAutopilotEnabled(cfg.enabled ?? overrides.enabled);
+        showToast(cfg.enabled ? '🤖 Autopilot ON — scans daily at 09:20 IST' : 'Autopilot disabled');
+      }
+    } catch { showToast('Failed to save settings'); }
     finally { setAutopilotSaving(false); }
+  }, [autopilotEnabled, execMode, capital, maxTrades]);
+
+  const handleModeChange = (m: 'paper' | 'live') => {
+    setExecMode(m);
+    localStorage.setItem('swing_exec_mode', m);
+    syncAutopilot({ mode: m });
+  };
+
+  const handleCapitalChange = (val: string) => {
+    setCapitalInput(val);
+    const n = parseInt(val.replace(/,/g, ''), 10);
+    if (!isNaN(n) && n >= 500) {
+      setCapital(n);
+      localStorage.setItem('swing_capital', String(n));
+    }
+  };
+
+  const handleMaxTradesChange = (n: number) => {
+    setMaxTrades(n);
+    localStorage.setItem('swing_max_trades', String(n));
+    syncAutopilot({ max_trades: n });
+  };
+
+  const handleAutopilotToggle = () => {
+    const next = !autopilotEnabled;
+    setAutopilotEnabled(next);
+    syncAutopilot({ enabled: next });
   };
 
   const handleRunNow = async () => {
@@ -244,7 +240,6 @@ export function StocksView() {
       setRegimeWarning(data.regime_warning ?? '');
       setNiftyBullish(data.nifty_bullish ?? null);
       setNiftyReturn(data.nifty_20d_return ?? 0);
-      setUniverseSize(data.universe_size ?? sigs.length);
       if (sigs.length > 0) setScanTime(sigs[0].scan_time);
       else setScanTime(new Date().toISOString());
       showToast(`Scan complete — ${sigs.length} BUY signal${sigs.length !== 1 ? 's' : ''} found`);
@@ -255,34 +250,24 @@ export function StocksView() {
     }
   };
 
-  const handleExecute = async (symbol: string) => {
-    setConfirm({ symbol });
-  };
-
-  const handleAutoExecute = () => {
-    setConfirm({ symbol: '', auto: true });
-  };
-
   const confirmExecute = async () => {
-    if (!confirm) return;
-    const isAuto = confirm.auto;
-    setConfirm(null);
-    setExecuting(isAuto ? '__auto__' : confirm.symbol);
+    if (!confirmSym) return;
+    const isTop = confirmSym === '__top__';
+    setConfirmSym(null);
+    setExecuting(isTop ? '__top__' : confirmSym);
     try {
-      if (isAuto) {
-        const res = await stocksApi.autoExecute(execMode, 3, capital);
+      if (isTop) {
+        const res = await stocksApi.autoExecute(execMode, maxTrades, capital);
         const count = res.data.count ?? 0;
-        showToast(`Auto-executed ${count} ${execMode} order${count !== 1 ? 's' : ''}`);
+        showToast(`Executed ${count} ${execMode} order${count !== 1 ? 's' : ''}`);
       } else {
-        await stocksApi.execute(confirm.symbol, execMode, capital);
-        showToast(`${execMode === 'paper' ? 'Paper' : 'Live'} order placed for ${confirm.symbol}`);
+        await stocksApi.execute(confirmSym, execMode, capital);
+        showToast(`${execMode === 'paper' ? 'Paper' : 'Live'} order placed for ${confirmSym}`);
       }
       await fetchPositions();
     } catch (err: any) {
       showToast(`Execution failed: ${err?.response?.data?.detail ?? err?.message}`);
-    } finally {
-      setExecuting(null);
-    }
+    } finally { setExecuting(null); }
   };
 
   const handleClosePosition = async (symbol: string) => {
@@ -300,12 +285,10 @@ export function StocksView() {
       const res = await stocksApi.syncFromBroker();
       showToast(res.data?.message || 'Sync complete');
       await fetchPositions();
-    } catch {
-      showToast('Sync failed — check broker connection');
-    }
+    } catch { showToast('Sync failed — check broker connection'); }
   };
 
-  const formatPrice = (v: number) => `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatPrice   = (v: number) => `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatScanTime = (iso: string) => {
     try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
     catch { return iso; }
@@ -313,11 +296,12 @@ export function StocksView() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5">
+
       {/* Toast */}
       {toast && (
         <div
-          className="fixed top-6 right-6 glass-panel px-5 py-3 text-sm font-semibold text-jarvis-primary neon-border z-50"
+          className="fixed top-6 right-6 glass-panel px-5 py-3 text-sm font-semibold text-jarvis-primary neon-border"
           style={{ zIndex: 99998 }}
         >
           {toast}
@@ -325,99 +309,109 @@ export function StocksView() {
       )}
 
       {/* Confirm modal */}
-      {confirm && (
-        <ConfirmModal
-          title={confirm.auto ? 'Auto-Execute Top 3 Signals' : `Execute ${confirm.symbol}`}
-          body={
-            confirm.auto
-              ? `Place ${execMode} delivery orders for the top 3 signals with confidence ≥ 70%. Only BUY orders, no short-selling.`
-              : `Place a ${execMode} delivery BUY order for ${confirm.symbol}. The position will be tracked in the Swing Positions table.`
-          }
-          onConfirm={confirmExecute}
-          onCancel={() => setConfirm(null)}
-        />
+      {confirmSym && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 99999 }}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setConfirmSym(null)} />
+          <div className="glass-panel neon-border p-8 max-w-md w-full mx-4 relative" style={{ zIndex: 100000 }}>
+            <h3 className="text-lg font-bold text-jarvis-primary uppercase tracking-widest mb-3">
+              {confirmSym === '__top__' ? `Execute Top ${maxTrades} Signals` : `Execute ${confirmSym}`}
+            </h3>
+            <p className="text-jarvis-text-secondary text-sm mb-6">
+              {confirmSym === '__top__'
+                ? `Place ${execMode.toUpperCase()} delivery BUY orders for the top ${maxTrades} highest-confidence signals. ₹${capital.toLocaleString('en-IN')} per trade.`
+                : `Place a ${execMode.toUpperCase()} delivery BUY order for ${confirmSym}. ₹${capital.toLocaleString('en-IN')} invested.`}
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmSym(null)} className="flex-1 jarvis-button-outline text-center">Cancel</button>
+              <button
+                onClick={confirmExecute}
+                className="flex-1 py-2.5 rounded-lg font-bold uppercase tracking-wider text-sm"
+                style={{ background: execMode === 'live' ? 'rgba(255,23,68,0.2)' : 'rgba(0,229,255,0.15)', border: `1px solid ${execMode === 'live' ? 'rgba(255,23,68,0.6)' : 'rgba(0,229,255,0.5)'}`, color: execMode === 'live' ? '#ff1744' : '#00e5ff' }}
+              >
+                Confirm {execMode.toUpperCase()}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* ── Header ── */}
+      {/* ── Header: title + unified settings + scan ── */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-xl font-black text-jarvis-primary glow-text uppercase tracking-widest">
-            Equity Swing
-          </h2>
-          <p className="text-xs text-jarvis-text-secondary mt-1">
-            CNC delivery trades · 2–10 day holds · Entry / Stop-Loss / Target
-          </p>
+          <h2 className="text-xl font-black text-jarvis-primary glow-text uppercase tracking-widest">Equity Swing</h2>
+          <p className="text-xs text-jarvis-text-secondary mt-1">CNC delivery trades · 2–10 day holds · Entry / Stop-Loss / Target</p>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Capital input */}
+
+          {/* ₹ per trade */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-jarvis-text-secondary">Capital:</span>
+            <span className="text-xs text-jarvis-text-secondary">₹ / trade:</span>
             <div className="flex items-center glass-panel rounded-lg px-3 py-1.5 gap-1" style={{ border: '1px solid rgba(0,229,255,0.25)' }}>
               <span className="text-xs text-jarvis-text-secondary">₹</span>
               <input
                 type="text"
                 value={capitalInput}
                 onChange={e => handleCapitalChange(e.target.value)}
-                className="bg-transparent text-xs font-mono text-jarvis-primary outline-none w-24 text-right"
-                placeholder="150000"
+                onBlur={() => syncAutopilot({ capital })}
+                className="bg-transparent text-xs font-mono text-jarvis-primary outline-none w-20 text-right"
+                placeholder="1000"
               />
             </div>
           </div>
 
-          {/* Mode toggle */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-jarvis-text-secondary">Mode:</span>
-            {(['paper', 'live'] as const).map(m => (
+          {/* Max positions */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-jarvis-text-secondary">Max:</span>
+            {[1, 2, 3, 5].map(n => (
               <button
-                key={m}
-                onClick={() => setExecMode(m)}
-                className="px-3 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+                key={n}
+                onClick={() => handleMaxTradesChange(n)}
+                className="w-7 h-7 text-xs font-bold rounded-lg transition-all"
                 style={{
-                  background: execMode === m ? (m === 'live' ? 'rgba(255,23,68,0.2)' : 'rgba(0,229,255,0.15)') : 'transparent',
-                  border:     execMode === m ? (m === 'live' ? '1px solid rgba(255,23,68,0.6)' : '1px solid rgba(0,229,255,0.5)') : '1px solid rgba(255,255,255,0.1)',
-                  color:      execMode === m ? (m === 'live' ? '#ff1744' : '#00e5ff') : '#8aa5c0',
+                  background: maxTrades === n ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.05)',
+                  border:     maxTrades === n ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                  color:      maxTrades === n ? '#00e5ff' : '#8aa5c0',
                 }}
               >
-                {m}
+                {n}
               </button>
             ))}
           </div>
 
-          {/* Auto-execute */}
-          {signals.length > 0 && (
+          {/* Mode */}
+          {(['paper', 'live'] as const).map(m => (
             <button
-              onClick={handleAutoExecute}
-              disabled={!!executing}
-              className="px-4 py-2 text-xs font-bold uppercase rounded-lg transition-all"
-              style={{ background: 'rgba(0,230,118,0.15)', border: '1px solid rgba(0,230,118,0.4)', color: '#00e676' }}
+              key={m}
+              onClick={() => handleModeChange(m)}
+              className="px-3 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+              style={{
+                background: execMode === m ? (m === 'live' ? 'rgba(255,23,68,0.2)' : 'rgba(0,229,255,0.15)') : 'transparent',
+                border:     execMode === m ? (m === 'live' ? '1px solid rgba(255,23,68,0.6)' : '1px solid rgba(0,229,255,0.5)') : '1px solid rgba(255,255,255,0.1)',
+                color:      execMode === m ? (m === 'live' ? '#ff1744' : '#00e5ff') : '#8aa5c0',
+              }}
             >
-              ⚡ Auto Execute Top 3
+              {m}
             </button>
-          )}
+          ))}
 
-          {/* Scan button */}
+          {/* Scan */}
           <button
             onClick={handleScan}
             disabled={scanning}
             className="px-5 py-2 text-xs font-bold uppercase rounded-lg transition-all jarvis-button"
           >
-            {scanning ? (
-              <span className="flex items-center gap-2">
-                <span className="inline-block w-3 h-3 border-2 border-jarvis-primary border-t-transparent rounded-full animate-spin" />
-                Scanning…
-              </span>
-            ) : '🔍 Run Scan'}
+            {scanning
+              ? <span className="flex items-center gap-2"><span className="inline-block w-3 h-3 border-2 border-jarvis-primary border-t-transparent rounded-full animate-spin" />Scanning…</span>
+              : '🔍 Run Scan'}
           </button>
         </div>
       </div>
 
-      {/* ── Filter Controls ── */}
-      <div className="glass-panel p-4 rounded-xl" style={{ border: '1px solid rgba(0,229,255,0.15)' }}>
+      {/* ── Filters ── */}
+      <div className="glass-panel p-3 rounded-xl" style={{ border: '1px solid rgba(0,229,255,0.15)' }}>
         <div className="flex items-center gap-4 flex-wrap">
           <span className="text-xs font-bold uppercase tracking-widest text-jarvis-text-secondary">Filters:</span>
-
-          {/* Universe selector */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-jarvis-text-secondary">Universe:</span>
             {([['nifty50', 'Nifty 50'], ['nifty100', 'Nifty 100']] as const).map(([val, label]) => (
@@ -435,54 +429,18 @@ export function StocksView() {
               </button>
             ))}
           </div>
-
-          <div className="w-px h-5 bg-white/15 hidden sm:block" />
-
-          {/* Regime filter toggle */}
-          <div className="flex items-center gap-2">
-            <FilterToggle
-              label="Nifty Regime"
-              value={regimeFilter}
-              onChange={setRegimeFilter}
-            />
-            <span className="text-xs text-jarvis-text-secondary hidden sm:inline">
-              (warns if Nifty below 200-EMA)
-            </span>
-          </div>
-
-          {/* RS filter toggle */}
-          <div className="flex items-center gap-2">
-            <FilterToggle
-              label="Rel. Strength"
-              value={rsFilter}
-              onChange={setRsFilter}
-            />
-            <span className="text-xs text-jarvis-text-secondary hidden sm:inline">
-              (scores stocks vs Nifty 20d return)
-            </span>
-          </div>
-
-          {/* Nifty return badge */}
+          <div className="w-px h-4 bg-white/15 hidden sm:block" />
+          <FilterToggle label="Nifty Regime" value={regimeFilter} onChange={setRegimeFilter} />
+          <span className="text-xs text-jarvis-text-secondary hidden sm:inline">(warns if Nifty below 200-EMA)</span>
+          <FilterToggle label="Rel. Strength" value={rsFilter} onChange={setRsFilter} />
+          <span className="text-xs text-jarvis-text-secondary hidden sm:inline">(scores stocks vs Nifty 20d return)</span>
           {niftyBullish !== null && (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-xs text-jarvis-text-secondary">Nifty 20d:</span>
-              <span
-                className="text-xs font-mono font-bold px-2 py-0.5 rounded"
-                style={{
-                  background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,82,82,0.12)',
-                  color:      niftyBullish ? '#00e676' : '#ff5252',
-                }}
-              >
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{ background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,82,82,0.12)', color: niftyBullish ? '#00e676' : '#ff5252' }}>
                 {niftyReturn >= 0 ? '+' : ''}{niftyReturn.toFixed(1)}%
               </span>
-              <span
-                className="text-xs font-bold px-2 py-0.5 rounded"
-                style={{
-                  background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,214,0,0.12)',
-                  color:      niftyBullish ? '#00e676' : '#ffd600',
-                  border:     `1px solid ${niftyBullish ? 'rgba(0,230,118,0.3)' : 'rgba(255,214,0,0.3)'}`,
-                }}
-              >
+              <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: niftyBullish ? 'rgba(0,230,118,0.12)' : 'rgba(255,214,0,0.12)', color: niftyBullish ? '#00e676' : '#ffd600', border: `1px solid ${niftyBullish ? 'rgba(0,230,118,0.3)' : 'rgba(255,214,0,0.3)'}` }}>
                 {niftyBullish ? '▲ Above 200-EMA' : '▼ Below 200-EMA'}
               </span>
             </div>
@@ -490,203 +448,87 @@ export function StocksView() {
         </div>
       </div>
 
-      {/* ── Autopilot Panel ── */}
+      {/* ── Autopilot (minimal — inherits settings from above) ── */}
       <div
-        className="glass-panel p-4 rounded-xl"
+        className="glass-panel px-4 py-3 rounded-xl flex items-center gap-4 flex-wrap"
         style={{
-          border: autopilotEnabled
-            ? '1px solid rgba(0,230,118,0.5)'
-            : '1px solid rgba(255,255,255,0.1)',
-          background: autopilotEnabled ? 'rgba(0,230,118,0.04)' : undefined,
+          border:     autopilotEnabled ? '1px solid rgba(0,230,118,0.4)' : '1px solid rgba(255,255,255,0.1)',
+          background: autopilotEnabled ? 'rgba(0,230,118,0.03)' : undefined,
         }}
       >
-        <div className="flex items-center gap-4 flex-wrap">
-          {/* Autopilot header + master toggle */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-black uppercase tracking-widest" style={{ color: autopilotEnabled ? '#00e676' : '#8aa5c0' }}>
-              🤖 Autopilot
-            </span>
-            <button
-              onClick={() => {
-                const next = !autopilotEnabled;
-                setAutopilotEnabled(next);
-                saveAutopilot({ enabled: next });
-              }}
-              disabled={autopilotSaving}
-              className="relative inline-flex h-6 w-11 items-center rounded-full transition-all"
-              style={{
-                background: autopilotEnabled ? 'rgba(0,230,118,0.6)' : 'rgba(255,255,255,0.1)',
-                border: autopilotEnabled ? '1px solid rgba(0,230,118,0.8)' : '1px solid rgba(255,255,255,0.2)',
-              }}
-            >
-              <span
-                className="inline-block h-4 w-4 rounded-full transition-transform"
-                style={{
-                  background: autopilotEnabled ? '#00e676' : '#8aa5c0',
-                  transform: autopilotEnabled ? 'translateX(22px)' : 'translateX(3px)',
-                  boxShadow: autopilotEnabled ? '0 0 8px #00e676' : 'none',
-                }}
-              />
-            </button>
-            {autopilotEnabled && (
-              <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(0,230,118,0.12)', color: '#00e676' }}>
-                Active — scans daily at 09:20 IST
-              </span>
-            )}
-          </div>
-
-          {/* Capital per trade */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-jarvis-text-secondary">₹ per trade:</span>
-            <div className="flex items-center glass-panel rounded-lg px-2 py-1 gap-1" style={{ border: '1px solid rgba(0,229,255,0.2)' }}>
-              <span className="text-xs text-jarvis-text-secondary">₹</span>
-              <input
-                type="text"
-                value={autopilotCapitalInput}
-                onChange={e => {
-                  setAutopilotCapitalInput(e.target.value);
-                  const n = parseInt(e.target.value.replace(/,/g, ''), 10);
-                  if (!isNaN(n) && n >= 100) setAutopilotCapital(n);
-                }}
-                onBlur={() => saveAutopilot({ capital: autopilotCapital })}
-                className="bg-transparent text-xs font-mono text-jarvis-primary outline-none w-16 text-right"
-                placeholder="1000"
-              />
-            </div>
-          </div>
-
-          {/* Max trades */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-jarvis-text-secondary">Max trades:</span>
-            {[1, 2, 3, 5].map(n => (
-              <button
-                key={n}
-                onClick={() => { setAutopilotMaxTrades(n); saveAutopilot({ max_trades: n }); }}
-                className="w-7 h-7 text-xs font-bold rounded-lg transition-all"
-                style={{
-                  background: autopilotMaxTrades === n ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.05)',
-                  border:     autopilotMaxTrades === n ? '1px solid rgba(0,229,255,0.6)' : '1px solid rgba(255,255,255,0.1)',
-                  color:      autopilotMaxTrades === n ? '#00e5ff' : '#8aa5c0',
-                }}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-
-          {/* Mode */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-jarvis-text-secondary">Mode:</span>
-            {(['paper', 'live'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setAutopilotMode(m); saveAutopilot({ mode: m }); }}
-                className="px-2.5 py-1 text-xs font-bold uppercase rounded-lg transition-all"
-                style={{
-                  background: autopilotMode === m ? (m === 'live' ? 'rgba(255,23,68,0.2)' : 'rgba(0,229,255,0.15)') : 'transparent',
-                  border:     autopilotMode === m ? (m === 'live' ? '1px solid rgba(255,23,68,0.6)' : '1px solid rgba(0,229,255,0.5)') : '1px solid rgba(255,255,255,0.1)',
-                  color:      autopilotMode === m ? (m === 'live' ? '#ff1744' : '#00e5ff') : '#8aa5c0',
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-
-          {/* Run Now button */}
-          <button
-            onClick={handleRunNow}
-            disabled={autopilotRunning || !autopilotEnabled}
-            className="ml-auto px-4 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+        {/* Toggle */}
+        <span className="text-sm font-black uppercase tracking-widest" style={{ color: autopilotEnabled ? '#00e676' : '#8aa5c0' }}>
+          🤖 Autopilot
+        </span>
+        <button
+          onClick={handleAutopilotToggle}
+          disabled={autopilotSaving}
+          className="relative inline-flex h-6 w-11 items-center rounded-full transition-all"
+          style={{
+            background: autopilotEnabled ? 'rgba(0,230,118,0.6)' : 'rgba(255,255,255,0.1)',
+            border:     autopilotEnabled ? '1px solid rgba(0,230,118,0.8)' : '1px solid rgba(255,255,255,0.2)',
+          }}
+        >
+          <span
+            className="inline-block h-4 w-4 rounded-full transition-transform"
             style={{
-              background: autopilotEnabled ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.05)',
-              border:     autopilotEnabled ? '1px solid rgba(0,230,118,0.5)' : '1px solid rgba(255,255,255,0.1)',
-              color:      autopilotEnabled ? '#00e676' : '#8aa5c0',
-              opacity:    autopilotRunning ? 0.6 : 1,
+              background: autopilotEnabled ? '#00e676' : '#8aa5c0',
+              transform:  autopilotEnabled ? 'translateX(22px)' : 'translateX(3px)',
+              boxShadow:  autopilotEnabled ? '0 0 8px #00e676' : 'none',
             }}
-          >
-            {autopilotRunning ? (
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: '#00e676', borderTopColor: 'transparent' }} />
-                Running…
-              </span>
-            ) : '▶ Run Now'}
-          </button>
-        </div>
+          />
+        </button>
 
-        {/* Last run result */}
-        {autopilotLastRun && (
-          <div className="mt-3 pt-3 border-t border-white/10 flex items-start gap-4 flex-wrap text-xs">
-            <span className="text-jarvis-text-secondary">
-              Last run: <span className="text-jarvis-primary font-mono">{formatScanTime(autopilotLastRun)}</span>
-            </span>
-            {autopilotLastResult.executed_count !== undefined && (
-              <span className="text-jarvis-text-secondary">
-                Executed: <span style={{ color: '#00e676' }} className="font-bold">{autopilotLastResult.executed_count}</span>
-                {' '}/ {autopilotLastResult.signals_found ?? '?'} signals
-              </span>
-            )}
-            {Array.isArray(autopilotLastResult.executed) && autopilotLastResult.executed.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {autopilotLastResult.executed.map((t: any) => (
-                  <span
-                    key={t.symbol}
-                    className="px-2 py-0.5 rounded text-xs font-mono font-bold"
-                    style={{ background: 'rgba(0,229,255,0.1)', color: '#00e5ff', border: '1px solid rgba(0,229,255,0.3)' }}
-                  >
-                    {t.symbol} × {t.qty} @ ₹{t.entry?.toFixed(0)} (₹{t.invested?.toFixed(0)})
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Description — shows current settings */}
+        <span className="text-xs text-jarvis-text-secondary">
+          {autopilotEnabled
+            ? <>Scans daily at 09:20 IST · <span className="text-jarvis-primary font-mono">₹{capital.toLocaleString('en-IN')}</span> × <span className="text-jarvis-primary font-mono">{maxTrades}</span> stocks · <span style={{ color: execMode === 'live' ? '#ff1744' : '#00e5ff' }} className="font-bold">{execMode.toUpperCase()}</span></>
+            : 'Off — enable to scan and buy automatically at 09:20 IST each day'}
+        </span>
+
+        {/* Last run summary */}
+        {autopilotLastRun && autopilotLastResult.executed_count !== undefined && (
+          <span className="text-xs text-jarvis-text-secondary">
+            · Last run <span className="text-jarvis-primary font-mono">{formatScanTime(autopilotLastRun)}</span>
+            {' '}→ <span style={{ color: '#00e676' }} className="font-bold">{autopilotLastResult.executed_count}</span> traded
+          </span>
         )}
 
-        <p className="mt-2 text-xs text-jarvis-text-secondary">
-          Buys at 09:20 IST (market open) · Checks SL/Target at 15:20 IST (10 min before close) · Allocates ₹{autopilotCapital.toLocaleString()} per trade · {autopilotMaxTrades} stock{autopilotMaxTrades !== 1 ? 's' : ''} max.
-        </p>
+        {/* Run Now */}
+        <button
+          onClick={handleRunNow}
+          disabled={autopilotRunning || !autopilotEnabled}
+          className="ml-auto px-4 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+          style={{
+            background: autopilotEnabled ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.05)',
+            border:     autopilotEnabled ? '1px solid rgba(0,230,118,0.5)' : '1px solid rgba(255,255,255,0.1)',
+            color:      autopilotEnabled ? '#00e676' : '#8aa5c0',
+            opacity:    autopilotRunning ? 0.6 : 1,
+            cursor:     !autopilotEnabled ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {autopilotRunning
+            ? <span className="flex items-center gap-1.5"><span className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: '#00e676', borderTopColor: 'transparent' }} />Running…</span>
+            : '▶ Run Now'}
+        </button>
       </div>
 
-      {/* ── Regime Warning Banner ── */}
+      {/* ── Regime Warning ── */}
       {regimeWarning && (
-        <div
-          className="glass-panel p-4 rounded-xl text-sm font-semibold"
-          style={{ border: '1px solid rgba(255,214,0,0.4)', background: 'rgba(255,214,0,0.06)', color: '#ffd600' }}
-        >
+        <div className="glass-panel p-4 rounded-xl text-sm font-semibold" style={{ border: '1px solid rgba(255,214,0,0.4)', background: 'rgba(255,214,0,0.06)', color: '#ffd600' }}>
           {regimeWarning}
           <span className="block text-xs font-normal mt-1 text-jarvis-text-secondary">
-            Signals still shown — use your discretion. Only the strongest setups with high RS scores are advisable in a downtrend.
+            Signals still shown — only the strongest setups with high RS scores are advisable in a downtrend.
           </span>
         </div>
       )}
 
-      {scanTime && (
-        <p className="text-xs text-jarvis-text-secondary">
-          Last scan: {formatScanTime(scanTime)} · {signals.length} BUY signal{signals.length !== 1 ? 's' : ''}
-          {universeSize > 0 && ` · scanned ${universe === 'nifty100' ? '~100' : '50'} stocks`}
-        </p>
-      )}
-
-      {error && (
-        <div className="glass-panel p-4 border border-red-500/40 text-red-400 text-sm">{error}</div>
-      )}
-
-      {/* ── Sync from Broker (always visible when no positions or as recovery tool) ── */}
-      {positions.length === 0 && (
-        <div className="flex justify-end">
-          <button
-            onClick={handleSyncFromBroker}
-            className="text-xs px-4 py-2 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
-            title="Import positions from Angel One demat holdings (use after server restart)"
-          >
-            ⟳ Sync Positions from Broker
-          </button>
-        </div>
-      )}
+      {error && <div className="glass-panel p-4 border border-red-500/40 text-red-400 text-sm">{error}</div>}
 
       {/* ── Open Swing Positions ── */}
       {positions.length > 0 && (
-        <Card title={`Open Swing Positions (${positions.length})`}
+        <Card
+          title={`Open Positions (${positions.length})`}
           headerAction={
             <button
               onClick={handleSyncFromBroker}
@@ -705,7 +547,7 @@ export function StocksView() {
                   <th className="pb-2 text-right">Entry</th>
                   <th className="pb-2 text-right">CMP</th>
                   <th className="pb-2 text-right">P&L</th>
-                  <th className="pb-2 text-right">SL</th>
+                  <th className="pb-2 text-right">Stop Loss</th>
                   <th className="pb-2 text-right">Target</th>
                   <th className="pb-2 text-center">Trail</th>
                   <th className="pb-2 text-center">Mode</th>
@@ -725,14 +567,14 @@ export function StocksView() {
                     <td className="py-2.5 text-right font-mono text-red-400">{formatPrice(pos.stop_loss)}</td>
                     <td className="py-2.5 text-right font-mono text-green-400">
                       {pos.trailing_active
-                        ? <span title="Riding to T2">{formatPrice(pos.target2)} <span style={{color:'#ffd600',fontSize:'10px'}}>T2</span></span>
+                        ? <span title="Riding to T2">{formatPrice(pos.target2)} <span style={{ color: '#ffd600', fontSize: 10 }}>T2</span></span>
                         : formatPrice(pos.target1)
                       }
                     </td>
                     <td className="py-2.5 text-center">
                       {pos.trailing_active
-                        ? <span title="T1 hit — trailing stop at breakeven" style={{color:'#ffd600',fontSize:'16px'}}>🔒</span>
-                        : <span style={{color:'#8aa5c0'}}>—</span>
+                        ? <span title="T1 hit — trailing stop at breakeven" style={{ color: '#ffd600', fontSize: 16 }}>🔒</span>
+                        : <span style={{ color: '#8aa5c0' }}>—</span>
                       }
                     </td>
                     <td className="py-2.5 text-center">
@@ -759,7 +601,7 @@ export function StocksView() {
         </Card>
       )}
 
-      {/* ── Signal cards ── */}
+      {/* ── Scan results / empty state ── */}
       {scanning ? (
         <div className="flex flex-col items-center justify-center py-16 gap-4">
           <div className="w-10 h-10 border-4 border-jarvis-primary border-t-transparent rounded-full animate-spin" />
@@ -775,11 +617,31 @@ export function StocksView() {
           <div className="text-center py-12 text-jarvis-text-secondary">
             <div className="text-4xl mb-4">🔍</div>
             <div className="font-semibold">No signals yet</div>
-            <div className="text-xs mt-2">Click "Run Scan" to scan {universe === 'nifty100' ? 'Nifty100' : 'Nifty50'} for swing trade setups</div>
+            <div className="text-xs mt-2 mb-6">Click "Run Scan" to scan {universe === 'nifty100' ? 'Nifty100' : 'Nifty50'} for swing trade setups</div>
+            {positions.length === 0 && (
+              <button
+                onClick={handleSyncFromBroker}
+                className="text-xs px-4 py-2 border border-jarvis-primary/40 text-jarvis-primary rounded hover:bg-jarvis-primary/10 transition-colors"
+              >
+                ⟳ Sync Positions from Broker
+              </button>
+            )}
           </div>
         </Card>
       ) : (
-        <Card title={`Swing Trade Signals — ${signals.length} found`}>
+        <Card
+          title={`${signals.length} BUY Signal${signals.length !== 1 ? 's' : ''} · ${scanTime ? formatScanTime(scanTime) : ''}`}
+          headerAction={
+            <button
+              onClick={() => setConfirmSym('__top__')}
+              disabled={!!executing}
+              className="px-4 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
+              style={{ background: 'rgba(0,230,118,0.15)', border: '1px solid rgba(0,230,118,0.4)', color: '#00e676', opacity: executing ? 0.5 : 1 }}
+            >
+              ⚡ Execute Top {maxTrades}
+            </button>
+          }
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -805,29 +667,23 @@ export function StocksView() {
                   const alreadyHeld = positions.some(p => p.symbol === sig.symbol);
                   const isExec      = executing === sig.symbol;
                   return (
-                    <tr key={sig.symbol} className="border-b border-white/5 hover:bg-white/5 group">
-                      {/* Stock info */}
+                    <tr key={sig.symbol} className="border-b border-white/5 hover:bg-white/5">
                       <td className="py-3">
                         <div className="font-bold text-jarvis-primary">{sig.symbol}</div>
-                        <div className="text-jarvis-text-secondary mt-0.5">{sig.name.split(' ').slice(0,2).join(' ')}</div>
+                        <div className="text-jarvis-text-secondary mt-0.5">{sig.name.split(' ').slice(0, 2).join(' ')}</div>
                         <SectorChip sector={sig.sector} />
                       </td>
-
-                      {/* Prices */}
                       <td className="py-3 text-right font-mono">{formatPrice(sig.close)}</td>
                       <td className="py-3 text-right font-mono text-jarvis-primary">{formatPrice(sig.entry_price)}</td>
                       <td className="py-3 text-right font-mono text-red-400">{formatPrice(sig.stop_loss)}</td>
                       <td className="py-3 text-right font-mono text-green-400">{formatPrice(sig.target1)}</td>
                       <td className="py-3 text-right font-mono text-green-300">{formatPrice(sig.target2)}</td>
                       <td className="py-3 text-right text-orange-400">-{sig.sl_pct}%</td>
-                      <td className="py-3 text-right text-green-400 font-mono text-xs">
+                      <td className="py-3 text-right text-green-400 font-mono">
                         +{((sig.target1 - sig.entry_price) / sig.entry_price * 100).toFixed(1)}%
                       </td>
-
-                      {/* Confidence bar */}
                       <td className="py-3 pl-4 min-w-[120px]">
                         <ConfidenceBar value={sig.confidence} />
-                        {/* Regime badge */}
                         <div className="mt-1">
                           <span className="text-xs px-1.5 py-0.5 rounded"
                             style={{
@@ -839,49 +695,29 @@ export function StocksView() {
                           </span>
                         </div>
                       </td>
-
-                      {/* Indicators */}
                       <td className="py-3 text-center">
-                        <span style={{ color: sig.rsi >= 50 && sig.rsi <= 70 ? '#00e676' : '#8aa5c0' }}>
-                          {sig.rsi.toFixed(0)}
-                        </span>
+                        <span style={{ color: sig.rsi >= 50 && sig.rsi <= 70 ? '#00e676' : '#8aa5c0' }}>{sig.rsi.toFixed(0)}</span>
                       </td>
                       <td className="py-3 text-center">
-                        <span style={{ color: sig.adx > 25 ? '#00e676' : sig.adx > 20 ? '#ffd600' : '#8aa5c0' }}>
-                          {sig.adx.toFixed(0)}
-                        </span>
+                        <span style={{ color: sig.adx > 25 ? '#00e676' : sig.adx > 20 ? '#ffd600' : '#8aa5c0' }}>{sig.adx.toFixed(0)}</span>
                       </td>
                       <td className="py-3 text-center">
-                        <span style={{ color: sig.volume_ratio >= 1.5 ? '#00e676' : sig.volume_ratio >= 1.2 ? '#ffd600' : '#8aa5c0' }}>
-                          {sig.volume_ratio.toFixed(1)}×
-                        </span>
+                        <span style={{ color: sig.volume_ratio >= 1.5 ? '#00e676' : sig.volume_ratio >= 1.2 ? '#ffd600' : '#8aa5c0' }}>{sig.volume_ratio.toFixed(1)}×</span>
                       </td>
-                      <td className="py-3 text-center font-mono text-xs">
-                        <span style={{
-                          color: (sig.rs_vs_nifty ?? 0) >= 3 ? '#00e676'
-                               : (sig.rs_vs_nifty ?? 0) >= 1 ? '#69f0ae'
-                               : (sig.rs_vs_nifty ?? 0) < -2 ? '#ff5252'
-                               : '#8aa5c0'
-                        }}>
+                      <td className="py-3 text-center font-mono">
+                        <span style={{ color: (sig.rs_vs_nifty ?? 0) >= 3 ? '#00e676' : (sig.rs_vs_nifty ?? 0) >= 1 ? '#69f0ae' : (sig.rs_vs_nifty ?? 0) < -2 ? '#ff5252' : '#8aa5c0' }}>
                           {(sig.rs_vs_nifty ?? 0) >= 0 ? '+' : ''}{(sig.rs_vs_nifty ?? 0).toFixed(1)}%
                         </span>
                       </td>
-
-                      {/* Execute */}
                       <td className="py-3 text-center">
                         {alreadyHeld ? (
                           <span className="text-xs text-green-400 font-semibold">Held</span>
                         ) : (
                           <button
-                            onClick={() => handleExecute(sig.symbol)}
+                            onClick={() => setConfirmSym(sig.symbol)}
                             disabled={isExec || !!executing}
                             className="px-3 py-1.5 text-xs font-bold uppercase rounded-lg transition-all"
-                            style={{
-                              background: 'rgba(0,229,255,0.15)',
-                              border: '1px solid rgba(0,229,255,0.4)',
-                              color: '#00e5ff',
-                              opacity: executing ? 0.5 : 1,
-                            }}
+                            style={{ background: 'rgba(0,229,255,0.15)', border: '1px solid rgba(0,229,255,0.4)', color: '#00e5ff', opacity: executing ? 0.5 : 1 }}
                           >
                             {isExec ? '…' : 'Execute'}
                           </button>
@@ -893,8 +729,6 @@ export function StocksView() {
               </tbody>
             </table>
           </div>
-
-          {/* Reasons tooltip info */}
           <div className="mt-4 pt-4 border-t border-white/10">
             <p className="text-xs text-jarvis-text-secondary">
               <span className="text-jarvis-primary font-semibold">Signal logic:</span>{' '}
