@@ -74,11 +74,34 @@ async def close_position(
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary)
 async def get_portfolio_summary(service: PositionService = Depends(get_position_service)):
-    """Get portfolio summary"""
+    """Get portfolio summary including swing positions."""
     if DEMO_MODE:
         return PortfolioSummary(
             total_capital=500000.0, used_capital=121250.0, available_capital=378750.0,
             total_pnl=262.5, total_pnl_percentage=0.05,
             open_positions_count=2, daily_pnl=262.5, daily_pnl_percentage=0.05
         )
-    return await service.get_portfolio_summary()
+    summary = await service.get_portfolio_summary()
+
+    # Merge in swing positions so dashboard shows combined P&L and position count
+    try:
+        from backend.api.routes.stocks import _get_svc
+        swing_svc = _get_svc()
+        await swing_svc.refresh_position_prices()
+        swing_positions = swing_svc.get_positions()
+        if swing_positions:
+            swing_pnl   = sum(p.get("unrealized_pnl", 0.0) for p in swing_positions)
+            swing_cost  = sum(p.get("entry_price", 0) * p.get("qty", 0) for p in swing_positions)
+            summary.total_pnl           += swing_pnl
+            summary.daily_pnl           += swing_pnl
+            summary.open_positions_count += len(swing_positions)
+            summary.used_capital        += swing_cost
+            if summary.total_capital > 0:
+                summary.total_pnl_percentage = round(
+                    summary.total_pnl / summary.total_capital * 100, 4
+                )
+                summary.daily_pnl_percentage = summary.total_pnl_percentage
+    except Exception:
+        pass  # never break the dashboard if swing service is unavailable
+
+    return summary

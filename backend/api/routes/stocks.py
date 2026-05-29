@@ -184,9 +184,10 @@ async def run_scan(
 
 @router.get("/positions", response_model=List[SwingPositionResponse])
 async def get_positions(svc: SwingTradeService = Depends(_get_svc)):
-    """Return currently open swing positions."""
+    """Return currently open swing positions with live P&L."""
     if DEMO_MODE:
         return []
+    await svc.refresh_position_prices()   # live LTP update (throttled to 30s)
     return [SwingPositionResponse(**p) for p in svc.get_positions()]
 
 

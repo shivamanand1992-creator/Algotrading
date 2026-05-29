@@ -45,6 +45,7 @@ class SwingTradeService:
         self._last_scan_time: Optional[datetime] = None
         self._swing_positions: Dict[str, dict] = {}   # symbol → position dict
         self._token_cache: Dict[str, str] = {}        # symbol → Angel One token
+        self._last_ltp_refresh: Optional[datetime] = None  # throttle live LTP calls
 
         stocks_cfg = config.get("stocks", {})
         self._max_positions      = int(stocks_cfg.get("max_swing_positions", 5))
@@ -287,6 +288,50 @@ class SwingTradeService:
 
     def get_positions(self) -> List[dict]:
         return list(self._swing_positions.values())
+
+    async def refresh_position_prices(self) -> None:
+        """
+        Fetch live LTP for every open swing position and update current_price / P&L.
+        Throttled: at most one round of LTP calls per 30 seconds to avoid hammering
+        the Angel One API on every frontend poll.
+        Paper positions use the same token lookup but live prices too — the screener
+        entry price was at market close; intraday moves still matter for P&L display.
+        """
+        if not self._swing_positions:
+            return
+
+        now = datetime.now(_IST)
+        if (
+            self._last_ltp_refresh is not None
+            and (now - self._last_ltp_refresh).total_seconds() < 30
+        ):
+            return  # skip — refreshed recently
+        self._last_ltp_refresh = now
+
+        loop = asyncio.get_event_loop()
+        for symbol, pos in list(self._swing_positions.items()):
+            try:
+                token = await self._resolve_token(symbol)
+                if not token or token == "0":
+                    continue
+                eq_sym = f"{symbol}-EQ"
+                ltp = await loop.run_in_executor(
+                    None,
+                    lambda s=eq_sym, t=token: self.angel_client.get_ltp("NSE", s, t)
+                )
+                if ltp and ltp > 0:
+                    entry = pos["entry_price"]
+                    qty   = pos["qty"]
+                    pos["current_price"]  = round(ltp, 2)
+                    pos["unrealized_pnl"] = round((ltp - entry) * qty, 2)
+                    pos["pnl_pct"]        = round((ltp - entry) / entry * 100, 2)
+                    pos["last_updated"]   = now.isoformat()
+                    logger.debug(
+                        f"[SwingService] {symbol} LTP=₹{ltp:.2f} "
+                        f"P&L={pos['pnl_pct']:+.2f}% (₹{pos['unrealized_pnl']:+.2f})"
+                    )
+            except Exception as exc:
+                logger.debug(f"[SwingService] LTP refresh skipped for {symbol}: {exc}")
 
     def close_position(self, symbol: str, reason: str = "manual") -> bool:
         if symbol not in self._swing_positions:
