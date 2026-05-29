@@ -11,6 +11,7 @@ Live mode   — places CNC delivery orders via Angel One; monitors for SL/target
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import sys
 from datetime import datetime, timezone, timedelta
@@ -27,6 +28,8 @@ from data.nifty50_universe import NIFTY50_UNIVERSE
 from models.stock_screener import StockScreener, StockSignal
 
 _IST = pytz.timezone("Asia/Kolkata")
+
+_STATE_FILE = Path(__file__).parent.parent.parent / "logs" / "swing_state.json"
 
 
 class SwingTradeService:
@@ -62,6 +65,58 @@ class SwingTradeService:
         self._autopilot_max_trades        = 3
         self._autopilot_last_run: Optional[datetime] = None
         self._autopilot_last_result: dict             = {}
+
+        self._load_state()
+
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def _save_state(self) -> None:
+        """Persist positions and autopilot config to disk so restarts don't lose them."""
+        try:
+            _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            state = {
+                "positions": self._swing_positions,
+                "autopilot": {
+                    "enabled":           self._autopilot_enabled,
+                    "mode":              self._autopilot_mode,
+                    "capital_per_trade": self._autopilot_capital_per_trade,
+                    "max_trades":        self._autopilot_max_trades,
+                },
+            }
+            _STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+        except Exception as exc:
+            logger.warning(f"[SwingService] Could not save state: {exc}")
+
+    def _load_state(self) -> None:
+        """Restore positions and autopilot config from disk on startup."""
+        if not _STATE_FILE.exists():
+            return
+        try:
+            state = json.loads(_STATE_FILE.read_text())
+            positions = state.get("positions", {})
+            if isinstance(positions, dict):
+                self._swing_positions = positions
+                if positions:
+                    logger.info(
+                        f"[SwingService] Restored {len(positions)} swing position(s) from disk: "
+                        + ", ".join(positions.keys())
+                    )
+            ap = state.get("autopilot", {})
+            if ap.get("enabled") is not None:
+                self._autopilot_enabled           = bool(ap["enabled"])
+                self._autopilot_mode              = ap.get("mode", "paper")
+                self._autopilot_capital_per_trade = float(ap.get("capital_per_trade", 1000.0))
+                self._autopilot_max_trades        = int(ap.get("max_trades", 3))
+                if self._autopilot_enabled:
+                    logger.info(
+                        f"[SwingService] Restored autopilot: enabled={self._autopilot_enabled}, "
+                        f"mode={self._autopilot_mode}, ₹{self._autopilot_capital_per_trade:.0f} "
+                        f"× {self._autopilot_max_trades} trades"
+                    )
+        except Exception as exc:
+            logger.warning(f"[SwingService] Could not load saved state: {exc}")
 
     # ------------------------------------------------------------------
     # Scan
@@ -199,6 +254,7 @@ class SwingTradeService:
             f"[SwingAutopilot] Config: enabled={enabled}, mode={self._autopilot_mode}, "
             f"₹{self._autopilot_capital_per_trade:.0f} × {self._autopilot_max_trades} trades"
         )
+        self._save_state()
 
     async def run_autopilot(self) -> dict:
         """
@@ -332,12 +388,14 @@ class SwingTradeService:
                     )
             except Exception as exc:
                 logger.debug(f"[SwingService] LTP refresh skipped for {symbol}: {exc}")
+        self._save_state()
 
     def close_position(self, symbol: str, reason: str = "manual") -> bool:
         if symbol not in self._swing_positions:
             return False
         pos = self._swing_positions.pop(symbol)
         logger.info(f"[SwingService] Closed {symbol} position — reason: {reason}. PnL: ₹{pos.get('unrealized_pnl', 0):.2f}")
+        self._save_state()
         return True
 
     async def monitor_positions(self) -> None:
@@ -448,6 +506,8 @@ class SwingTradeService:
             # Remove closed positions from active dict
             if symbol in self._swing_positions and self._swing_positions[symbol].get("status") in ("closed_sl", "closed_target", "closed_trail"):
                 self._swing_positions.pop(symbol, None)
+        if symbols_to_close:
+            self._save_state()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -572,6 +632,7 @@ class SwingTradeService:
             "regime":         sig.regime,
         }
         logger.info(f"[SwingService] Paper position opened: {sig.symbol} qty={qty} entry=₹{sig.entry_price:.2f}")
+        self._save_state()
         return pos_id
 
     async def _resolve_token(self, symbol: str) -> str:
@@ -682,6 +743,7 @@ class SwingTradeService:
                     "regime":         sig.regime,
                 }
                 logger.info(f"[SwingService] Live CNC order placed: {sig.symbol} qty={qty} order_id={order_id}")
+                self._save_state()
                 return order_id
         except Exception as exc:
             logger.error(f"[SwingService] Live order failed for {sig.symbol}: {exc}")
