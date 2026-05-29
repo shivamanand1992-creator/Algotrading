@@ -25,8 +25,10 @@ from data.angel_client import AngelOneClient
 # Try multiple module paths across smartapi-python versions
 _SmartWebSocket = None
 for _ws_mod, _ws_cls in [
+    ("SmartApi.smartWebSocketV2", "SmartWebSocketV2"),   # v1.3.x — correct path
+    ("SmartApi.SmartWebSocketV2", "SmartWebSocketV2"),   # alternate casing
+    ("SmartApi", "SmartWebSocket"),                      # older fallback
     ("SmartApi.smartWebSocket", "SmartWebSocket"),
-    ("SmartApi.SmartWebSocketV2", "SmartWebSocketV2"),
     ("SmartApi.SmartWebSocket", "SmartWebSocket"),
 ]:
     try:
@@ -84,17 +86,27 @@ def _parse_tick(raw: Any) -> Optional[Dict]:
     if not token:
         return None
 
-    ltp = float(raw.get("ltp", raw.get("lp", 0.0)) or 0.0)
-    volume = int(raw.get("volume", raw.get("v", 0)) or 0)
-    oi = int(raw.get("oi", raw.get("oi", 0)) or 0)
+    # SmartWebSocketV2 delivers prices in paisa (integer), older V1 delivers floats
+    raw_ltp = raw.get("last_traded_price", raw.get("ltp", raw.get("lp", 0)))
+    ltp = float(raw_ltp or 0)
+    # V2 prices are in paisa — convert to rupees when value is suspiciously large
+    if ltp > 1_000_000:
+        ltp = ltp / 100.0
+
+    volume = int(raw.get("volume_trade_for_the_day", raw.get("volume", raw.get("v", 0))) or 0)
+    oi = int(raw.get("open_interest", raw.get("oi", 0)) or 0)
     bid = float(raw.get("best_bid_price", raw.get("bp1", 0.0)) or 0.0)
     ask = float(raw.get("best_ask_price", raw.get("sp1", 0.0)) or 0.0)
 
-    # Exchange-provided timestamp (epoch ms) or fall back to local time
+    # Exchange-provided timestamp — V2 may be epoch ms or epoch s
     exchange_ts = raw.get("exchange_timestamp", raw.get("ft", None))
     if exchange_ts:
         try:
-            ts = datetime.fromtimestamp(int(exchange_ts) / 1000, tz=_IST)
+            ts_val = int(exchange_ts)
+            # If value looks like seconds (not ms), multiply
+            if ts_val < 1_000_000_000_000:
+                ts_val *= 1000
+            ts = datetime.fromtimestamp(ts_val / 1000, tz=_IST)
         except (ValueError, TypeError):
             ts = datetime.now(_IST)
     else:
