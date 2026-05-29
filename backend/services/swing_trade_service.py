@@ -29,7 +29,8 @@ from models.stock_screener import StockScreener, StockSignal
 
 _IST = pytz.timezone("Asia/Kolkata")
 
-_STATE_FILE = Path(__file__).parent.parent.parent / "logs" / "swing_state.json"
+_STATE_FILE   = Path(__file__).parent.parent.parent / "logs" / "swing_state.json"
+_LEDGER_FILE  = Path(__file__).parent.parent.parent / "logs" / "swing_orders_ledger.json"
 
 
 class SwingTradeService:
@@ -66,7 +67,9 @@ class SwingTradeService:
         self._autopilot_last_run: Optional[datetime] = None
         self._autopilot_last_result: dict             = {}
 
+        self._orders_ledger: List[dict] = []   # all orders ever placed by this system
         self._load_state()
+        self._load_ledger()
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -117,6 +120,43 @@ class SwingTradeService:
                     )
         except Exception as exc:
             logger.warning(f"[SwingService] Could not load saved state: {exc}")
+
+    def _load_ledger(self) -> None:
+        """Load the append-only orders ledger from disk."""
+        if not _LEDGER_FILE.exists():
+            return
+        try:
+            self._orders_ledger = json.loads(_LEDGER_FILE.read_text())
+            logger.info(f"[SwingService] Ledger loaded — {len(self._orders_ledger)} historical orders.")
+        except Exception as exc:
+            logger.warning(f"[SwingService] Could not load orders ledger: {exc}")
+
+    def _append_to_ledger(self, symbol: str, order_id: str, qty: int,
+                          entry_price: float, mode: str) -> None:
+        """Append a new order entry to the on-disk ledger (never overwritten, only appended)."""
+        entry = {
+            "symbol":      symbol,
+            "order_id":    order_id,
+            "date":        datetime.now(_IST).strftime("%Y-%m-%d"),
+            "qty":         qty,
+            "entry_price": entry_price,
+            "mode":        mode,
+        }
+        self._orders_ledger.append(entry)
+        try:
+            _LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _LEDGER_FILE.write_text(json.dumps(self._orders_ledger, indent=2, default=str))
+        except Exception as exc:
+            logger.warning(f"[SwingService] Could not write orders ledger: {exc}")
+
+    def _ledger_symbols(self) -> set:
+        """Return the set of all symbols ever ordered by the system."""
+        return {e["symbol"] for e in self._orders_ledger}
+
+    def _ledger_entry(self, symbol: str) -> Optional[dict]:
+        """Return the most recent ledger entry for a symbol."""
+        matches = [e for e in self._orders_ledger if e["symbol"] == symbol]
+        return matches[-1] if matches else None
 
     # ------------------------------------------------------------------
     # Scan
@@ -363,32 +403,18 @@ class SwingTradeService:
 
         loop = asyncio.get_event_loop()
 
-        # 1. Today's completed DELIVERY BUY orders → only these are eligible for import
-        try:
-            orders = await loop.run_in_executor(None, self.angel_client.get_orders)
-        except Exception as exc:
-            logger.warning(f"[SwingSync] get_orders failed: {exc}")
-            orders = []
+        # 1. Symbols the system has ever ordered (ledger is the source of truth)
+        system_symbols = self._ledger_symbols()
+        logger.info(f"[SwingSync] Ledger contains {len(system_symbols)} system-ordered symbol(s): {system_symbols or 'none'}")
 
-        system_bought_today: set[str] = {
-            o.get("tradingsymbol", "").replace("-EQ", "").upper()
-            for o in (orders or [])
-            if (
-                o.get("producttype", "").upper() in ("DELIVERY", "CNC")
-                and o.get("transactiontype", "").upper() == "BUY"
-                and o.get("status", "").upper() in ("COMPLETE", "COMPLETE AFTER MARKET ORDER")
-            )
-        }
-        logger.info(f"[SwingSync] System orders today: {system_bought_today or 'none'}")
-
-        # 2. Holdings → qty / avg price data
+        # 2. Holdings → current qty / avg price from demat
         try:
             holdings = await loop.run_in_executor(None, self.angel_client.get_holdings)
         except Exception as exc:
             logger.error(f"[SwingSync] get_holdings failed: {exc}")
             return {"error": str(exc)}
 
-        holdings_map: dict[str, dict] = {
+        holdings_map: dict = {
             h.get("tradingsymbol", "").replace("-EQ", "").upper(): h
             for h in (holdings or [])
             if int(h.get("quantity", 0) or 0) > 0
@@ -396,61 +422,64 @@ class SwingTradeService:
 
         imported, updated, skipped, orphaned = [], [], [], []
 
-        # 3. Process: tracked positions (always update) + today's orders (import if missing)
-        candidates = set(self._swing_positions.keys()) | system_bought_today
+        # 3. Candidates = already tracked + anything in ledger that's still in demat
+        candidates = set(self._swing_positions.keys()) | (system_symbols & set(holdings_map.keys()))
         for symbol in candidates:
             if symbol not in universe_symbols:
                 continue
             h = holdings_map.get(symbol)
             if h is None:
-                continue  # not in demat at all
+                continue
 
             qty    = int(h.get("quantity", 0) or 0)
             avg_px = float(h.get("averageprice", 0) or 0)
             ltp    = float(h.get("ltp", avg_px) or avg_px)
-
             if qty <= 0:
                 continue
 
             stock_info = universe_symbols[symbol]
 
             if symbol in self._swing_positions:
+                # Always refresh qty and live price for tracked positions
                 existing = self._swing_positions[symbol]
                 if existing["qty"] != qty:
                     logger.info(f"[SwingSync] {symbol}: qty {existing['qty']} → {qty}")
                     existing["qty"] = qty
-                existing["entry_price"]    = round(avg_px, 2)
                 existing["current_price"]  = round(ltp, 2)
-                existing["unrealized_pnl"] = round((ltp - avg_px) * qty, 2)
-                existing["pnl_pct"]        = round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0
+                existing["unrealized_pnl"] = round((ltp - existing["entry_price"]) * qty, 2)
+                existing["pnl_pct"]        = round((ltp - existing["entry_price"]) / existing["entry_price"] * 100, 2) if existing["entry_price"] > 0 else 0.0
                 updated.append(symbol)
             else:
-                # Only import if the system placed the order today
+                # Recover from ledger — use original entry price from ledger if available
+                ledger_entry = self._ledger_entry(symbol)
+                entry_price  = float(ledger_entry["entry_price"]) if ledger_entry else avg_px
                 sig = await self._fetch_signal_on_demand(symbol)
-                sl  = sig.stop_loss if sig else round(avg_px * 0.97, 2)
-                t1  = sig.target1   if sig else round(avg_px * 1.06, 2)
-                t2  = sig.target2   if sig else round(avg_px * 1.09, 2)
+                sl  = sig.stop_loss if sig else round(entry_price * 0.97, 2)
+                t1  = sig.target1   if sig else round(entry_price * 1.06, 2)
+                t2  = sig.target2   if sig else round(entry_price * 1.09, 2)
+                entry_date = ledger_entry["date"] if ledger_entry else datetime.now(_IST).strftime("%Y-%m-%d")
+                order_id   = ledger_entry["order_id"] if ledger_entry else f"RECOVERED-{symbol}"
                 self._swing_positions[symbol] = {
-                    "order_id":       f"RECOVERED-{symbol}",
+                    "order_id":       order_id,
                     "symbol":         symbol,
                     "name":           stock_info["name"],
                     "sector":         stock_info.get("sector", ""),
                     "yf_ticker":      stock_info["yf"],
-                    "entry_price":    round(avg_px, 2),
+                    "entry_price":    round(entry_price, 2),
                     "current_price":  round(ltp, 2),
                     "qty":            qty,
                     "stop_loss":      sl,
                     "target1":        t1,
                     "target2":        t2,
-                    "entry_date":     datetime.now(_IST).strftime("%Y-%m-%d"),
-                    "unrealized_pnl": round((ltp - avg_px) * qty, 2),
-                    "pnl_pct":        round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0,
+                    "entry_date":     entry_date,
+                    "unrealized_pnl": round((ltp - entry_price) * qty, 2),
+                    "pnl_pct":        round((ltp - entry_price) / entry_price * 100, 2) if entry_price > 0 else 0.0,
                     "status":         "open",
-                    "mode":           "live",
+                    "mode":           ledger_entry["mode"] if ledger_entry else "live",
                     "confidence":     0.5,
                     "regime":         "recovered",
                 }
-                logger.info(f"[SwingSync] Recovered {symbol} qty={qty} avg=₹{avg_px:.2f}")
+                logger.info(f"[SwingSync] Recovered {symbol} from ledger: qty={qty} entry=₹{entry_price:.2f}")
                 imported.append(symbol)
 
         # 4. Report live positions not found in broker holdings
@@ -459,9 +488,9 @@ class SwingTradeService:
                 orphaned.append(symbol)
                 logger.warning(f"[SwingSync] {symbol} tracked as live but not in holdings — sold externally?")
 
-        # 5. Count personal holdings that were skipped
-        for symbol, h in holdings_map.items():
-            if symbol in universe_symbols and symbol not in self._swing_positions and symbol not in system_bought_today:
+        # 5. Demat stocks that were skipped (not in ledger = personal portfolio)
+        for symbol in holdings_map:
+            if symbol in universe_symbols and symbol not in system_symbols and symbol not in self._swing_positions:
                 skipped.append(symbol)
 
         if imported or updated:
@@ -762,6 +791,7 @@ class SwingTradeService:
             "regime":         sig.regime,
         }
         logger.info(f"[SwingService] Paper position opened: {sig.symbol} qty={qty} entry=₹{sig.entry_price:.2f}")
+        self._append_to_ledger(sig.symbol, pos_id, qty, sig.entry_price, "paper")
         self._save_state()
         return pos_id
 
@@ -873,6 +903,7 @@ class SwingTradeService:
                     "regime":         sig.regime,
                 }
                 logger.info(f"[SwingService] Live CNC order placed: {sig.symbol} qty={qty} order_id={order_id}")
+                self._append_to_ledger(sig.symbol, order_id, qty, sig.entry_price, "live")
                 self._save_state()
                 return order_id
         except Exception as exc:
