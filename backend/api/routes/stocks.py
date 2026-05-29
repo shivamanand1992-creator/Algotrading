@@ -245,8 +245,8 @@ async def sync_from_broker(svc: SwingTradeService = Depends(_get_svc)):
     if "error" in result:
         raise HTTPException(status_code=503, detail=result["error"])
     msg_parts = []
-    if result.get("fresh_deploy"):
-        msg_parts.append("⚠ Fresh deploy — all Nifty holdings imported. Close any personal portfolio stocks below")
+    if result.get("fresh_deploy") and not result["imported"]:
+        return {**result, "message": result["message"]}
     if result["imported"]:
         msg_parts.append(f"Recovered: {', '.join(result['imported'])}")
     if result["updated"]:

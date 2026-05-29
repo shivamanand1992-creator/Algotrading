@@ -518,17 +518,27 @@ class SwingTradeService:
         imported, updated, skipped, orphaned = [], [], [], []
 
         # 3. Candidates = already tracked + anything in ledger that's still in demat
-        # On a fresh deploy (empty ledger + empty state), import ALL Nifty universe
-        # holdings so the user isn't left stranded — they can manually close any
-        # personal portfolio stocks that shouldn't be here.
-        if fresh_deploy:
-            candidates = set(holdings_map.keys()) & set(universe_symbols.keys())
+        # SAFETY: never import holdings that aren't in the ledger — that's personal portfolio
+        if not system_symbols and not self._swing_positions:
             logger.warning(
-                f"[SwingSync] Fresh deploy — ledger empty. Importing all "
-                f"{len(candidates)} Nifty-universe holding(s) as system positions."
+                "[SwingSync] Ledger is empty and no tracked positions — "
+                "nothing to sync. This usually means the database ledger hasn't "
+                "recorded any orders yet, or this is the first ever run."
             )
-        else:
-            candidates = set(self._swing_positions.keys()) | (system_symbols & set(holdings_map.keys()))
+            return {
+                "imported":     [],
+                "updated":      [],
+                "orphaned":     [],
+                "skipped":      list(holdings_map.keys()),
+                "fresh_deploy": True,
+                "message":      (
+                    "Ledger is empty — cannot safely identify which holdings were bought by "
+                    "this system. No positions imported (your personal portfolio is safe). "
+                    "To recover: manually execute the stocks the system previously bought "
+                    "using the signal table, or wait for the autopilot to re-enter them."
+                ),
+            }
+        candidates = set(self._swing_positions.keys()) | (system_symbols & set(holdings_map.keys()))
         for symbol in candidates:
             if symbol not in universe_symbols:
                 continue
@@ -1139,7 +1149,19 @@ class SwingTradeService:
         """Place a live CNC sell order to exit a position."""
         if self.angel_client is None:
             return
-        symbol    = pos["symbol"]
+        symbol = pos["symbol"]
+
+        # ── HARD SAFETY GUARD ──────────────────────────────────────────────
+        # Never sell a stock the system didn't explicitly place a BUY order for.
+        # This prevents accidentally selling personal portfolio holdings.
+        if symbol not in self._ledger_symbols():
+            logger.error(
+                f"[SAFETY BLOCK] Refusing to sell {symbol} — "
+                f"not found in system orders ledger. "
+                f"This stock was NOT bought by this system. Sell cancelled."
+            )
+            return
+        # ──────────────────────────────────────────────────────────────────
         eq_symbol = f"{symbol}-EQ"
         token     = pos.get("token", await self._resolve_token(symbol))
         try:
