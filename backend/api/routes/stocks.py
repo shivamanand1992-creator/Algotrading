@@ -203,7 +203,7 @@ async def execute_signal(
     if req.mode == "live" and get_angel_client() is None:
         raise HTTPException(status_code=503, detail="Broker not connected — cannot place live order")
 
-    order_id = await svc.execute_signal(symbol, req.mode, capital_override=req.capital)
+    order_id = await svc.execute_signal(symbol, req.mode, position_value=req.capital)
     if order_id is None:
         raise HTTPException(status_code=400, detail=f"Could not execute {symbol} — check logs for reason")
 
@@ -222,7 +222,7 @@ async def auto_execute(
     if req.mode == "live" and get_angel_client() is None:
         raise HTTPException(status_code=503, detail="Broker not connected — cannot place live orders")
 
-    order_ids = await svc.auto_execute_top_signals(req.mode, req.max_signals, capital_override=req.capital)
+    order_ids = await svc.auto_execute_top_signals(req.mode, req.max_signals, position_value=req.capital)
     return {
         "success": True,
         "executed": order_ids,

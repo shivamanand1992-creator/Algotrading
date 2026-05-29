@@ -549,6 +549,32 @@ class SwingTradeService:
         if not token or token == "0":
             logger.error(f"[SwingService] Could not resolve token for {sig.symbol} — skipping live order.")
             return None
+
+        # Pre-flight balance check — abort early if clearly insufficient
+        order_amount = round(qty * sig.entry_price, 2)
+        try:
+            loop2 = asyncio.get_event_loop()
+            funds = await loop2.run_in_executor(None, self.angel_client.get_funds)
+            avail = float(
+                funds.get("availablecash")
+                or funds.get("net")
+                or funds.get("availablebalance")
+                or 0
+            )
+            if avail > 0 and order_amount > avail:
+                logger.error(
+                    f"[SwingService] Insufficient funds for {sig.symbol}: "
+                    f"need ₹{order_amount:.2f} but only ₹{avail:.2f} available. "
+                    f"Reduce capital or quantity."
+                )
+                return None
+            logger.info(
+                f"[SwingService] Balance OK: ₹{avail:.2f} available, "
+                f"order ₹{order_amount:.2f} ({qty}×{sig.symbol})"
+            )
+        except Exception as exc:
+            logger.warning(f"[SwingService] Balance check failed (proceeding anyway): {exc}")
+
         # NSE cash equity trading symbol uses the "-EQ" suffix in Angel One
         eq_symbol = f"{sig.symbol}-EQ"
         try:
