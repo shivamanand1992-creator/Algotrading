@@ -347,11 +347,13 @@ class SwingTradeService:
 
     async def sync_from_broker(self) -> dict:
         """
-        Fetch actual CNC holdings from Angel One and reconcile with local state.
-        - Holdings NOT in local state → imported (added)
-        - Holdings already in local state → qty updated to match broker
-        - Local state entries NOT found in broker holdings → flagged as orphaned
-        Returns a summary dict for the API response.
+        Reconcile local swing state with Angel One.
+
+        Rules:
+        - Already tracked position → update qty/price from holdings (always safe)
+        - NOT tracked + bought via system TODAY (appears in today's completed DELIVERY orders)
+          → import (recovery after server restart on same day)
+        - NOT tracked + NOT in today's orders → skip (personal portfolio, not touched)
         """
         if self.angel_client is None:
             return {"error": "Broker not connected"}
@@ -360,56 +362,76 @@ class SwingTradeService:
         universe_symbols = {s["symbol"]: s for s in NIFTY100_UNIVERSE}
 
         loop = asyncio.get_event_loop()
+
+        # 1. Today's completed DELIVERY BUY orders → only these are eligible for import
+        try:
+            orders = await loop.run_in_executor(None, self.angel_client.get_orders)
+        except Exception as exc:
+            logger.warning(f"[SwingSync] get_orders failed: {exc}")
+            orders = []
+
+        system_bought_today: set[str] = {
+            o.get("tradingsymbol", "").replace("-EQ", "").upper()
+            for o in (orders or [])
+            if (
+                o.get("producttype", "").upper() in ("DELIVERY", "CNC")
+                and o.get("transactiontype", "").upper() == "BUY"
+                and o.get("status", "").upper() in ("COMPLETE", "COMPLETE AFTER MARKET ORDER")
+            )
+        }
+        logger.info(f"[SwingSync] System orders today: {system_bought_today or 'none'}")
+
+        # 2. Holdings → qty / avg price data
         try:
             holdings = await loop.run_in_executor(None, self.angel_client.get_holdings)
         except Exception as exc:
             logger.error(f"[SwingSync] get_holdings failed: {exc}")
             return {"error": str(exc)}
 
-        imported, updated, orphaned = [], [], []
+        holdings_map: dict[str, dict] = {
+            h.get("tradingsymbol", "").replace("-EQ", "").upper(): h
+            for h in (holdings or [])
+            if int(h.get("quantity", 0) or 0) > 0
+        }
 
-        for h in (holdings or []):
-            # Angel One holding fields: tradingsymbol, quantity, averageprice, ltp, …
-            raw_sym = h.get("tradingsymbol", "")
-            # Strip "-EQ" suffix if present
-            symbol = raw_sym.replace("-EQ", "").upper()
+        imported, updated, skipped, orphaned = [], [], [], []
+
+        # 3. Process: tracked positions (always update) + today's orders (import if missing)
+        candidates = set(self._swing_positions.keys()) | system_bought_today
+        for symbol in candidates:
+            if symbol not in universe_symbols:
+                continue
+            h = holdings_map.get(symbol)
+            if h is None:
+                continue  # not in demat at all
+
             qty    = int(h.get("quantity", 0) or 0)
             avg_px = float(h.get("averageprice", 0) or 0)
             ltp    = float(h.get("ltp", avg_px) or avg_px)
 
-            if qty <= 0 or symbol not in universe_symbols:
-                continue  # skip non-Nifty holdings or zero-qty
+            if qty <= 0:
+                continue
 
             stock_info = universe_symbols[symbol]
 
             if symbol in self._swing_positions:
                 existing = self._swing_positions[symbol]
                 if existing["qty"] != qty:
-                    logger.info(
-                        f"[SwingSync] {symbol}: broker qty={qty}, local qty={existing['qty']} — updating"
-                    )
+                    logger.info(f"[SwingSync] {symbol}: qty {existing['qty']} → {qty}")
                     existing["qty"] = qty
-                    existing["entry_price"] = round(avg_px, 2)
-                    existing["current_price"] = round(ltp, 2)
-                    existing["unrealized_pnl"] = round((ltp - avg_px) * qty, 2)
-                    existing["pnl_pct"] = round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0
-                    updated.append(symbol)
+                existing["entry_price"]    = round(avg_px, 2)
+                existing["current_price"]  = round(ltp, 2)
+                existing["unrealized_pnl"] = round((ltp - avg_px) * qty, 2)
+                existing["pnl_pct"]        = round((ltp - avg_px) / avg_px * 100, 2) if avg_px > 0 else 0.0
+                updated.append(symbol)
             else:
-                # Compute ATR-based SL/target via on-demand signal or fallback
+                # Only import if the system placed the order today
                 sig = await self._fetch_signal_on_demand(symbol)
-                if sig:
-                    sl = sig.stop_loss
-                    t1 = sig.target1
-                    t2 = sig.target2
-                else:
-                    risk = avg_px * 0.03  # fallback: 3% SL
-                    sl = round(avg_px - risk, 2)
-                    t1 = round(avg_px + 2 * risk, 2)
-                    t2 = round(avg_px + 3 * risk, 2)
-
-                pos_id = h.get("authorisedquantity") or f"BROKER-{symbol}"
+                sl  = sig.stop_loss if sig else round(avg_px * 0.97, 2)
+                t1  = sig.target1   if sig else round(avg_px * 1.06, 2)
+                t2  = sig.target2   if sig else round(avg_px * 1.09, 2)
                 self._swing_positions[symbol] = {
-                    "order_id":       str(pos_id),
+                    "order_id":       f"RECOVERED-{symbol}",
                     "symbol":         symbol,
                     "name":           stock_info["name"],
                     "sector":         stock_info.get("sector", ""),
@@ -426,27 +448,21 @@ class SwingTradeService:
                     "status":         "open",
                     "mode":           "live",
                     "confidence":     0.5,
-                    "regime":         "imported",
+                    "regime":         "recovered",
                 }
-                logger.info(
-                    f"[SwingSync] Imported broker holding: {symbol} qty={qty} avg=₹{avg_px:.2f}"
-                )
+                logger.info(f"[SwingSync] Recovered {symbol} qty={qty} avg=₹{avg_px:.2f}")
                 imported.append(symbol)
 
-        # Check for local positions not found in broker holdings
-        broker_symbols = {
-            h.get("tradingsymbol", "").replace("-EQ", "").upper()
-            for h in (holdings or [])
-            if int(h.get("quantity", 0) or 0) > 0
-        }
-        for symbol in list(self._swing_positions.keys()):
-            pos = self._swing_positions[symbol]
-            if pos.get("mode") == "live" and symbol not in broker_symbols:
+        # 4. Report live positions not found in broker holdings
+        for symbol, pos in self._swing_positions.items():
+            if pos.get("mode") == "live" and symbol not in holdings_map:
                 orphaned.append(symbol)
-                logger.warning(
-                    f"[SwingSync] {symbol} is in local state as 'live' but NOT found "
-                    f"in broker holdings — may have been sold externally."
-                )
+                logger.warning(f"[SwingSync] {symbol} tracked as live but not in holdings — sold externally?")
+
+        # 5. Count personal holdings that were skipped
+        for symbol, h in holdings_map.items():
+            if symbol in universe_symbols and symbol not in self._swing_positions and symbol not in system_bought_today:
+                skipped.append(symbol)
 
         if imported or updated:
             self._save_state()
@@ -455,10 +471,8 @@ class SwingTradeService:
             "imported":  imported,
             "updated":   updated,
             "orphaned":  orphaned,
-            "total_broker_holdings": len([
-                h for h in (holdings or [])
-                if int(h.get("quantity", 0) or 0) > 0
-            ]),
+            "skipped":   skipped,
+            "message":   "",
         }
 
     async def refresh_position_prices(self) -> None:

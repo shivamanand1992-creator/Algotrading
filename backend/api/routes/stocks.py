@@ -246,11 +246,13 @@ async def sync_from_broker(svc: SwingTradeService = Depends(_get_svc)):
         raise HTTPException(status_code=503, detail=result["error"])
     msg_parts = []
     if result["imported"]:
-        msg_parts.append(f"Imported: {', '.join(result['imported'])}")
+        msg_parts.append(f"Recovered: {', '.join(result['imported'])}")
     if result["updated"]:
-        msg_parts.append(f"Updated qty: {', '.join(result['updated'])}")
+        msg_parts.append(f"Updated: {', '.join(result['updated'])}")
     if result["orphaned"]:
-        msg_parts.append(f"Orphaned (not on broker): {', '.join(result['orphaned'])}")
+        msg_parts.append(f"Not on broker: {', '.join(result['orphaned'])}")
+    if result.get("skipped"):
+        msg_parts.append(f"Skipped {len(result['skipped'])} personal holding(s)")
     if not msg_parts:
         msg_parts.append("Already in sync — no changes needed")
     return {**result, "message": " | ".join(msg_parts)}
