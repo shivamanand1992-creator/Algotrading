@@ -273,8 +273,42 @@ async def _morning_retrain_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auth middleware — protects all /api/* paths except public endpoints
+# Morning broker reconnect — runs at 08:55 IST every weekday
+# Ensures a fresh Angel One session 25 min before autopilot (09:20)
+# and 20 min before market open (09:15).
 # ---------------------------------------------------------------------------
+
+async def _morning_reconnect_loop() -> None:
+    """Force a full Angel One re-login at 08:55 IST on trading days."""
+    last_reconnect_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (8, 55)
+            not_done_today = last_reconnect_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_reconnect_date = today
+                try:
+                    from backend.dependencies import get_angel_client
+                    angel_client = get_angel_client()
+                    if angel_client is None:
+                        logger.warning("Morning reconnect skipped — no broker client configured.")
+                    else:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, angel_client.connect)
+                        logger.info("Morning reconnect at 08:55 IST — Angel One session refreshed.")
+                except Exception as exc:
+                    logger.error(f"Morning reconnect error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_morning_reconnect_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)
 _PUBLIC_API_PATHS = {
     "/api/auth/login",
     "/api/system/status",  # Railway health check
@@ -317,6 +351,7 @@ async def lifespan(app: FastAPI):
     )
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
+    asyncio.create_task(_morning_reconnect_loop())
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())

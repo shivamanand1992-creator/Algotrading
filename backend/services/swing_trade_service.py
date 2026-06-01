@@ -1141,7 +1141,21 @@ class SwingTradeService:
                 f"order ₹{order_amount:.2f} ({qty}×{sig.symbol})"
             )
         except Exception as exc:
-            logger.warning(f"[SwingService] Balance check failed (proceeding anyway): {exc}")
+            # 'str' object has no attribute 'get' means Angel One session expired
+            if "str" in str(exc) and "get" in str(exc):
+                logger.error(
+                    "[SwingService] Balance check suggests expired session (API returned string). "
+                    "Attempting broker reconnect before placing order…"
+                )
+                try:
+                    loop2 = asyncio.get_event_loop()
+                    await loop2.run_in_executor(None, self.angel_client.connect)
+                    logger.info("[SwingService] Broker reconnected.")
+                except Exception as reconnect_exc:
+                    logger.error(f"[SwingService] Reconnect failed: {reconnect_exc}")
+                    return None
+            else:
+                logger.warning(f"[SwingService] Balance check failed (proceeding anyway): {exc}")
 
         # NSE cash equity trading symbol uses the "-EQ" suffix in Angel One
         eq_symbol = f"{sig.symbol}-EQ"
@@ -1189,7 +1203,48 @@ class SwingTradeService:
                 self._save_state()
                 return order_id
         except Exception as exc:
-            logger.error(f"[SwingService] Live order failed for {sig.symbol}: {exc}")
+            err_str = str(exc)
+            # AG8001 = Angel One "Invalid Token" → session expired; reconnect and retry once
+            if "AG8001" in err_str or "Invalid Token" in err_str:
+                logger.warning(
+                    f"[SwingService] AG8001 Invalid Token for {sig.symbol} — "
+                    f"session expired. Reconnecting and retrying…"
+                )
+                try:
+                    loop_rc = asyncio.get_event_loop()
+                    await loop_rc.run_in_executor(None, self.angel_client.connect)
+                    logger.info("[SwingService] Broker reconnected after AG8001.")
+                    # Single retry after reconnect
+                    order_id = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: self.angel_client.place_order(
+                            variety="NORMAL", exchange="NSE", symbol=eq_symbol,
+                            token=token, qty=qty, order_type="MARKET",
+                            transaction_type="BUY", price=0.0,
+                            trigger_price=0.0, product="DELIVERY",
+                        )
+                    )
+                    if order_id:
+                        self._swing_positions[sig.symbol] = {
+                            "order_id": order_id, "symbol": sig.symbol,
+                            "name": sig.name, "sector": sig.sector,
+                            "yf_ticker": sig.yf_ticker, "entry_price": sig.entry_price,
+                            "current_price": sig.entry_price, "qty": qty,
+                            "stop_loss": sig.stop_loss, "target1": sig.target1,
+                            "target2": sig.target2,
+                            "entry_date": datetime.now(_IST).strftime("%Y-%m-%d"),
+                            "unrealized_pnl": 0.0, "pnl_pct": 0.0,
+                            "status": "open", "mode": "live", "token": token,
+                            "confidence": sig.confidence, "regime": sig.regime,
+                        }
+                        logger.info(f"[SwingService] Live CNC order placed after reconnect: {sig.symbol} qty={qty} order_id={order_id}")
+                        self._append_to_ledger(sig.symbol, order_id, qty, sig.entry_price, "live")
+                        self._save_state()
+                        return order_id
+                except Exception as retry_exc:
+                    logger.error(f"[SwingService] Order retry after reconnect failed for {sig.symbol}: {retry_exc}")
+            else:
+                logger.error(f"[SwingService] Live order failed for {sig.symbol}: {exc}")
 
         return None
 
