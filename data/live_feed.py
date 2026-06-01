@@ -24,6 +24,7 @@ from data.angel_client import AngelOneClient
 
 # Try multiple module paths across smartapi-python versions
 _SmartWebSocket = None
+_WS_IS_V2 = False  # True when SmartWebSocketV2 is loaded (prices in paise)
 for _ws_mod, _ws_cls in [
     ("SmartApi.smartWebSocketV2", "SmartWebSocketV2"),   # v1.3.x — correct path
     ("SmartApi.SmartWebSocketV2", "SmartWebSocketV2"),   # alternate casing
@@ -34,6 +35,7 @@ for _ws_mod, _ws_cls in [
     try:
         import importlib as _il
         _SmartWebSocket = getattr(_il.import_module(_ws_mod), _ws_cls)
+        _WS_IS_V2 = "V2" in _ws_cls
         break
     except (ImportError, AttributeError):
         continue
@@ -89,8 +91,11 @@ def _parse_tick(raw: Any) -> Optional[Dict]:
     # SmartWebSocketV2 delivers prices in paisa (integer), older V1 delivers floats
     raw_ltp = raw.get("last_traded_price", raw.get("ltp", raw.get("lp", 0)))
     ltp = float(raw_ltp or 0)
-    # V2 prices are in paisa — convert to rupees when value is suspiciously large
-    if ltp > 1_000_000:
+    # V2 always sends paise — divide unconditionally.  V1 (old SmartWebSocket)
+    # sends rupee floats — only divide if the value is implausibly large (> ₹10000).
+    if _WS_IS_V2:
+        ltp = ltp / 100.0
+    elif ltp > 1_000_000:
         ltp = ltp / 100.0
 
     volume = int(raw.get("volume_trade_for_the_day", raw.get("volume", raw.get("v", 0))) or 0)

@@ -946,8 +946,21 @@ class SwingTradeService:
         """Callback invoked by LiveFeed on every incoming tick (runs in WS thread)."""
         token = str(tick.get("token", ""))
         ltp   = float(tick.get("ltp", 0) or 0)
-        if token and ltp > 0:
-            self._realtime_ltps[token] = ltp
+        if not (token and ltp > 0):
+            return
+        # Sanity-check: if the tick LTP is > 50× the known entry price for this
+        # token, it's almost certainly a paise value that wasn't converted.
+        symbol = self._token_to_symbol.get(token)
+        if symbol:
+            pos = self._swing_positions.get(symbol)
+            if pos and pos.get("entry_price", 0) > 0:
+                if ltp > pos["entry_price"] * 50:
+                    ltp = ltp / 100.0
+                    logger.warning(
+                        f"[SwingTick] {symbol}: raw tick looked like paise "
+                        f"({ltp * 100:.0f}) — auto-divided to ₹{ltp:.2f}"
+                    )
+        self._realtime_ltps[token] = ltp
 
     async def _subscribe_open_positions(self) -> None:
         """Subscribe all open swing positions to the live feed."""
