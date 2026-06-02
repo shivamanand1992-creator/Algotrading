@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { niftyBeesApi } from '../../api/client';
 import { Card } from '../ui/Card';
-import type { NiftyBeesConfig, NiftyBeesPosition, NiftyBeesStatus } from '../../types/api';
+import type { NiftyBeesConfig, NiftyBeesBuyEntry, NiftyBeesPosition, NiftyBeesStatus } from '../../types/api';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Small helpers
 // ---------------------------------------------------------------------------
 
 function PnLBadge({ value }: { value: number }) {
@@ -37,65 +37,55 @@ function Stat({ label, value, sub }: { label: string; value: React.ReactNode; su
 // ---------------------------------------------------------------------------
 
 interface ConfigFormProps {
-  config: NiftyBeesConfig;
-  saving: boolean;
-  onSave: (cfg: Partial<NiftyBeesConfig>) => void;
-  brokerConnected: boolean;
+  config:  NiftyBeesConfig;
+  saving:  boolean;
+  onSave:  (cfg: Partial<NiftyBeesConfig>) => void;
 }
 
-function ConfigForm({ config, saving, onSave, brokerConnected }: ConfigFormProps) {
+function ConfigForm({ config, saving, onSave }: ConfigFormProps) {
   const [local, setLocal] = useState<NiftyBeesConfig>({ ...config });
-
   useEffect(() => { setLocal({ ...config }); }, [config]);
 
-  const field = (key: keyof NiftyBeesConfig, label: string, type: 'number' | 'select', opts?: string[]) => (
+  const numField = (key: keyof NiftyBeesConfig, label: string, step = 'any') => (
     <div className="flex flex-col gap-1">
       <label className="text-[10px] uppercase tracking-widest text-jarvis-primary/60">{label}</label>
-      {type === 'select' && opts ? (
-        <select
-          className="bg-black/40 border border-jarvis-primary/30 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-jarvis-primary"
-          value={String(local[key])}
-          onChange={e => setLocal(p => ({ ...p, [key]: e.target.value }))}
-        >
-          {opts.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
-      ) : (
-        <input
-          type="number"
-          step="any"
-          className="bg-black/40 border border-jarvis-primary/30 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-jarvis-primary w-full"
-          value={local[key] as number}
-          onChange={e => setLocal(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))}
-        />
-      )}
+      <input
+        type="number" step={step}
+        className="bg-black/40 border border-jarvis-primary/30 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-jarvis-primary w-full"
+        value={local[key] as number}
+        onChange={e => setLocal(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))}
+      />
     </div>
   );
 
-  const handleSave = () => {
-    if (local.mode === 'live' && !brokerConnected) {
-      alert('Broker is not connected — switch to paper mode first.');
-      return;
-    }
-    onSave({ ...local });
-  };
-
   return (
     <div className="grid grid-cols-2 gap-4">
-      {field('capital_amount',    'Capital per Buy (₹)', 'number')}
-      {field('dip_threshold_pct', 'Nifty Dip Trigger (%)', 'number')}
-      {field('target_gain_pct',   'Target Gain (%)', 'number')}
-      {field('mode', 'Order Mode', 'select', ['paper', 'live'])}
+      {numField('capital_amount',    'Capital per Buy Chunk (₹)')}
+      {numField('dip_threshold_pct', 'Nifty Dip Trigger (%)')}
+      {numField('target_gain_pct',   'Avg Gain to Sell All (%)')}
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] uppercase tracking-widest text-jarvis-primary/60">Order Mode</label>
+        <select
+          className="bg-black/40 border border-jarvis-primary/30 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-jarvis-primary"
+          value={local.mode}
+          onChange={e => setLocal(p => ({ ...p, mode: e.target.value as 'paper' | 'live' }))}
+        >
+          <option value="paper">paper</option>
+          <option value="live">live</option>
+        </select>
+      </div>
 
       <div className="col-span-2 flex justify-end pt-2">
         <button
-          onClick={handleSave}
+          onClick={() => onSave({ ...local })}
           disabled={saving}
           className="px-5 py-2 rounded font-semibold text-sm transition-all"
           style={{
-            background:  saving ? 'rgba(0,229,255,0.1)' : 'rgba(0,229,255,0.2)',
-            border:      '1px solid rgba(0,229,255,0.5)',
-            color:       '#00e5ff',
-            cursor:      saving ? 'not-allowed' : 'pointer',
+            background: saving ? 'rgba(0,229,255,0.1)' : 'rgba(0,229,255,0.2)',
+            border: '1px solid rgba(0,229,255,0.5)',
+            color: '#00e5ff',
+            cursor: saving ? 'not-allowed' : 'pointer',
           }}
         >
           {saving ? 'Saving…' : 'Save Config'}
@@ -106,23 +96,63 @@ function ConfigForm({ config, saving, onSave, brokerConnected }: ConfigFormProps
 }
 
 // ---------------------------------------------------------------------------
-// Active position card
+// Active DCA position card
 // ---------------------------------------------------------------------------
+
+function BuysTable({ buys }: { buys: NiftyBeesBuyEntry[] }) {
+  if (!buys?.length) return null;
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-jarvis-primary/40 uppercase tracking-widest border-b border-white/5">
+            <th className="text-left py-1.5 pr-3">#</th>
+            <th className="text-left py-1.5 pr-3">Date</th>
+            <th className="text-right pr-3">Qty</th>
+            <th className="text-right pr-3">Buy Price</th>
+            <th className="text-right pr-3">Invested</th>
+            <th className="text-right pr-3">Nifty Dip</th>
+          </tr>
+        </thead>
+        <tbody>
+          {buys.map((b, i) => (
+            <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+              <td className="py-1.5 pr-3 text-jarvis-primary/50">{i + 1}</td>
+              <td className="pr-3 text-jarvis-text-secondary">{b.date?.slice(0, 10)}</td>
+              <td className="text-right pr-3 font-mono text-white">{b.qty}</td>
+              <td className="text-right pr-3 font-mono text-white">₹{b.price.toFixed(2)}</td>
+              <td className="text-right pr-3 font-mono text-jarvis-text-secondary">₹{b.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+              <td className="text-right pr-3">
+                <span className="text-orange-400">▼{b.nifty_dip_pct.toFixed(2)}%</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () => void }) {
   const pnlPos = pos.pnl_pct >= 0;
+  const numBuys = pos.buys?.length ?? 0;
+
   return (
     <div
       className="rounded-xl p-4 border"
       style={{
-        background:   'rgba(0,229,255,0.05)',
-        borderColor:  pnlPos ? 'rgba(0,230,118,0.4)' : 'rgba(255,82,82,0.4)',
-        boxShadow:    pnlPos ? '0 0 20px rgba(0,230,118,0.08)' : '0 0 20px rgba(255,82,82,0.08)',
+        background:  'rgba(0,229,255,0.04)',
+        borderColor: pnlPos ? 'rgba(0,230,118,0.4)' : 'rgba(255,82,82,0.4)',
+        boxShadow:   pnlPos ? '0 0 20px rgba(0,230,118,0.07)' : '0 0 20px rgba(255,82,82,0.07)',
       }}
     >
-      <div className="flex items-center justify-between mb-3">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <span className="text-lg font-bold text-white">NIFTYBEES ETF</span>
+          <span className="text-xs bg-green-500/10 text-green-400 border border-green-400/30 px-2 py-0.5 rounded">
+            {numBuys} BUY{numBuys !== 1 ? 'S' : ''} — DCA ACTIVE
+          </span>
           <span
             className="text-xs px-2 py-0.5 rounded font-semibold"
             style={{
@@ -133,34 +163,66 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
           >
             {pos.mode.toUpperCase()}
           </span>
-          <span className="text-xs bg-green-500/10 text-green-400 border border-green-400/30 px-2 py-0.5 rounded">
-            HOLDING
-          </span>
         </div>
         <PnLBadge value={pos.pnl_pct} />
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-3">
-        <Stat label="Qty"         value={`${pos.qty} units`} />
-        <Stat label="Entry Price" value={`₹${pos.entry_price.toFixed(2)}`} />
-        <Stat label="Current"     value={`₹${(pos.current_price ?? pos.entry_price).toFixed(2)}`} />
-        <Stat label="Invested"    value={`₹${pos.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
-        <Stat label="Unrealized P&L" value={
-          <span style={{ color: pos.unrealized_pnl >= 0 ? '#00e676' : '#ff5252' }}>
-            {pos.unrealized_pnl >= 0 ? '+' : ''}₹{pos.unrealized_pnl.toFixed(2)}
-          </span>
-        } />
-        <Stat label="Nifty at Entry" value={`₹${pos.nifty_at_entry.toFixed(0)}`} sub={`Dip: ${pos.nifty_dip_pct.toFixed(2)}%`} />
+      {/* Key metrics */}
+      <div className="grid grid-cols-4 gap-4 mb-2">
+        <Stat label="Total Units"    value={`${pos.total_qty}`} />
+        <Stat label="Avg Entry"      value={`₹${pos.avg_entry_price.toFixed(2)}`} />
+        <Stat label="Current Price"  value={`₹${(pos.current_price ?? pos.avg_entry_price).toFixed(2)}`} />
+        <Stat
+          label="Unrealized P&L"
+          value={
+            <span style={{ color: pos.unrealized_pnl >= 0 ? '#00e676' : '#ff5252' }}>
+              {pos.unrealized_pnl >= 0 ? '+' : ''}₹{pos.unrealized_pnl.toFixed(2)}
+            </span>
+          }
+        />
+        <Stat
+          label="Total Invested"
+          value={`₹${pos.total_invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+        />
+        <Stat
+          label="Target @ 5%"
+          value={`₹${(pos.avg_entry_price * (1 + (pos.avg_entry_price > 0 ? 0.05 : 0))).toFixed(2)}`}
+          sub="avg × 1.05"
+        />
+        <Stat label="Last Buy"   value={pos.last_buy_date ?? '—'} />
+        <Stat label="Checked"    value={pos.last_checked?.slice(11, 16) ?? '—'} sub={pos.last_checked?.slice(0, 10)} />
       </div>
 
-      <div className="flex items-center justify-between text-xs text-jarvis-text-secondary">
-        <span>Bought: {pos.entry_date}</span>
-        <span>Last checked: {pos.last_checked ?? '—'}</span>
+      {/* Progress bar: avg gain toward target */}
+      {(() => {
+        const target = 5;
+        const pct    = Math.min(100, Math.max(0, (pos.pnl_pct / target) * 100));
+        const col    = pct >= 100 ? '#00e676' : pct >= 60 ? '#ffd600' : '#00e5ff';
+        return (
+          <div className="my-3">
+            <div className="flex justify-between text-[10px] text-jarvis-text-secondary mb-1">
+              <span>Progress to target ({pos.pnl_pct.toFixed(2)}% of {target}%)</span>
+              <span style={{ color: col }}>{pct.toFixed(0)}%</span>
+            </div>
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-1000"
+                style={{ width: `${pct}%`, background: col, boxShadow: `0 0 6px ${col}` }}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Individual buys table */}
+      <BuysTable buys={pos.buys} />
+
+      <div className="flex justify-end mt-3">
         <button
           onClick={onClose}
-          className="text-red-400 hover:text-red-300 border border-red-400/30 hover:border-red-400/60 px-3 py-1 rounded transition-all"
+          className="text-red-400 hover:text-red-300 border border-red-400/30 hover:border-red-400/60 px-3 py-1 rounded text-xs transition-all"
         >
-          Close Tracker
+          Reset Tracker
         </button>
       </div>
     </div>
@@ -168,7 +230,7 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
 }
 
 // ---------------------------------------------------------------------------
-// History table
+// Closed trade history
 // ---------------------------------------------------------------------------
 
 function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
@@ -180,10 +242,11 @@ function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-jarvis-primary/60 text-[10px] uppercase tracking-wider border-b border-jarvis-primary/10">
-            <th className="text-left py-2 pr-3">Entry Date</th>
-            <th className="text-right pr-3">Entry ₹</th>
+            <th className="text-left py-2 pr-3">Exit Date</th>
+            <th className="text-right pr-3">Buys</th>
+            <th className="text-right pr-3">Units</th>
+            <th className="text-right pr-3">Avg Entry</th>
             <th className="text-right pr-3">Exit ₹</th>
-            <th className="text-right pr-3">Qty</th>
             <th className="text-right pr-3">P&L ₹</th>
             <th className="text-right pr-3">Gain %</th>
             <th className="text-left">Reason</th>
@@ -192,16 +255,15 @@ function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
         <tbody>
           {[...history].reverse().map((h, i) => (
             <tr key={i} className="border-b border-white/5 hover:bg-jarvis-primary/5 transition-colors">
-              <td className="py-2 pr-3 text-jarvis-text-secondary text-xs">{h.entry_date?.slice(0, 10)}</td>
-              <td className="text-right pr-3 font-mono">₹{h.entry_price.toFixed(2)}</td>
+              <td className="py-2 pr-3 text-jarvis-text-secondary text-xs">{h.exit_date?.slice(0, 10) ?? '—'}</td>
+              <td className="text-right pr-3">{h.buys?.length ?? 1}</td>
+              <td className="text-right pr-3 font-mono">{h.total_qty}</td>
+              <td className="text-right pr-3 font-mono">₹{h.avg_entry_price.toFixed(2)}</td>
               <td className="text-right pr-3 font-mono">₹{(h.exit_price ?? 0).toFixed(2)}</td>
-              <td className="text-right pr-3">{h.qty}</td>
               <td className={`text-right pr-3 font-mono font-bold ${(h.realized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {(h.realized_pnl ?? 0) >= 0 ? '+' : ''}₹{(h.realized_pnl ?? 0).toFixed(2)}
               </td>
-              <td className="text-right pr-3">
-                <PnLBadge value={h.gain_pct ?? 0} />
-              </td>
+              <td className="text-right pr-3"><PnLBadge value={h.gain_pct ?? 0} /></td>
               <td className="text-xs text-jarvis-text-secondary capitalize">{h.close_reason?.replace(/_/g, ' ')}</td>
             </tr>
           ))}
@@ -216,12 +278,12 @@ function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
 // ---------------------------------------------------------------------------
 
 export function NiftyBeesView() {
-  const [status, setStatus]   = useState<NiftyBeesStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
+  const [status,   setStatus]   = useState<NiftyBeesStatus | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(false);
   const [checking, setChecking] = useState(false);
-  const [error, setError]     = useState('');
-  const [lastCheck, setLastCheck] = useState<{ action: string; details: string } | null>(null);
+  const [error,    setError]    = useState('');
+  const [lastAction, setLastAction] = useState<{ action: string; details: string } | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -237,8 +299,8 @@ export function NiftyBeesView() {
 
   useEffect(() => {
     fetchStatus();
-    const timer = setInterval(fetchStatus, 60_000);
-    return () => clearInterval(timer);
+    const t = setInterval(fetchStatus, 60_000);
+    return () => clearInterval(t);
   }, [fetchStatus]);
 
   const handleToggle = async () => {
@@ -247,11 +309,8 @@ export function NiftyBeesView() {
     try {
       await niftyBeesApi.updateConfig({ enabled: !status.config.enabled });
       await fetchStatus();
-    } catch {
-      setError('Failed to toggle autopilot.');
-    } finally {
-      setSaving(false);
-    }
+    } catch { setError('Failed to toggle autopilot.'); }
+    finally  { setSaving(false); }
   };
 
   const handleSaveConfig = async (cfg: Partial<NiftyBeesConfig>) => {
@@ -259,82 +318,66 @@ export function NiftyBeesView() {
     try {
       await niftyBeesApi.updateConfig(cfg);
       await fetchStatus();
-    } catch {
-      setError('Failed to save config.');
-    } finally {
-      setSaving(false);
-    }
+    } catch { setError('Failed to save config.'); }
+    finally  { setSaving(false); }
   };
 
   const handleManualCheck = async () => {
     setChecking(true);
-    setLastCheck(null);
+    setLastAction(null);
     try {
       const res = await niftyBeesApi.triggerCheck();
-      setLastCheck(res.data);
+      setLastAction(res.data);
       await fetchStatus();
-    } catch {
-      setError('Manual check failed.');
-    } finally {
-      setChecking(false);
-    }
+    } catch { setError('Manual check failed.'); }
+    finally  { setChecking(false); }
   };
 
   const handleClosePosition = async () => {
-    if (!window.confirm('Close / reset the tracked NiftyBees position? Use this if you sold manually.')) return;
+    if (!window.confirm('Reset the tracked NiftyBees position? Use this if you sold manually in Angel One.')) return;
     try {
       await niftyBeesApi.closePosition();
       await fetchStatus();
-    } catch {
-      setError('Failed to close position tracker.');
-    }
+    } catch { setError('Failed to reset position tracker.'); }
   };
 
-  const enabled = status?.config?.enabled ?? false;
+  const enabled  = status?.config?.enabled ?? false;
+  const position = status?.position;
+  const numBuys  = position?.buys?.length ?? 0;
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 text-jarvis-primary/40 text-sm tracking-widest">
-        LOADING NIFTYBEES AUTOPILOT...
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="flex items-center justify-center h-64 text-jarvis-primary/40 text-sm tracking-widest">
+      LOADING NIFTYBEES AUTOPILOT...
+    </div>
+  );
 
   return (
     <div className="p-6 space-y-6">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-wide">NiftyBees ETF Autopilot</h1>
           <p className="text-sm text-jarvis-text-secondary mt-1">
-            Auto-buy NIFTYBEES when Nifty dips · Auto-sell at 5% gain
+            DCA buy on each Nifty dip · Sell all when avg gain ≥ target
           </p>
         </div>
-
-        {/* Enable / disable toggle */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
-            onClick={handleManualCheck}
-            disabled={checking}
+            onClick={handleManualCheck} disabled={checking}
             className="text-sm px-4 py-2 rounded border transition-all"
-            style={{
-              border:  '1px solid rgba(0,229,255,0.3)',
-              color:   checking ? 'rgba(0,229,255,0.4)' : '#00e5ff',
-              background: 'rgba(0,229,255,0.05)',
-            }}
+            style={{ border: '1px solid rgba(0,229,255,0.3)', color: checking ? 'rgba(0,229,255,0.4)' : '#00e5ff', background: 'rgba(0,229,255,0.05)' }}
           >
             {checking ? 'Checking…' : 'Check Now'}
           </button>
-
           <button
-            onClick={handleToggle}
-            disabled={saving}
+            onClick={handleToggle} disabled={saving}
             className="px-5 py-2 rounded-lg font-bold text-sm transition-all"
             style={{
-              background:  enabled ? 'rgba(255,82,82,0.2)'    : 'rgba(0,229,255,0.2)',
-              border:      enabled ? '1px solid rgba(255,82,82,0.5)' : '1px solid rgba(0,229,255,0.5)',
-              color:       enabled ? '#ff5252' : '#00e5ff',
-              boxShadow:   enabled ? '0 0 16px rgba(255,82,82,0.2)' : '0 0 16px rgba(0,229,255,0.2)',
+              background: enabled ? 'rgba(255,82,82,0.2)'    : 'rgba(0,229,255,0.2)',
+              border:     enabled ? '1px solid rgba(255,82,82,0.5)' : '1px solid rgba(0,229,255,0.5)',
+              color:      enabled ? '#ff5252' : '#00e5ff',
+              boxShadow:  enabled ? '0 0 16px rgba(255,82,82,0.2)' : '0 0 16px rgba(0,229,255,0.2)',
             }}
           >
             {enabled ? '◼ Disable Autopilot' : '▶ Enable Autopilot'}
@@ -343,22 +386,13 @@ export function NiftyBeesView() {
       </div>
 
       {error && (
-        <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/30 rounded px-4 py-2">
-          {error}
-        </div>
+        <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/30 rounded px-4 py-2">{error}</div>
       )}
 
-      {lastCheck && lastCheck.action !== 'none' && (
-        <div
-          className="text-sm rounded px-4 py-2 border"
-          style={{
-            background:  'rgba(0,229,255,0.06)',
-            borderColor: 'rgba(0,229,255,0.25)',
-            color:       '#a0c4e0',
-          }}
-        >
+      {lastAction && !['none', 'watching'].includes(lastAction.action) && (
+        <div className="text-sm rounded px-4 py-2 border" style={{ background: 'rgba(0,229,255,0.06)', borderColor: 'rgba(0,229,255,0.25)', color: '#a0c4e0' }}>
           <span className="text-jarvis-primary font-semibold">Last check: </span>
-          {lastCheck.action.toUpperCase()} — {lastCheck.details}
+          {lastAction.action.toUpperCase()} — {lastAction.details}
         </div>
       )}
 
@@ -366,115 +400,75 @@ export function NiftyBeesView() {
       <Card>
         <div className="flex items-center gap-8 flex-wrap">
           <div className="flex items-center gap-2">
-            <div
-              className="w-2.5 h-2.5 rounded-full"
-              style={{
-                background: enabled ? '#00e676' : '#666',
-                boxShadow:  enabled ? '0 0 8px #00e676' : 'none',
-              }}
-            />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: enabled ? '#00e676' : '#555', boxShadow: enabled ? '0 0 8px #00e676' : 'none' }} />
             <span className="text-sm font-semibold" style={{ color: enabled ? '#00e676' : '#666' }}>
               {enabled ? 'AUTOPILOT ON' : 'AUTOPILOT OFF'}
             </span>
           </div>
           {status?.config && (
             <>
-              <Stat label="Capital" value={`₹${status.config.capital_amount.toLocaleString('en-IN')}`} />
-              <Stat label="Dip Trigger" value={`${status.config.dip_threshold_pct}%`} />
-              <Stat label="Target Gain" value={`${status.config.target_gain_pct}%`} />
-              <Stat label="Mode" value={
-                <span style={{ color: status.config.mode === 'live' ? '#ff4081' : '#00e5ff' }}>
-                  {status.config.mode.toUpperCase()}
-                </span>
-              } />
-              <Stat
-                label="Strategy"
-                value="Buy Dip, Hold for Target"
-                sub="No time limit — days to weeks"
-              />
+              <Stat label="Per-Chunk Capital" value={`₹${status.config.capital_amount.toLocaleString('en-IN')}`} />
+              <Stat label="Dip Trigger"       value={`≥${status.config.dip_threshold_pct}%`} sub="from prev close" />
+              <Stat label="Sell Trigger"      value={`≥${status.config.target_gain_pct}%`}   sub="avg entry gain" />
+              <Stat label="Mode"              value={<span style={{ color: status.config.mode === 'live' ? '#ff4081' : '#00e5ff' }}>{status.config.mode.toUpperCase()}</span>} />
+              {position?.active && (
+                <Stat label="Buys Accumulated" value={`${numBuys} day${numBuys !== 1 ? 's' : ''}`} sub={`avg ₹${position.avg_entry_price.toFixed(2)}`} />
+              )}
             </>
           )}
         </div>
       </Card>
 
-      {/* Active position */}
-      {status?.position?.active && (
+      {/* Active DCA position */}
+      {position?.active ? (
         <section>
-          <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-3">
-            Open Position
-          </h2>
-          <PositionCard pos={status.position} onClose={handleClosePosition} />
+          <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-3">Open Position</h2>
+          <PositionCard pos={position} onClose={handleClosePosition} />
         </section>
-      )}
-
-      {!status?.position?.active && (
-        <div
-          className="rounded-xl border border-dashed border-jarvis-primary/20 p-8 text-center"
-          style={{ background: 'rgba(0,229,255,0.02)' }}
-        >
-          <div className="text-3xl mb-2">📊</div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-jarvis-primary/20 p-8 text-center" style={{ background: 'rgba(0,229,255,0.02)' }}>
+          <div className="text-3xl mb-2">🐝</div>
           <p className="text-jarvis-text-secondary text-sm">
-            No active position — autopilot will buy when Nifty drops ≥{' '}
+            No active position — system will buy when Nifty dips ≥{' '}
             <strong className="text-jarvis-primary">{status?.config?.dip_threshold_pct ?? 1}%</strong>
           </p>
-          <p className="text-xs text-jarvis-text-secondary/60 mt-1">
-            Checks every 60 seconds during market hours (09:15–15:30 IST)
-          </p>
+          <p className="text-xs text-jarvis-text-secondary/60 mt-1">Checks every 60 s during 09:15–15:30 IST · One buy chunk per calendar day</p>
         </div>
       )}
 
       {/* Config editor */}
       <Card>
-        <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-4">
-          Configuration
-        </h2>
-        {status?.config && (
-          <ConfigForm
-            config={status.config}
-            saving={saving}
-            onSave={handleSaveConfig}
-            brokerConnected={true}
-          />
-        )}
+        <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-4">Configuration</h2>
+        {status?.config && <ConfigForm config={status.config} saving={saving} onSave={handleSaveConfig} />}
       </Card>
 
       {/* How it works */}
       <Card>
-        <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-3">
-          How It Works
-        </h2>
+        <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-3">Strategy Logic</h2>
         <ol className="space-y-2 text-sm text-jarvis-text-secondary">
           <li className="flex gap-3">
             <span className="text-jarvis-primary font-bold shrink-0">1.</span>
-            Every morning at 09:15 IST, the system wakes up and begins monitoring.
+            Each day Nifty drops ≥ <strong className="text-white">{status?.config?.dip_threshold_pct ?? 1}%</strong> from the previous close, the system buys ₹{status?.config?.capital_amount?.toLocaleString('en-IN') ?? '10,000'} of NIFTYBEES ETF (CNC delivery). Only one buy per calendar day.
           </li>
           <li className="flex gap-3">
             <span className="text-jarvis-primary font-bold shrink-0">2.</span>
-            It fetches the previous day's Nifty50 closing price and the live intraday price.
+            If tomorrow Nifty dips again, another chunk is added. The blended average entry price updates after every buy.
           </li>
           <li className="flex gap-3">
             <span className="text-jarvis-primary font-bold shrink-0">3.</span>
-            If Nifty drops ≥ <strong className="text-white">{status?.config?.dip_threshold_pct ?? 1}%</strong> from
-            yesterday's close, it buys NIFTYBEES ETF for ₹{status?.config?.capital_amount?.toLocaleString('en-IN') ?? '10,000'}.
+            The system checks live NIFTYBEES LTP every 60 seconds. When the current price is ≥ <strong className="text-white">{status?.config?.target_gain_pct ?? 5}%</strong> above the average entry, it sells <em>all accumulated units</em> in one DELIVERY order.
           </li>
           <li className="flex gap-3">
             <span className="text-jarvis-primary font-bold shrink-0">4.</span>
-            The position is tracked across days — no forced exit. It sells automatically when
-            the gain reaches <strong className="text-white">{status?.config?.target_gain_pct ?? 5}%</strong> (could be 2 days, 10 days, or a month).
-          </li>
-          <li className="flex gap-3">
-            <span className="text-jarvis-primary font-bold shrink-0">5.</span>
-            Only one position at a time. Once sold, the system waits for the next dip.
+            No fixed time limit — the position can span 2 days, 10 days, or a month. After a full exit, the cycle restarts on the next dip.
           </li>
         </ol>
       </Card>
 
-      {/* Trade history */}
-      {status?.history && status.history.length > 0 && (
+      {/* History */}
+      {!!status?.history?.length && (
         <Card>
-          <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-4">
-            Closed Trades
-          </h2>
+          <h2 className="text-sm font-semibold text-jarvis-primary/70 uppercase tracking-widest mb-4">Closed Trades</h2>
           <HistoryTable history={status.history} />
         </Card>
       )}

@@ -150,27 +150,34 @@ export interface NiftyBeesConfig {
   target_gain_pct:   number;
 }
 
+export interface NiftyBeesBuyEntry {
+  date:          string;
+  qty:           number;
+  price:         number;
+  nifty_at_buy:  number;
+  nifty_dip_pct: number;
+  order_id:      string;
+  invested:      number;
+}
+
 export interface NiftyBeesPosition {
-  active:         boolean;
-  symbol:         string;
-  qty:            number;
-  entry_price:    number;
-  entry_date:     string;
-  nifty_at_entry: number;
-  nifty_dip_pct:  number;
-  current_price:  number;
-  mode:           'paper' | 'live';
-  order_id:       string;
-  invested:       number;
-  unrealized_pnl: number;
-  pnl_pct:        number;
-  last_checked:   string;
+  active:          boolean;
+  buys:            NiftyBeesBuyEntry[];
+  total_qty:       number;
+  total_invested:  number;
+  avg_entry_price: number;
+  mode:            'paper' | 'live';
+  last_buy_date:   string;
+  current_price:   number;
+  unrealized_pnl:  number;
+  pnl_pct:         number;
+  last_checked:    string;
   // on closed trades
-  exit_price?:    number;
-  exit_date?:     string;
-  gain_pct?:      number;
-  realized_pnl?:  number;
-  close_reason?:  string;
+  exit_price?:     number;
+  exit_date?:      string;
+  gain_pct?:       number;
+  realized_pnl?:   number;
+  close_reason?:   string;
 }
 
 export interface NiftyBeesStatus {

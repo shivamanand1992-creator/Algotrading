@@ -1,8 +1,11 @@
 """
 niftybees_service.py
 ====================
-NiftyBees ETF autopilot — buy NIFTYBEES when Nifty drops ≥ threshold from
-previous close; sell when the position gains ≥ target.
+NiftyBees ETF autopilot — DCA buy strategy:
+  • Each trading day Nifty drops ≥ threshold% from previous close → buy a chunk
+  • Tracks blended average cost across all buys
+  • Sells ALL units when average gain ≥ target%
+  • No "one position at a time" restriction — accumulates across days
 
 Paper mode  — positions tracked in DB; no real orders
 Live mode   — CNC DELIVERY orders via Angel One
@@ -21,32 +24,28 @@ from typing import Optional
 
 import pytz
 from loguru import logger
-from sqlalchemy import Column, String, Text, create_engine, text
+from sqlalchemy import Column, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 _IST = pytz.timezone("Asia/Kolkata")
 
-# Angel One token for Nifty50 index spot price
 _NIFTY_TOKEN   = "26000"
 _NIFTY_SYMBOL  = "Nifty 50"
-
-# Fallback token for NIFTYBEES ETF (Nippon India ETF Nifty BeES)
-# Resolved dynamically via searchScrip; this is the known NSE token.
 _NIFTYBEES_FALLBACK_TOKEN = "2850"
 
 _DEFAULT_CONFIG: dict = {
     "enabled":            False,
     "mode":               "paper",   # "paper" | "live"
-    "capital_amount":     10000.0,   # INR to deploy on each buy signal
-    "dip_threshold_pct":  1.0,       # buy when Nifty intraday dip >= X%
-    "target_gain_pct":    5.0,       # sell when NiftyBees position gains >= X%
+    "capital_amount":     10000.0,   # INR per buy chunk
+    "dip_threshold_pct":  1.0,       # buy when Nifty dip >= X% from prev close
+    "target_gain_pct":    5.0,       # sell ALL when avg gain >= X%
 }
 
 
 # ---------------------------------------------------------------------------
-# SQLAlchemy — reuse the same swing_service_state table
+# SQLAlchemy — reuse swing_service_state table with niftybees_* keys
 # ---------------------------------------------------------------------------
 
 class _NBBase(DeclarativeBase):
@@ -58,8 +57,6 @@ class _NBStateRow(_NBBase):
     key        = Column(String(64), primary_key=True)
     value_json = Column(Text,       nullable=False, default="{}")
     updated_at = Column(String(32), nullable=False, default="")
-
-    # Allow extend_existing so other services using the same table don't clash
     __table_args__ = {"extend_existing": True}
 
 
@@ -75,17 +72,29 @@ def _get_engine():
 
 
 # ---------------------------------------------------------------------------
-# Service
+# Position structure
 # ---------------------------------------------------------------------------
+#
+# self._position = {
+#   "active":          True,
+#   "buys": [
+#     { "date": "2026-06-02 09:45:00", "qty": 40, "price": 248.0,
+#       "nifty_at_buy": 24100.0, "nifty_dip_pct": 1.25,
+#       "order_id": "PAPER-NB-…", "invested": 9920.0 },
+#     ...
+#   ],
+#   "total_qty":       81,
+#   "total_invested":  19924.0,
+#   "avg_entry_price": 246.22,
+#   "mode":            "paper",
+#   "last_buy_date":   "2026-06-03",   ← guard: one buy per day
+#   "current_price":   255.0,
+#   "unrealized_pnl":  712.38,
+#   "pnl_pct":         3.57,
+#   "last_checked":    "…",
+# }
 
 class NiftyBeesService:
-    """
-    Autopilot for NiftyBees ETF:
-      • Every minute during 09:15–15:30 IST: check Nifty dip → buy
-      • If position open: check gain → sell
-    State (config + position + history) persisted in PostgreSQL.
-    """
-
     def __init__(self, angel_client=None) -> None:
         self.angel_client = angel_client
         self._engine       = _get_engine()
@@ -93,17 +102,14 @@ class NiftyBeesService:
         self._position: Optional[dict] = None
         self._history: list = []
 
-        # daily cache for previous Nifty close
         self._prev_close_date: Optional[_date] = None
         self._prev_nifty_close: Optional[float] = None
-
-        # cached Angel One token for NIFTYBEES
         self._niftybees_token: Optional[str] = None
 
         self._load_state()
 
     # -----------------------------------------------------------------------
-    # State persistence
+    # Persistence
     # -----------------------------------------------------------------------
 
     def _load_state(self) -> None:
@@ -145,7 +151,7 @@ class NiftyBeesService:
             logger.warning(f"[NiftyBees] _save_state error: {exc}")
 
     # -----------------------------------------------------------------------
-    # Config / position accessors
+    # Config / public API
     # -----------------------------------------------------------------------
 
     def set_config(self, **kwargs) -> None:
@@ -163,13 +169,18 @@ class NiftyBeesService:
         }
 
     def close_position_manual(self, reason: str = "manual_close") -> bool:
-        """Mark current position as manually closed (paper only)."""
         if not self._position or not self._position.get("active"):
             return False
-        self._position["active"]       = False
-        self._position["close_reason"] = reason
-        self._position["exit_date"]    = datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
-        self._history.append(dict(self._position))
+        closed = {
+            **self._position,
+            "active":       False,
+            "exit_price":   self._position.get("current_price", self._position.get("avg_entry_price", 0)),
+            "exit_date":    datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
+            "gain_pct":     self._position.get("pnl_pct", 0.0),
+            "realized_pnl": self._position.get("unrealized_pnl", 0.0),
+            "close_reason": reason,
+        }
+        self._history.append(closed)
         self._position = None
         self._save_state()
         return True
@@ -179,7 +190,6 @@ class NiftyBeesService:
     # -----------------------------------------------------------------------
 
     async def _get_prev_nifty_close(self) -> Optional[float]:
-        """Return Nifty50 previous trading day close (cached per day)."""
         today = datetime.now(_IST).date()
         if self._prev_close_date == today and self._prev_nifty_close:
             return self._prev_nifty_close
@@ -190,9 +200,7 @@ class NiftyBeesService:
             loop = asyncio.get_event_loop()
 
             def _fetch():
-                ticker = yf.Ticker("^NSEI")
-                df = ticker.history(period="5d", interval="1d")
-                return df
+                return yf.Ticker("^NSEI").history(period="5d", interval="1d")
 
             df = await loop.run_in_executor(None, _fetch)
             if df is None or df.empty:
@@ -213,14 +221,12 @@ class NiftyBeesService:
             return None
 
     async def _get_nifty_ltp(self) -> Optional[float]:
-        """Return current Nifty50 index LTP via Angel One."""
         if self.angel_client is None:
             return None
         try:
             loop = asyncio.get_event_loop()
             ltp  = await loop.run_in_executor(
-                None,
-                lambda: self.angel_client.get_ltp("NSE", _NIFTY_SYMBOL, _NIFTY_TOKEN)
+                None, lambda: self.angel_client.get_ltp("NSE", _NIFTY_SYMBOL, _NIFTY_TOKEN)
             )
             return float(ltp) if ltp else None
         except Exception as exc:
@@ -235,12 +241,10 @@ class NiftyBeesService:
         try:
             loop  = asyncio.get_event_loop()
             token = await loop.run_in_executor(
-                None,
-                lambda: self.angel_client.search_scrip("NSE", "NIFTYBEES")
+                None, lambda: self.angel_client.search_scrip("NSE", "NIFTYBEES")
             )
             if token:
                 self._niftybees_token = token
-                logger.info(f"[NiftyBees] NIFTYBEES token resolved: {token}")
                 return token
         except Exception as exc:
             logger.warning(f"[NiftyBees] token resolution error: {exc}")
@@ -248,19 +252,16 @@ class NiftyBeesService:
         return _NIFTYBEES_FALLBACK_TOKEN
 
     async def _get_niftybees_ltp(self) -> Optional[float]:
-        """Return current NIFTYBEES ETF LTP via Angel One, fallback to yfinance."""
         if self.angel_client is not None:
             try:
                 token = await self._resolve_niftybees_token()
                 loop  = asyncio.get_event_loop()
                 ltp   = await loop.run_in_executor(
-                    None,
-                    lambda: self.angel_client.get_ltp("NSE", "NIFTYBEES-EQ", token)
+                    None, lambda: self.angel_client.get_ltp("NSE", "NIFTYBEES-EQ", token)
                 )
                 if ltp and float(ltp) > 0:
                     ltp_f = float(ltp)
-                    # Sanity: NIFTYBEES trades ~200-300; if > 10,000 it's paise
-                    if ltp_f > 10_000:
+                    if ltp_f > 10_000:   # sanity: NIFTYBEES ~200-300; paise guard
                         ltp_f /= 100.0
                     return ltp_f
             except Exception as exc:
@@ -270,13 +271,9 @@ class NiftyBeesService:
         try:
             import yfinance as yf
             loop = asyncio.get_event_loop()
-
-            def _fetch():
-                t  = yf.Ticker("NIFTYBEES.NS")
-                df = t.history(period="1d", interval="1m")
-                return df
-
-            df = await loop.run_in_executor(None, _fetch)
+            df   = await loop.run_in_executor(
+                None, lambda: yf.Ticker("NIFTYBEES.NS").history(period="1d", interval="1m")
+            )
             if df is not None and not df.empty:
                 return float(df["Close"].iloc[-1])
         except Exception as exc:
@@ -284,14 +281,16 @@ class NiftyBeesService:
         return None
 
     # -----------------------------------------------------------------------
-    # Buy / sell logic
+    # Buy — add a chunk to the DCA position
     # -----------------------------------------------------------------------
 
-    async def _buy(self, niftybees_price: float, nifty_ltp: float, dip_pct: float) -> None:
+    async def _buy(self, nb_price: float, nifty_ltp: float, dip_pct: float) -> None:
         capital  = self._config["capital_amount"]
-        qty      = max(1, math.floor(capital / niftybees_price))
-        invested = round(qty * niftybees_price, 2)
+        qty      = max(1, math.floor(capital / nb_price))
+        invested = round(qty * nb_price, 2)
         mode     = self._config["mode"]
+        today    = datetime.now(_IST).strftime("%Y-%m-%d")
+        ts       = datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
         order_id: Optional[str] = None
 
         if mode == "live" and self.angel_client is not None:
@@ -301,18 +300,13 @@ class NiftyBeesService:
                 order_id = await loop.run_in_executor(
                     None,
                     lambda: self.angel_client.place_order(
-                        variety="NORMAL",
-                        exchange="NSE",
-                        symbol="NIFTYBEES-EQ",
-                        token=token,
-                        qty=qty,
-                        order_type="MARKET",
-                        transaction_type="BUY",
-                        price=0.0,
+                        variety="NORMAL", exchange="NSE",
+                        symbol="NIFTYBEES-EQ", token=token,
+                        qty=qty, order_type="MARKET",
+                        transaction_type="BUY", price=0.0,
                         product="DELIVERY",
                     )
                 )
-                logger.info(f"[NiftyBees] Live BUY order placed: {order_id}")
             except Exception as exc:
                 logger.error(f"[NiftyBees] Live BUY failed: {exc}")
                 return
@@ -320,36 +314,60 @@ class NiftyBeesService:
         if order_id is None:
             order_id = f"PAPER-NB-{int(datetime.now().timestamp())}"
 
-        self._position = {
-            "active":         True,
-            "symbol":         "NIFTYBEES",
-            "qty":            qty,
-            "entry_price":    round(niftybees_price, 2),
-            "entry_date":     datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
-            "nifty_at_entry": round(nifty_ltp, 2),
-            "nifty_dip_pct":  round(dip_pct, 2),
-            "current_price":  round(niftybees_price, 2),
-            "mode":           mode,
-            "order_id":       order_id,
-            "invested":       invested,
-            "unrealized_pnl": 0.0,
-            "pnl_pct":        0.0,
-            "last_checked":   datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
+        buy_entry = {
+            "date":          ts,
+            "qty":           qty,
+            "price":         round(nb_price, 2),
+            "nifty_at_buy":  round(nifty_ltp, 2),
+            "nifty_dip_pct": round(dip_pct, 2),
+            "order_id":      order_id,
+            "invested":      invested,
         }
+
+        if self._position and self._position.get("active"):
+            # Add to existing DCA position
+            pos = self._position
+            pos["buys"].append(buy_entry)
+            pos["total_qty"]       += qty
+            pos["total_invested"]   = round(pos["total_invested"] + invested, 2)
+            pos["avg_entry_price"]  = round(pos["total_invested"] / pos["total_qty"], 2)
+            pos["last_buy_date"]    = today
+            pos["current_price"]    = round(nb_price, 2)
+        else:
+            self._position = {
+                "active":          True,
+                "buys":            [buy_entry],
+                "total_qty":       qty,
+                "total_invested":  invested,
+                "avg_entry_price": round(nb_price, 2),
+                "mode":            mode,
+                "last_buy_date":   today,
+                "current_price":   round(nb_price, 2),
+                "unrealized_pnl":  0.0,
+                "pnl_pct":         0.0,
+                "last_checked":    ts,
+            }
+
         self._save_state()
+        pos = self._position
         logger.info(
-            f"[NiftyBees] BOUGHT {qty} units @ ₹{niftybees_price:.2f} "
-            f"| Nifty dip={dip_pct:.2f}% | Invested=₹{invested:.0f}"
+            f"[NiftyBees] BUY #{len(pos['buys'])} — {qty} units @ ₹{nb_price:.2f} "
+            f"| total_qty={pos['total_qty']} | avg_entry=₹{pos['avg_entry_price']:.2f} "
+            f"| total_invested=₹{pos['total_invested']:.0f}"
         )
+
+    # -----------------------------------------------------------------------
+    # Sell — exit entire position
+    # -----------------------------------------------------------------------
 
     async def _sell(self, current_price: float, reason: str) -> None:
         if not self._position:
             return
-        qty   = self._position["qty"]
-        entry = self._position["entry_price"]
-        gain  = (current_price - entry) / entry * 100
-        pnl   = round((current_price - entry) * qty, 2)
-        mode  = self._position["mode"]
+        total_qty = self._position["total_qty"]
+        avg_entry = self._position["avg_entry_price"]
+        gain      = (current_price - avg_entry) / avg_entry * 100
+        pnl       = round((current_price - avg_entry) * total_qty, 2)
+        mode      = self._position["mode"]
 
         if mode == "live" and self.angel_client is not None:
             try:
@@ -358,65 +376,62 @@ class NiftyBeesService:
                 oid   = await loop.run_in_executor(
                     None,
                     lambda: self.angel_client.place_order(
-                        variety="NORMAL",
-                        exchange="NSE",
-                        symbol="NIFTYBEES-EQ",
-                        token=token,
-                        qty=qty,
-                        order_type="MARKET",
-                        transaction_type="SELL",
-                        price=0.0,
+                        variety="NORMAL", exchange="NSE",
+                        symbol="NIFTYBEES-EQ", token=token,
+                        qty=total_qty, order_type="MARKET",
+                        transaction_type="SELL", price=0.0,
                         product="DELIVERY",
                     )
                 )
-                logger.info(f"[NiftyBees] Live SELL order placed: {oid}")
+                logger.info(f"[NiftyBees] Live SELL order: {oid}")
             except Exception as exc:
                 logger.error(f"[NiftyBees] Live SELL failed: {exc}")
                 return
 
         closed = {
             **self._position,
-            "active":        False,
-            "exit_price":    round(current_price, 2),
-            "exit_date":     datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
-            "gain_pct":      round(gain, 2),
-            "realized_pnl":  pnl,
-            "close_reason":  reason,
+            "active":       False,
+            "exit_price":   round(current_price, 2),
+            "exit_date":    datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
+            "gain_pct":     round(gain, 2),
+            "realized_pnl": pnl,
+            "close_reason": reason,
         }
         self._history.append(closed)
         self._position = None
         self._save_state()
         logger.info(
-            f"[NiftyBees] SOLD {qty} units @ ₹{current_price:.2f} "
-            f"| Gain={gain:.2f}% | P&L=₹{pnl:.2f}"
+            f"[NiftyBees] SOLD {total_qty} units @ ₹{current_price:.2f} "
+            f"| Avg Entry ₹{avg_entry:.2f} | Gain={gain:.2f}% | P&L=₹{pnl:.2f}"
         )
 
     # -----------------------------------------------------------------------
-    # Main monitor — called every 60s during market hours from main.py
+    # Main monitor — called every 60s from main.py during market hours
     # -----------------------------------------------------------------------
 
     async def run_monitor(self) -> dict:
         """
-        Check conditions and act:
-        1. If position open → check gain threshold → sell
-        2. If no position  → check dip threshold  → buy
-        Returns a dict describing what action was taken (if any).
+        DCA logic:
+        1. If position active → update P&L; if avg gain >= target → sell ALL
+        2. If Nifty dipped today and haven't bought today yet → buy chunk
+        Both checks run every cycle so we can add to position on a dip day
+        even while already holding units.
         """
-        result = {"action": "none", "details": ""}
-
         if not self._config.get("enabled"):
-            return result
+            return {"action": "none", "details": "disabled"}
 
-        # ---- sell check ----
+        today_str = datetime.now(_IST).strftime("%Y-%m-%d")
+        result    = {"action": "none", "details": ""}
+
+        # ---- SELL CHECK ----
         if self._position and self._position.get("active"):
             nb_ltp = await self._get_niftybees_ltp()
             if nb_ltp:
-                entry   = self._position["entry_price"]
-                gain    = (nb_ltp - entry) / entry * 100
-                # Update live P&L in position dict
-                qty     = self._position["qty"]
+                avg    = self._position["avg_entry_price"]
+                qty    = self._position["total_qty"]
+                gain   = (nb_ltp - avg) / avg * 100
                 self._position["current_price"]  = round(nb_ltp, 2)
-                self._position["unrealized_pnl"] = round((nb_ltp - entry) * qty, 2)
+                self._position["unrealized_pnl"] = round((nb_ltp - avg) * qty, 2)
                 self._position["pnl_pct"]        = round(gain, 2)
                 self._position["last_checked"]   = datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
                 self._save_state()
@@ -424,48 +439,56 @@ class NiftyBeesService:
                 target = self._config["target_gain_pct"]
                 if gain >= target:
                     await self._sell(nb_ltp, reason="target_reached")
-                    result = {
+                    return {
                         "action":  "sold",
-                        "details": f"Gain {gain:.2f}% ≥ {target}% target",
+                        "details": f"Avg gain {gain:.2f}% ≥ {target}% target — all {qty} units sold",
                         "price":   nb_ltp,
                     }
-                else:
-                    result = {
-                        "action":  "holding",
-                        "details": f"Gain {gain:.2f}% (target {target}%)",
-                        "price":   nb_ltp,
-                    }
-            return result
 
-        # ---- buy check ----
+                result = {
+                    "action":  "holding",
+                    "details": f"Avg gain {gain:.2f}% (target {target}%)",
+                    "price":   nb_ltp,
+                }
+
+        # ---- BUY CHECK: one chunk per calendar day ----
+        last_buy = self._position.get("last_buy_date") if self._position else None
+        if last_buy == today_str:
+            return result   # already bought today, skip buy check
+
         prev_close = await self._get_prev_nifty_close()
         nifty_ltp  = await self._get_nifty_ltp()
 
         if prev_close and nifty_ltp:
-            dip = (prev_close - nifty_ltp) / prev_close * 100
-            logger.debug(f"[NiftyBees] Nifty prev_close={prev_close:.2f} ltp={nifty_ltp:.2f} dip={dip:.2f}%")
+            dip       = (prev_close - nifty_ltp) / prev_close * 100
             threshold = self._config["dip_threshold_pct"]
+            logger.debug(f"[NiftyBees] prev_close={prev_close:.2f} ltp={nifty_ltp:.2f} dip={dip:.2f}%")
 
             if dip >= threshold:
                 nb_ltp = await self._get_niftybees_ltp()
                 if nb_ltp:
                     await self._buy(nb_ltp, nifty_ltp, dip)
+                    pos = self._position
                     result = {
-                        "action":  "bought",
-                        "details": f"Nifty dip {dip:.2f}% ≥ {threshold}% threshold",
-                        "price":   nb_ltp,
+                        "action":         "bought",
+                        "details":        f"Nifty dip {dip:.2f}% ≥ {threshold}% — buy #{len(pos['buys'])}",
+                        "price":          nb_ltp,
+                        "total_qty":      pos["total_qty"],
+                        "avg_entry":      pos["avg_entry_price"],
+                        "total_invested": pos["total_invested"],
                     }
             else:
-                result = {
-                    "action":  "watching",
-                    "details": f"Nifty dip {dip:.2f}% (need {threshold}%)",
-                }
+                if result.get("action") == "none":
+                    result = {
+                        "action":  "watching",
+                        "details": f"Nifty dip {dip:.2f}% (need {threshold}%)",
+                    }
 
         return result
 
 
 # ---------------------------------------------------------------------------
-# Singleton accessor
+# Singleton
 # ---------------------------------------------------------------------------
 
 _svc: Optional[NiftyBeesService] = None
