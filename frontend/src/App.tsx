@@ -7,6 +7,7 @@ import { MarketDataView } from './components/market/MarketDataView';
 import { RiskView } from './components/risk/RiskView';
 import { HelpView } from './components/help/HelpView';
 import { StocksView } from './components/stocks/StocksView';
+import { NiftyBeesView } from './components/niftybees/NiftyBeesView';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -54,6 +55,7 @@ function App() {
       case 'portfolio':  return <PortfolioView />;
       case 'market':     return <MarketDataView />;
       case 'stocks':     return <StocksView />;
+      case 'niftybees':  return <NiftyBeesView />;
       case 'risk':       return <RiskView />;
       case 'help':       return <HelpView />;
       default:           return <DashboardView />;

@@ -141,6 +141,44 @@ export interface StockSignal {
   scan_time: string;
 }
 
+// NiftyBees ETF autopilot types
+export interface NiftyBeesConfig {
+  enabled:           boolean;
+  mode:              'paper' | 'live';
+  capital_amount:    number;
+  dip_threshold_pct: number;
+  target_gain_pct:   number;
+}
+
+export interface NiftyBeesPosition {
+  active:         boolean;
+  symbol:         string;
+  qty:            number;
+  entry_price:    number;
+  entry_date:     string;
+  nifty_at_entry: number;
+  nifty_dip_pct:  number;
+  current_price:  number;
+  mode:           'paper' | 'live';
+  order_id:       string;
+  invested:       number;
+  unrealized_pnl: number;
+  pnl_pct:        number;
+  last_checked:   string;
+  // on closed trades
+  exit_price?:    number;
+  exit_date?:     string;
+  gain_pct?:      number;
+  realized_pnl?:  number;
+  close_reason?:  string;
+}
+
+export interface NiftyBeesStatus {
+  config:   NiftyBeesConfig;
+  position: NiftyBeesPosition | null;
+  history:  NiftyBeesPosition[];
+}
+
 export interface SwingPosition {
   order_id: string;
   symbol: string;

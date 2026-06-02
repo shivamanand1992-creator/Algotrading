@@ -24,6 +24,7 @@ from backend.api.routes import (
     market_data,
     risk,
     stocks,
+    niftybees,
 )
 from backend.api.routes import auth as auth_routes
 from backend.auth import verify_token
@@ -278,6 +279,33 @@ async def _morning_retrain_loop() -> None:
 # and 20 min before market open (09:15).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# NiftyBees ETF autopilot — every 60s during 09:15–15:30 IST on weekdays
+# ---------------------------------------------------------------------------
+
+async def _niftybees_monitor_loop() -> None:
+    """Check Nifty dip and NiftyBees position gain every 60 seconds during market hours."""
+    while True:
+        try:
+            now_ist    = datetime.now(_IST)
+            is_weekday = now_ist.weekday() < 5
+            hm         = (now_ist.hour, now_ist.minute)
+            in_hours   = (9, 15) <= hm <= (15, 30)
+
+            if is_weekday and in_hours:
+                from backend.services.niftybees_service import get_niftybees_service
+                from backend.dependencies import get_angel_client
+                svc    = get_niftybees_service(get_angel_client())
+                result = await svc.run_monitor()
+                if result.get("action") not in ("none", "watching", "holding"):
+                    logger.info(f"[NiftyBeesLoop] {result}")
+
+        except Exception as exc:
+            logger.error(f"_niftybees_monitor_loop error: {exc}")
+
+        await asyncio.sleep(60)
+
+
 async def _session_refresh_loop() -> None:
     """
     Force a full Angel One re-login at 08:55 IST and again at 12:30 IST on trading days.
@@ -358,6 +386,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
+    asyncio.create_task(_niftybees_monitor_loop())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
     yield
@@ -393,6 +422,7 @@ app.include_router(trades.router)
 app.include_router(market_data.router)
 app.include_router(risk.router)
 app.include_router(stocks.router)
+app.include_router(niftybees.router)
 
 
 @app.get("/health")

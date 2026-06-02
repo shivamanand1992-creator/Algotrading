@@ -12,6 +12,8 @@ import type {
   TrainStatus,
   StockSignal,
   SwingPosition,
+  NiftyBeesConfig,
+  NiftyBeesStatus,
 } from '../types/api';
 
 // In production (Railway) frontend is served by the same server, so use relative URLs.
@@ -144,4 +146,12 @@ export const stocksApi = {
     imported: string[]; updated: string[]; orphaned: string[];
     total_broker_holdings: number; message: string;
   }>('/api/stocks/sync-from-broker', {}),
+};
+
+// NiftyBees ETF autopilot endpoints
+export const niftyBeesApi = {
+  getStatus:    () => api.get<NiftyBeesStatus>('/api/niftybees/status'),
+  updateConfig: (cfg: Partial<NiftyBeesConfig>) => api.post('/api/niftybees/config', cfg),
+  triggerCheck: () => api.post<{ action: string; details: string }>('/api/niftybees/check'),
+  closePosition: () => api.delete('/api/niftybees/position'),
 };
