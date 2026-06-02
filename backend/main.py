@@ -115,7 +115,7 @@ async def _swing_autopilot_loop() -> None:
                             f"from {result.get('signals_found', 0)} signals."
                         )
                     else:
-                        logger.debug("09:20 IST — Swing autopilot disabled, skipping.")
+                        logger.info("09:20 IST — Swing autopilot disabled, skipping.")
                 except Exception as exc:
                     logger.error(f"Swing autopilot error: {exc}")
 
@@ -278,35 +278,38 @@ async def _morning_retrain_loop() -> None:
 # and 20 min before market open (09:15).
 # ---------------------------------------------------------------------------
 
-async def _morning_reconnect_loop() -> None:
-    """Force a full Angel One re-login at 08:55 IST on trading days."""
-    last_reconnect_date: _date | None = None
+async def _session_refresh_loop() -> None:
+    """
+    Force a full Angel One re-login at 08:55 IST and again at 12:30 IST on trading days.
+    The threading.Timer in angel_client accumulates duplicate timers on reconnect, so
+    we do explicit scheduled reconnects to guarantee a live session all day.
+    """
+    _reconnect_slots = [(8, 55), (12, 30)]
+    _last_dates: dict = {}   # slot-tuple → last reconnect date
 
     while True:
         try:
             now_ist = datetime.now(_IST)
             today   = now_ist.date()
+            hm      = (now_ist.hour, now_ist.minute)
 
-            is_weekday     = today.weekday() < 5
-            past_cutoff    = (now_ist.hour, now_ist.minute) >= (8, 55)
-            not_done_today = last_reconnect_date != today
-
-            if is_weekday and past_cutoff and not_done_today:
-                last_reconnect_date = today
-                try:
-                    from backend.dependencies import get_angel_client
-                    angel_client = get_angel_client()
-                    if angel_client is None:
-                        logger.warning("Morning reconnect skipped — no broker client configured.")
-                    else:
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, angel_client.connect)
-                        logger.info("Morning reconnect at 08:55 IST — Angel One session refreshed.")
-                except Exception as exc:
-                    logger.error(f"Morning reconnect error: {exc}")
+            for slot in _reconnect_slots:
+                if hm >= slot and _last_dates.get(slot) != today and today.weekday() < 5:
+                    _last_dates[slot] = today
+                    try:
+                        from backend.dependencies import get_angel_client
+                        angel_client = get_angel_client()
+                        if angel_client is None:
+                            logger.warning(f"Session refresh {slot[0]:02d}:{slot[1]:02d} skipped — no broker client.")
+                        else:
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, angel_client.connect)
+                            logger.info(f"Session refresh at {slot[0]:02d}:{slot[1]:02d} IST — Angel One reconnected.")
+                    except Exception as exc:
+                        logger.error(f"Session refresh {slot} error: {exc}")
 
         except Exception as exc:
-            logger.error(f"_morning_reconnect_loop unexpected error: {exc}")
+            logger.error(f"_session_refresh_loop unexpected error: {exc}")
 
         await asyncio.sleep(60)
 _PUBLIC_API_PATHS = {
@@ -351,7 +354,7 @@ async def lifespan(app: FastAPI):
     )
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
-    asyncio.create_task(_morning_reconnect_loop())
+    asyncio.create_task(_session_refresh_loop())
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())

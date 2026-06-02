@@ -119,6 +119,7 @@ class SwingTradeService:
         self._realtime_ltps: Dict[str, float] = {}   # token → live LTP
         self._token_to_symbol: Dict[str, str] = {}   # token → symbol
         self._sl_triggered: set = set()              # symbols with exits already placed today
+        self._feed_subscribed_tokens: set = set()    # tokens already sent to live feed
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -963,7 +964,7 @@ class SwingTradeService:
         self._realtime_ltps[token] = ltp
 
     async def _subscribe_open_positions(self) -> None:
-        """Subscribe all open swing positions to the live feed."""
+        """Subscribe open swing positions to the live feed — skips already-subscribed tokens."""
         if self._live_feed is None:
             return
         to_subscribe = []
@@ -972,10 +973,13 @@ class SwingTradeService:
             if token and token != "0":
                 pos["token"] = token
                 self._token_to_symbol[token] = symbol
-                to_subscribe.append({"exchange_type": 1, "token": token})  # 1 = NSE CM
+                if token not in self._feed_subscribed_tokens:
+                    to_subscribe.append({"exchange_type": 1, "token": token})
         if to_subscribe:
             self._live_feed.add_symbols(to_subscribe)
-            logger.info(f"[SwingService] Subscribed {len(to_subscribe)} position token(s) to live feed.")
+            for s in to_subscribe:
+                self._feed_subscribed_tokens.add(s["token"])
+            logger.info(f"[SwingService] Subscribed {len(to_subscribe)} new position token(s) to live feed.")
 
     async def check_sl_realtime(self) -> List[str]:
         """
@@ -1058,6 +1062,7 @@ class SwingTradeService:
                     except Exception:
                         pass
                 self._token_to_symbol.pop(token, None)
+                self._feed_subscribed_tokens.discard(token)
                 self._save_state()
 
         return triggered
