@@ -18,6 +18,7 @@ import json
 import math
 import os
 import sys
+import time
 from datetime import datetime, date as _date
 from pathlib import Path
 from typing import Optional
@@ -113,22 +114,39 @@ class NiftyBeesService:
     # -----------------------------------------------------------------------
 
     def _load_state(self) -> None:
-        try:
-            _NBBase.metadata.create_all(self._engine, checkfirst=True)
-            with Session(self._engine) as s:
-                for key, attr in [
-                    ("niftybees_config",   "_config"),
-                    ("niftybees_position", "_position"),
-                    ("niftybees_history",  "_history"),
-                ]:
-                    row = s.get(_NBStateRow, key)
-                    if row and row.value_json:
-                        try:
-                            setattr(self, attr, json.loads(row.value_json))
-                        except Exception:
-                            pass
-        except Exception as exc:
-            logger.warning(f"[NiftyBees] _load_state error: {exc}")
+        """Load state from DB with up to 3 retries — Railway cold-start safety."""
+        for attempt in range(3):
+            try:
+                _NBBase.metadata.create_all(self._engine, checkfirst=True)
+                with Session(self._engine) as s:
+                    for key, attr in [
+                        ("niftybees_config",   "_config"),
+                        ("niftybees_position", "_position"),
+                        ("niftybees_history",  "_history"),
+                    ]:
+                        row = s.get(_NBStateRow, key)
+                        if row and row.value_json:
+                            try:
+                                val = json.loads(row.value_json)
+                                if val is not None:
+                                    setattr(self, attr, val)
+                            except Exception:
+                                pass
+                pos  = self._position
+                enab = self._config.get("enabled", False)
+                logger.info(
+                    f"[NiftyBees] State loaded from DB "
+                    f"(attempt {attempt+1}) — "
+                    f"enabled={enab}, "
+                    f"position={'ACTIVE (' + str(pos.get('total_qty', '?')) + ' units, ' + str(len(pos.get('buys', []))) + ' buys)' if pos and pos.get('active') else 'none'}, "
+                    f"history={len(self._history)} trade(s)"
+                )
+                return
+            except Exception as exc:
+                logger.warning(f"[NiftyBees] DB load attempt {attempt+1}/3 failed: {exc}")
+                if attempt < 2:
+                    time.sleep(2)
+        logger.error("[NiftyBees] All DB load attempts failed — running with empty state")
 
     def _save_state(self) -> None:
         try:

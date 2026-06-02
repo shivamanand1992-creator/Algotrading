@@ -108,15 +108,21 @@ async def _swing_autopilot_loop() -> None:
                 try:
                     from backend.api.routes.stocks import _get_svc
                     svc = _get_svc()
+                    logger.info(
+                        f"[SwingAutopilot] 09:20 IST check — "
+                        f"autopilot={'ON' if svc._autopilot_enabled else 'OFF'}, "
+                        f"open_positions={len(svc._swing_positions)}, "
+                        f"mode={svc._autopilot_mode}"
+                    )
                     if svc._autopilot_enabled:
-                        logger.info("09:20 IST — Swing autopilot triggered (scan + execute).")
                         result = await svc.run_autopilot()
                         logger.info(
-                            f"[SwingAutopilot] {result.get('executed_count', 0)} trades executed "
-                            f"from {result.get('signals_found', 0)} signals."
+                            f"[SwingAutopilot] Complete: {result.get('executed_count', 0)} trades from "
+                            f"{result.get('signals_found', 0)} signals. "
+                            f"regime_warning={result.get('regime_warning', '')}"
                         )
                     else:
-                        logger.info("09:20 IST — Swing autopilot disabled, skipping.")
+                        logger.info("[SwingAutopilot] Disabled — set enabled=True via /api/stocks/autopilot to activate.")
                 except Exception as exc:
                     logger.error(f"Swing autopilot error: {exc}")
 
@@ -285,6 +291,9 @@ async def _morning_retrain_loop() -> None:
 
 async def _niftybees_monitor_loop() -> None:
     """Check Nifty dip and NiftyBees position gain every 60 seconds during market hours."""
+    _last_heartbeat: _date | None = None
+    _last_heartbeat_hm: tuple = (0, 0)
+
     while True:
         try:
             now_ist    = datetime.now(_IST)
@@ -297,8 +306,28 @@ async def _niftybees_monitor_loop() -> None:
                 from backend.dependencies import get_angel_client
                 svc    = get_niftybees_service(get_angel_client())
                 result = await svc.run_monitor()
-                if result.get("action") not in ("none", "watching", "holding"):
-                    logger.info(f"[NiftyBeesLoop] {result}")
+                action = result.get("action", "none")
+
+                # Always log buy/sell actions
+                if action in ("bought", "sold"):
+                    logger.info(f"[NiftyBeesLoop] ACTION={action} | {result.get('details', '')}")
+                # Heartbeat every 30 minutes so we can verify the loop is alive in Railway logs
+                elif (now_ist.hour * 60 + now_ist.minute) % 30 == 0 and hm != _last_heartbeat_hm:
+                    _last_heartbeat_hm = hm
+                    pos = svc._position
+                    logger.info(
+                        f"[NiftyBeesLoop] heartbeat {hm[0]:02d}:{hm[1]:02d} IST — "
+                        f"enabled={svc._config.get('enabled')}, "
+                        f"action={action}, "
+                        f"detail={result.get('details', '')}, "
+                        f"position={'ACTIVE (' + str(pos.get('pnl_pct', 0)) + '%)' if pos and pos.get('active') else 'none'}"
+                    )
+            else:
+                # Outside market hours — log once per day at first check
+                today = now_ist.date()
+                if _last_heartbeat != today and hm >= (15, 31):
+                    _last_heartbeat = today
+                    logger.info(f"[NiftyBeesLoop] Market closed for today. State preserved in DB.")
 
         except Exception as exc:
             logger.error(f"_niftybees_monitor_loop error: {exc}")
@@ -312,7 +341,7 @@ async def _session_refresh_loop() -> None:
     The threading.Timer in angel_client accumulates duplicate timers on reconnect, so
     we do explicit scheduled reconnects to guarantee a live session all day.
     """
-    _reconnect_slots = [(8, 55), (12, 30)]
+    _reconnect_slots = [(8, 55), (9, 5), (12, 30)]
     _last_dates: dict = {}   # slot-tuple → last reconnect date
 
     while True:
@@ -371,9 +400,58 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def _startup_init_services() -> None:
+    """
+    Eagerly create service singletons on startup so DB state is loaded BEFORE
+    the background loops fire. Retries up to 3 times (2s gaps) in case the
+    Railway PostgreSQL container is still warming up.
+    """
+    from backend.dependencies import get_angel_client
+    angel = get_angel_client()
+
+    # --- Swing / equity service ---
+    for attempt in range(3):
+        try:
+            from backend.api.routes.stocks import _get_svc
+            svc = _get_svc()
+            logger.info(
+                f"[Startup] SwingService ready: {len(svc._swing_positions)} open position(s), "
+                f"autopilot={'ON' if svc._autopilot_enabled else 'OFF'} "
+                f"(attempt {attempt+1})"
+            )
+            break
+        except Exception as exc:
+            logger.warning(f"[Startup] SwingService init attempt {attempt+1}/3 failed: {exc}")
+            if attempt < 2:
+                await asyncio.sleep(3)
+
+    # --- NiftyBees service ---
+    for attempt in range(3):
+        try:
+            from backend.services.niftybees_service import get_niftybees_service
+            nb  = get_niftybees_service(angel)
+            pos = nb._position
+            logger.info(
+                f"[Startup] NiftyBeesService ready: "
+                f"enabled={nb._config.get('enabled')}, "
+                f"position={'ACTIVE (' + str(pos.get('total_qty', 0)) + ' units, avg ₹' + str(pos.get('avg_entry_price', 0)) + ')' if pos and pos.get('active') else 'none'} "
+                f"(attempt {attempt+1})"
+            )
+            break
+        except Exception as exc:
+            logger.warning(f"[Startup] NiftyBeesService init attempt {attempt+1}/3 failed: {exc}")
+            if attempt < 2:
+                await asyncio.sleep(3)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting FastAPI backend...")
+
+    # Give Railway DB a moment to be ready on cold-start, then init singletons
+    await asyncio.sleep(2)
+    await _startup_init_services()
+
     from backend.api.routes.positions import get_position_service
     from backend.api.routes.market_data import get_market_service
     from backend.api.routes.strategies import get_strategy_service
