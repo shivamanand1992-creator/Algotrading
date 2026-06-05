@@ -9,15 +9,11 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '📊' },
-  // F&O section
-  { id: 'strategies', label: 'Nifty Options',   icon: '⚡', section: 'F&O' },
-  { id: 'portfolio',  label: 'F&O Portfolio',   icon: '💼' },
-  { id: 'risk',       label: 'F&O Risk',        icon: '🛡️' },
   // Equity section
-  { id: 'stocks',     label: 'Equity Swing',    icon: '📈', section: 'EQUITY' },
-  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '🐝' },
-  // Market
-  { id: 'market',     label: 'Market',          icon: '🌐' },
+  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '🐝', section: 'EQUITY' },
+  { id: 'stocks',     label: 'Equity Swing',    icon: '📈' },
+  // Market & Analysis
+  { id: 'market',     label: 'Market',          icon: '🌐', section: 'ANALYSIS' },
 ];
 
 const bottomNavItems: NavItem[] = [

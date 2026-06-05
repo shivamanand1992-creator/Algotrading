@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, ReferenceArea, Legend,
+  ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { marketApi } from '../../api/client';
 import { Card } from '../ui/Card';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import type { MarketData, MarketRegime, Prediction, OHLCVCandle } from '../../types/api';
+import type { MarketData, MarketRegime, Prediction, OHLCVCandle, GlobalCue, NewsItem } from '../../types/api';
 
 type Interval = 'FIVE_MINUTE' | 'FIFTEEN_MINUTE' | 'ONE_HOUR' | 'ONE_DAY';
 
@@ -165,6 +165,9 @@ export function MarketDataView() {
   const [days,       setDays]       = useState(5);
   const [chartLoading, setChartLoading] = useState(true);
   const [loading,    setLoading]    = useState(true);
+  const [globalCues, setGlobalCues] = useState<GlobalCue[]>([]);
+  const [news, setNews]             = useState<NewsItem[]>([]);
+  const [cuesLoading, setCuesLoading] = useState(true);
 
   const fetchAnalysis = useCallback(async () => {
     try {
@@ -256,6 +259,23 @@ export function MarketDataView() {
   const xTicks = mergedData.length > 20
     ? mergedData.filter((_, i) => i % Math.floor(mergedData.length / 8) === 0).map(c => c.displayTime)
     : mergedData.map(c => c.displayTime);
+
+  // Global cues
+  useEffect(() => {
+    const fetch = async () => {
+      setCuesLoading(true);
+      try { const r = await marketApi.getGlobalCues(); setGlobalCues(r.data); }
+      catch {} finally { setCuesLoading(false); }
+    };
+    fetch();
+    const iv = setInterval(fetch, 300000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // News
+  useEffect(() => {
+    marketApi.getNews().then(r => setNews(r.data)).catch(() => {});
+  }, []);
 
   const handleIntervalChange = (opt: typeof INTERVAL_OPTIONS[0]) => {
     setSelectedInterval(opt.value);
@@ -607,6 +627,78 @@ export function MarketDataView() {
         </Card>
 
       </div>
+
+      {/* ── Global Cues ─────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Global Market Cues</span>
+          <div className="flex-1 h-px bg-jarvis-primary/10" />
+        </div>
+        {cuesLoading ? (
+          <div className="grid grid-cols-4 gap-3">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-3">
+            {globalCues.map(cue => {
+              const up = (cue.change_pct ?? 0) >= 0;
+              return (
+                <motion.div key={cue.symbol}
+                  className="rounded-xl px-4 py-3"
+                  style={{ background: 'rgba(0,229,255,0.03)', border: `1px solid ${cue.ltp === null ? 'rgba(0,229,255,0.06)' : up ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}` }}
+                  whileHover={{ scale: 1.02 }}
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[10px] font-bold text-jarvis-text-secondary uppercase tracking-wider">{cue.name}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cue.type === 'index' ? 'bg-blue-400/10 text-blue-400' : cue.type === 'commodity' ? 'bg-amber-400/10 text-amber-400' : 'bg-purple-400/10 text-purple-400'}`}>
+                      {cue.type.toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-sm font-mono font-bold text-jarvis-primary tabular-nums">
+                    {cue.ltp !== null ? cue.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
+                  </span>
+                  {cue.change_pct !== null && (
+                    <span className={`ml-2 text-xs font-mono font-bold ${up ? 'text-green-400' : 'text-red-400'}`}>
+                      {up ? '+' : ''}{cue.change_pct.toFixed(2)}%
+                    </span>
+                  )}
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── News ───────────────────────────────────────────────────── */}
+      {news.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Market Intelligence</span>
+            <div className="flex-1 h-px bg-jarvis-primary/10" />
+            <span className="text-[9px] text-jarvis-text-secondary/40">ET Markets</span>
+          </div>
+          <div className="rounded-2xl p-4" style={{ background: 'rgba(0,8,24,0.97)', border: '1px solid rgba(0,229,255,0.08)' }}>
+            <div className="divide-y divide-white/5">
+              {news.slice(0, 8).map((item, i) => (
+                <motion.a key={i} href={item.link || '#'} target="_blank" rel="noopener noreferrer"
+                  className="flex items-start gap-3 py-2.5 group cursor-pointer"
+                  initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                >
+                  <span className="text-jarvis-primary/30 text-xs font-mono mt-0.5 flex-shrink-0 w-4">{i + 1}</span>
+                  <span className="text-xs text-jarvis-text-secondary group-hover:text-jarvis-primary transition-colors leading-relaxed flex-1">
+                    {item.title}
+                  </span>
+                  {item.published && (
+                    <span className="text-[10px] text-jarvis-text-secondary/40 flex-shrink-0 whitespace-nowrap ml-2">{item.published.slice(0, 20)}</span>
+                  )}
+                </motion.a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

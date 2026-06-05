@@ -335,6 +335,38 @@ async def _niftybees_monitor_loop() -> None:
         await asyncio.sleep(60)
 
 
+async def _morning_news_loop() -> None:
+    """Fetch market news at 09:00 IST Mon–Fri and cache for the day."""
+    _last_fetch_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+            hm      = (now_ist.hour, now_ist.minute)
+            is_weekday  = today.weekday() < 5
+            past_cutoff = hm >= (9, 0)
+            not_done_today = _last_fetch_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                _last_fetch_date = today
+                try:
+                    from backend.api.routes.market_data import get_market_service, set_cached_news
+                    svc   = get_market_service()
+                    items = await svc.get_news_summary()
+                    if items:
+                        set_cached_news(items)
+                        logger.info(f"[NewsLoop] Fetched {len(items)} headlines for {today}.")
+                    else:
+                        logger.warning("[NewsLoop] No headlines returned.")
+                except Exception as exc:
+                    logger.error(f"[NewsLoop] error: {exc}")
+        except Exception as exc:
+            logger.error(f"_morning_news_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)
+
+
 async def _session_refresh_loop() -> None:
     """
     Force a full Angel One re-login at 08:55 IST and again at 12:30 IST on trading days.
@@ -465,6 +497,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
+    asyncio.create_task(_morning_news_loop())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
     yield

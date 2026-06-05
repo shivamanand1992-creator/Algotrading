@@ -107,10 +107,10 @@ class MarketService:
                 return self._default_market()
             self._cached_ltp = ltp
 
-            # Fetch previous day's close if cache is stale (>5 min)
+            # Fetch previous day's close if cache is stale (>30 s)
             if (
                 not self._cache_ts
-                or (datetime.now(_IST) - self._cache_ts).total_seconds() > 300
+                or (datetime.now(_IST) - self._cache_ts).total_seconds() > 30
             ):
                 now    = _now_ist()
                 f_date = (now - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
@@ -436,6 +436,95 @@ class MarketService:
         except Exception as e:
             logger.error(f"_yf_ohlcv_dataframe error: {e}")
             return pd.DataFrame()
+
+    # ------------------------------------------------------------------
+    # Global market cues
+    # ------------------------------------------------------------------
+
+    async def get_global_cues(self) -> list:
+        """Fetch last-close data for major global indices and commodities via yfinance."""
+        tickers = [
+            {"symbol": "^GSPC",    "name": "S&P 500",    "type": "index"},
+            {"symbol": "^IXIC",    "name": "NASDAQ",     "type": "index"},
+            {"symbol": "^DJI",     "name": "Dow Jones",  "type": "index"},
+            {"symbol": "^N225",    "name": "Nikkei 225", "type": "index"},
+            {"symbol": "^HSI",     "name": "Hang Seng",  "type": "index"},
+            {"symbol": "CL=F",     "name": "Crude Oil",  "type": "commodity"},
+            {"symbol": "GC=F",     "name": "Gold",       "type": "commodity"},
+            {"symbol": "USDINR=X", "name": "USD/INR",    "type": "forex"},
+        ]
+        try:
+            import yfinance as yf
+
+            def _fetch():
+                results = []
+                for t in tickers:
+                    try:
+                        hist = yf.Ticker(t["symbol"]).history(period="2d", interval="1d")
+                        if hist is None or hist.empty or len(hist) < 1:
+                            results.append({**t, "ltp": None, "change": None, "change_pct": None})
+                            continue
+                        closes = hist["Close"].dropna()
+                        ltp = float(closes.iloc[-1])
+                        if len(closes) >= 2:
+                            prev   = float(closes.iloc[-2])
+                            change = round(ltp - prev, 4)
+                            chg_pct = round((change / prev) * 100, 2) if prev else 0.0
+                        else:
+                            change = 0.0
+                            chg_pct = 0.0
+                        results.append({**t, "ltp": round(ltp, 2), "change": change, "change_pct": chg_pct})
+                    except Exception:
+                        results.append({**t, "ltp": None, "change": None, "change_pct": None})
+                return results
+
+            return await self._run_sync(_fetch)
+        except Exception as e:
+            logger.error(f"get_global_cues error: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Market news
+    # ------------------------------------------------------------------
+
+    async def get_news_summary(self) -> list:
+        """Parse ET Markets RSS feed and return headline list."""
+        import xml.etree.ElementTree as ET
+        RSS_URLS = [
+            "https://economictimes.indiatimes.com/markets/rss.cms",
+            "https://feeds.feedburner.com/etspecialssection",
+        ]
+        try:
+            import urllib.request
+
+            def _fetch():
+                for url in RSS_URLS:
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=8) as resp:
+                            raw = resp.read().decode("utf-8", errors="ignore")
+                        root = ET.fromstring(raw)
+                        channel = root.find("channel")
+                        if channel is None:
+                            continue
+                        items = channel.findall("item")
+                        news = []
+                        for item in items[:12]:
+                            title = item.findtext("title", "").strip()
+                            link  = item.findtext("link", "").strip()
+                            pub   = item.findtext("pubDate", "").strip()
+                            if title:
+                                news.append({"title": title, "link": link, "published": pub})
+                        if news:
+                            return news
+                    except Exception:
+                        continue
+                return []
+
+            return await self._run_sync(_fetch)
+        except Exception as e:
+            logger.error(f"get_news_summary error: {e}")
+            return []
 
     async def get_vix_data(self, interval: str = "FIFTEEN_MINUTE", days: int = 5) -> list:
         """Fetch India VIX (^INDIAVIX) data from Yahoo Finance."""

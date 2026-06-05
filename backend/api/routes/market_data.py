@@ -104,6 +104,61 @@ async def get_vix(
     return await service.get_vix_data(interval=interval, days=days)
 
 
+@router.get("/global-cues")
+async def get_global_cues(service: MarketService = Depends(get_market_service)):
+    """Global market cues: S&P 500, NASDAQ, Nikkei, Hang Seng, Crude, Gold, USD/INR."""
+    if DEMO_MODE:
+        return _demo_global_cues()
+    return await service.get_global_cues()
+
+
+@router.get("/news")
+async def get_news(service: MarketService = Depends(get_market_service)):
+    """Latest Indian market news headlines from ET Markets RSS."""
+    if DEMO_MODE:
+        return _demo_news()
+    # Return cached news if available (populated by morning news loop in main.py)
+    if _cached_news:
+        return _cached_news
+    items = await service.get_news_summary()
+    _cached_news.clear()
+    _cached_news.extend(items)
+    return _cached_news
+
+
+# Module-level news cache (populated by background loop at 09:00 IST)
+_cached_news: list = []
+
+
+def set_cached_news(items: list) -> None:
+    """Called from background loop in main.py to refresh the news cache."""
+    global _cached_news
+    _cached_news = items
+
+
+def _demo_global_cues():
+    return [
+        {"symbol": "^GSPC",    "name": "S&P 500",    "type": "index",     "ltp": 5287.76, "change": 23.45,  "change_pct": 0.45},
+        {"symbol": "^IXIC",    "name": "NASDAQ",     "type": "index",     "ltp": 18407.0, "change": -45.20, "change_pct": -0.25},
+        {"symbol": "^DJI",     "name": "Dow Jones",  "type": "index",     "ltp": 38721.0, "change": 112.0,  "change_pct": 0.29},
+        {"symbol": "^N225",    "name": "Nikkei 225", "type": "index",     "ltp": 38710.0, "change": -80.0,  "change_pct": -0.21},
+        {"symbol": "^HSI",     "name": "Hang Seng",  "type": "index",     "ltp": 18500.0, "change": 155.0,  "change_pct": 0.84},
+        {"symbol": "CL=F",     "name": "Crude Oil",  "type": "commodity", "ltp": 78.45,   "change": -0.35,  "change_pct": -0.44},
+        {"symbol": "GC=F",     "name": "Gold",       "type": "commodity", "ltp": 2320.0,  "change": 8.50,   "change_pct": 0.37},
+        {"symbol": "USDINR=X", "name": "USD/INR",    "type": "forex",     "ltp": 83.47,   "change": 0.05,   "change_pct": 0.06},
+    ]
+
+
+def _demo_news():
+    return [
+        {"title": "Sensex rises 300 pts; Nifty tests 24,700 as IT stocks rally", "link": "#", "published": "Today, 9:10 AM"},
+        {"title": "FII outflows moderate; DII support cushions market decline", "link": "#", "published": "Today, 8:45 AM"},
+        {"title": "RBI holds rates steady; inflation within target band", "link": "#", "published": "Today, 8:30 AM"},
+        {"title": "HDFC Bank Q4 results beat estimates; NIM expands", "link": "#", "published": "Yesterday"},
+        {"title": "Crude oil steady near $78; no major supply disruptions", "link": "#", "published": "Yesterday"},
+    ]
+
+
 def _demo_ohlcv():
     """Generate ~50 synthetic 15-min candles for demo mode."""
     import random

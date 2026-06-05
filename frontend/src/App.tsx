@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { DashboardView } from './components/dashboard/DashboardView';
-import { StrategyPanel } from './components/strategies/StrategyPanel';
-import { PortfolioView } from './components/portfolio/PortfolioView';
 import { MarketDataView } from './components/market/MarketDataView';
-import { RiskView } from './components/risk/RiskView';
 import { HelpView } from './components/help/HelpView';
 import { StocksView } from './components/stocks/StocksView';
 import { NiftyBeesView } from './components/niftybees/NiftyBeesView';
@@ -51,12 +48,9 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
-      case 'strategies': return <StrategyPanel />;
-      case 'portfolio':  return <PortfolioView />;
       case 'market':     return <MarketDataView />;
       case 'stocks':     return <StocksView />;
       case 'niftybees':  return <NiftyBeesView />;
-      case 'risk':       return <RiskView />;
       case 'help':       return <HelpView />;
       default:           return <DashboardView />;
     }

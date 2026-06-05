@@ -186,6 +186,21 @@ export interface NiftyBeesStatus {
   history:  NiftyBeesPosition[];
 }
 
+export interface GlobalCue {
+  symbol: string;
+  name: string;
+  type: 'index' | 'commodity' | 'forex';
+  ltp: number | null;
+  change: number | null;
+  change_pct: number | null;
+}
+
+export interface NewsItem {
+  title: string;
+  link: string;
+  published: string;
+}
+
 export interface SwingPosition {
   order_id: string;
   symbol: string;

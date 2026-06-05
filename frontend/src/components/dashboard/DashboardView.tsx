@@ -1,496 +1,436 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, type Variants } from 'framer-motion';
-import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { CircularWidget } from '../ui/CircularWidget';
-import { Card } from '../ui/Card';
+import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { positionsApi, marketApi, riskApi, trainingApi, stocksApi } from '../../api/client';
-import { formatCurrency, formatPercent } from '../../utils/formatters';
-import type { PortfolioSummary, MarketData, RiskLimits, TrainStatus, SwingPosition } from '../../types/api';
+import { marketApi, niftyBeesApi, stocksApi } from '../../api/client';
+import { formatCurrency } from '../../utils/formatters';
+import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } from '../../types/api';
 
 const staggerContainer: Variants = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
+  show: { transition: { staggerChildren: 0.07 } },
 };
-
 const staggerItem: Variants = {
-  hidden: { opacity: 0, y: 24 },
-  show:   { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
+  hidden: { opacity: 0, y: 20 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
-const SPARKLINE_MAX = 80;
+const SPARKLINE_MAX = 120;
+
+function SparkTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: 'rgba(0,5,20,0.95)', border: '1px solid rgba(0,229,255,0.3)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontFamily: 'monospace', color: '#00e5ff' }}>
+      {payload[0]?.value?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+    </div>
+  );
+}
 
 export function DashboardView() {
-  const { connected, positions, marketData: wsMarketData } = useWebSocket();
-  const [portfolio, setPortfolio]   = useState<PortfolioSummary | null>(null);
-  const [marketData, setMarketData] = useState<MarketData | null>(null);
-  const [riskLimits, setRiskLimits] = useState<RiskLimits | null>(null);
-  const [sparkline, setSparkline]   = useState<{ v: number }[]>([]);
-  const [trainStatus, setTrainStatus] = useState<TrainStatus | null>(null);
+  const { connected, marketData: wsMarketData } = useWebSocket();
+  const [marketData, setMarketData]     = useState<MarketData | null>(null);
+  const [sparkline, setSparkline]       = useState<{ v: number; t: string }[]>([]);
+  const [globalCues, setGlobalCues]     = useState<GlobalCue[]>([]);
+  const [news, setNews]                 = useState<NewsItem[]>([]);
+  const [nbStatus, setNbStatus]         = useState<NiftyBeesStatus | null>(null);
   const [swingPositions, setSwingPositions] = useState<SwingPosition[]>([]);
-  const [trainStarting, setTrainStarting] = useState(false);
-  const trainPollerRef = useRef<NodeJS.Timeout | null>(null);
+  const [cuesLoading, setCuesLoading]   = useState(true);
+  const [newsLoading, setNewsLoading]   = useState(true);
+  const prevLtp = useRef<number>(0);
 
+  // Market data polling (30s)
   useEffect(() => {
-    const fetchData = async () => {
+    const fetch = async () => {
       try {
-        const [pRes, mRes, rRes, swRes] = await Promise.all([
-          positionsApi.getPortfolio(),
-          marketApi.getCurrent(),
-          riskApi.getLimits(),
-          stocksApi.getPositions(),
-        ]);
-        setPortfolio(pRes.data);
-        setMarketData(mRes.data);
-        setRiskLimits(rRes.data);
-        setSwingPositions(Array.isArray(swRes.data) ? swRes.data : []);
-      } catch (e) {
-        console.error('Dashboard fetch error:', e);
-      }
+        const res = await marketApi.getCurrent();
+        setMarketData(res.data);
+      } catch {}
     };
-    fetchData();
-    const iv = setInterval(fetchData, 5000);
+    fetch();
+    const iv = setInterval(fetch, 30000);
     return () => clearInterval(iv);
   }, []);
 
-  // Poll training status
+  // NiftyBees status (15s)
   useEffect(() => {
-    const poll = async () => {
+    const fetch = async () => {
       try {
-        const res = await trainingApi.getStatus();
-        setTrainStatus(res.data);
+        const res = await niftyBeesApi.getStatus();
+        setNbStatus(res.data);
       } catch {}
     };
-    poll();
-    trainPollerRef.current = setInterval(poll, 5000);
-    return () => { if (trainPollerRef.current) clearInterval(trainPollerRef.current); };
+    fetch();
+    const iv = setInterval(fetch, 15000);
+    return () => clearInterval(iv);
   }, []);
 
-  // Build sparkline from WS ticks
+  // Swing positions (30s)
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const res = await stocksApi.getPositions();
+        setSwingPositions(Array.isArray(res.data) ? res.data : []);
+      } catch {}
+    };
+    fetch();
+    const iv = setInterval(fetch, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Global cues once on mount + every 5 min
+  useEffect(() => {
+    const fetch = async () => {
+      setCuesLoading(true);
+      try {
+        const res = await marketApi.getGlobalCues();
+        setGlobalCues(res.data);
+      } catch {} finally { setCuesLoading(false); }
+    };
+    fetch();
+    const iv = setInterval(fetch, 300000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // News once on mount
+  useEffect(() => {
+    const fetch = async () => {
+      setNewsLoading(true);
+      try {
+        const res = await marketApi.getNews();
+        setNews(res.data);
+      } catch {} finally { setNewsLoading(false); }
+    };
+    fetch();
+  }, []);
+
+  // Sparkline from WS ticks
   useEffect(() => {
     if (wsMarketData) {
       setMarketData(wsMarketData);
       setSparkline(prev => {
-        const next = [...prev, { v: wsMarketData.ltp }];
+        const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const next = [...prev, { v: wsMarketData.ltp, t: now }];
         return next.length > SPARKLINE_MAX ? next.slice(-SPARKLINE_MAX) : next;
       });
     }
   }, [wsMarketData]);
 
-  const handleTrainNow = async () => {
-    setTrainStarting(true);
-    try { await trainingApi.start(60); } catch {}
-    setTrainStarting(false);
-  };
-
-  const pnl        = portfolio?.total_pnl ?? 0;
-  const pnlColor   = pnl >= 0 ? 'green' : 'red';
+  const ltp        = marketData?.ltp ?? 0;
   const change     = marketData?.change ?? 0;
   const changePct  = marketData?.change_percentage ?? 0;
+  const isUp       = change >= 0;
+  const ltpChanged = ltp !== prevLtp.current;
+  prevLtp.current  = ltp;
+
+  const nb     = nbStatus?.position ?? null;
+  const nbConf = nbStatus?.config;
+  const nbTarget = nbConf?.target_gain_pct ?? 5;
+  const nbPnlPct = nb?.pnl_pct ?? 0;
+  const nbProgress = Math.min((nbPnlPct / nbTarget) * 100, 100);
 
   return (
     <motion.div
-      className="space-y-6"
+      className="space-y-5"
       variants={staggerContainer}
       initial="hidden"
       animate="show"
     >
-      {/* Header row */}
-      <motion.div variants={staggerItem} className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-black text-jarvis-primary glow-text tracking-widest neon-flicker">
-            COMMAND CENTER
-          </h2>
-          <p className="text-xs text-jarvis-text-secondary mt-1 tracking-wider">
-            Real-time trading intelligence dashboard
-          </p>
-        </div>
-        <motion.div
-          className="flex items-center gap-2 px-4 py-2 rounded-full border border-jarvis-primary/20 bg-jarvis-primary/5"
-          animate={connected ? { borderColor: ['rgba(0,229,255,0.2)', 'rgba(0,229,255,0.5)', 'rgba(0,229,255,0.2)'] } : {}}
-          transition={{ duration: 2, repeat: Infinity }}
-        >
-          <motion.div
-            className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-green-400' : 'bg-red-500'}`}
-            animate={connected ? { scale: [1, 1.3, 1], opacity: [1, 0.6, 1] } : {}}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
-          <span className="text-xs font-mono text-jarvis-text-secondary uppercase tracking-widest">
-            {connected ? 'Live Stream' : 'Disconnected'}
-          </span>
-        </motion.div>
-      </motion.div>
-
-      {/* Circular KPI widgets */}
+      {/* ── HERO: Nifty 50 ──────────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
-        <motion.div
-          className="glass-panel py-10 px-6 neon-border"
-          style={{ perspective: 1000 }}
+        <div
+          className="relative overflow-hidden rounded-2xl neon-border"
+          style={{ background: 'linear-gradient(135deg, rgba(0,8,24,0.97) 0%, rgba(0,20,45,0.97) 100%)' }}
         >
           <div className="scan-line" />
-          <div className="grid grid-cols-4 gap-8 items-center">
-            <CircularWidget
-              title="Total P&L"
-              value={formatCurrency(pnl)}
-              progress={Math.min(Math.abs(portfolio?.total_pnl_percentage ?? 0), 100)}
-              size="lg"
-              color={pnlColor as any}
-            />
-            <CircularWidget
-              title="Daily P&L"
-              value={formatPercent(portfolio?.daily_pnl_percentage ?? 0)}
-              progress={Math.abs(portfolio?.daily_pnl_percentage ?? 0)}
-              size="md"
-              color={(portfolio?.daily_pnl_percentage ?? 0) >= 0 ? 'green' : 'red'}
-            />
-            <CircularWidget
-              title="Capital Used"
-              value={formatPercent(
-                portfolio ? (portfolio.used_capital / portfolio.total_capital) * 100 : 0
+          <div className="px-8 py-6 grid grid-cols-3 gap-6 items-center">
+            {/* Left: Price */}
+            <div className="col-span-2">
+              <div className="flex items-center gap-3 mb-1">
+                <span className="text-[10px] font-bold tracking-[0.3em] text-jarvis-primary/60 uppercase">Nifty 50 Index</span>
+                <motion.div
+                  className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-500'}`}
+                  animate={connected ? { scale: [1, 1.4, 1], opacity: [1, 0.5, 1] } : {}}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                />
+                <span className="text-[10px] text-jarvis-text-secondary/60">{connected ? 'LIVE' : 'OFFLINE'}</span>
+              </div>
+              <div className="flex items-end gap-5">
+                <motion.div
+                  className="text-6xl font-black font-mono tabular-nums glow-text"
+                  style={{ color: '#00e5ff', letterSpacing: '-1px' }}
+                  key={ltp}
+                  animate={ltpChanged ? { scale: [1, 1.02, 1] } : {}}
+                  transition={{ duration: 0.25 }}
+                >
+                  {ltp > 0 ? ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </motion.div>
+                <div className="mb-2">
+                  <div className={`text-2xl font-mono font-bold tabular-nums ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                    {isUp ? '+' : ''}{change.toFixed(2)}
+                  </div>
+                  <div className={`text-base font-mono ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                    {isUp ? '▲' : '▼'} {Math.abs(changePct).toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Sparkline */}
+            <div>
+              {sparkline.length > 4 ? (
+                <ResponsiveContainer width="100%" height={90}>
+                  <AreaChart data={sparkline} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                    <defs>
+                      <linearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%"  stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="t" hide />
+                    <YAxis domain={['auto', 'auto']} hide />
+                    <Tooltip content={<SparkTooltip />} />
+                    <Area
+                      type="monotone" dataKey="v"
+                      stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={2}
+                      fill="url(#heroGrad)" dot={false} isAnimationActive={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-20 flex items-center justify-center text-xs text-jarvis-text-secondary/40 tracking-widest uppercase">
+                  Waiting for ticks…
+                </div>
               )}
-              progress={portfolio ? (portfolio.used_capital / portfolio.total_capital) * 100 : 0}
-              size="md"
-              color="primary"
-            />
-            <CircularWidget
-              title="Positions"
-              value={portfolio?.open_positions_count ?? 0}
-              unit="active"
-              progress={
-                riskLimits
-                  ? ((portfolio?.open_positions_count ?? 0) / riskLimits.max_positions) * 100
-                  : 0
-              }
-              size="md"
-              color="yellow"
-            />
+            </div>
           </div>
-        </motion.div>
+        </div>
       </motion.div>
 
-      {/* Sparkline + Training */}
-      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-6">
-        {/* Nifty Sparkline */}
-        <div className="rounded-xl p-4" style={{ background: 'rgba(0,15,35,0.7)', border: '1px solid rgba(0,229,255,0.15)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-jarvis-text-secondary uppercase tracking-widest">NIFTY Live</span>
-            <span className="text-xs font-mono text-jarvis-primary">
-              {marketData?.ltp ? marketData.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
-            </span>
+      {/* ── GLOBAL CUES ─────────────────────────────────────────────── */}
+      <motion.div variants={staggerItem}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Global Market Cues</span>
+          <div className="flex-1 h-px bg-jarvis-primary/10" />
+        </div>
+        {cuesLoading ? (
+          <div className="grid grid-cols-4 gap-3">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
+            ))}
           </div>
-          {sparkline.length > 2 ? (
-            <ResponsiveContainer width="100%" height={80}>
-              <AreaChart data={sparkline} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                <defs>
-                  <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#00e5ff" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#00e5ff" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area type="monotone" dataKey="v" stroke="#00e5ff" strokeWidth={1.5}
-                  fill="url(#sparkGrad)" dot={false} isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+        ) : (
+          <div className="grid grid-cols-4 gap-3">
+            {globalCues.map(cue => {
+              const up = (cue.change_pct ?? 0) >= 0;
+              return (
+                <motion.div
+                  key={cue.symbol}
+                  className="rounded-xl px-4 py-3 flex flex-col justify-between"
+                  style={{ background: 'rgba(0,229,255,0.03)', border: `1px solid ${cue.ltp === null ? 'rgba(0,229,255,0.06)' : up ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}` }}
+                  whileHover={{ scale: 1.02 }}
+                  transition={{ type: 'spring', stiffness: 300 }}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-[10px] font-bold text-jarvis-text-secondary uppercase tracking-wider">{cue.name}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cue.type === 'index' ? 'bg-blue-400/10 text-blue-400' : cue.type === 'commodity' ? 'bg-amber-400/10 text-amber-400' : 'bg-purple-400/10 text-purple-400'}`}>
+                      {cue.type.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-sm font-mono font-bold text-jarvis-primary tabular-nums">
+                      {cue.ltp !== null ? cue.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
+                    </span>
+                    {cue.change_pct !== null && (
+                      <span className={`ml-2 text-xs font-mono font-bold ${up ? 'text-green-400' : 'text-red-400'}`}>
+                        {up ? '+' : ''}{cue.change_pct.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </motion.div>
+
+      {/* ── NIFTYBEES + SWING POSITIONS ─────────────────────────────── */}
+      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-5">
+        {/* NiftyBees Card */}
+        <div
+          className="rounded-2xl p-5 relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, rgba(0,8,24,0.97) 0%, rgba(0,30,50,0.97) 100%)', border: nb?.active ? '1px solid rgba(0,229,255,0.3)' : '1px solid rgba(0,229,255,0.1)' }}
+        >
+          {nb?.active && <div className="scan-line" />}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🐝</span>
+              <span className="text-xs font-bold tracking-[0.2em] text-jarvis-primary uppercase">NiftyBees ETF</span>
+            </div>
+            {nbConf?.enabled ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,229,255,0.1)', color: '#00e5ff' }}>
+                AUTOPILOT ON
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,100,100,0.1)', color: '#f87171' }}>
+                DISABLED
+              </span>
+            )}
+          </div>
+
+          {nb?.active ? (
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="text-[10px] text-jarvis-text-secondary uppercase tracking-wider">DCA Position</div>
+                  <div className="text-2xl font-black font-mono text-jarvis-primary tabular-nums mt-0.5">
+                    {nb.total_qty} <span className="text-base font-normal">units</span>
+                  </div>
+                  <div className="text-xs text-jarvis-text-secondary mt-0.5">
+                    {nb.buys?.length ?? 1} {(nb.buys?.length ?? 1) === 1 ? 'buy' : 'buys'} · avg ₹{nb.avg_entry_price?.toFixed(2)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-jarvis-text-secondary uppercase tracking-wider">Unrealised P&L</div>
+                  <div className={`text-xl font-mono font-bold tabular-nums mt-0.5 ${(nb.pnl_pct ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {(nb.pnl_pct ?? 0) >= 0 ? '+' : ''}{(nb.pnl_pct ?? 0).toFixed(2)}%
+                  </div>
+                  <div className={`text-xs font-mono ${(nb.unrealized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {formatCurrency(nb.unrealized_pnl ?? 0)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress toward target */}
+              <div>
+                <div className="flex justify-between text-[10px] text-jarvis-text-secondary mb-1.5">
+                  <span>Progress toward {nbTarget}% target</span>
+                  <span className="font-mono">{nbPnlPct.toFixed(2)}% / {nbTarget}%</span>
+                </div>
+                <div className="h-2 rounded-full" style={{ background: 'rgba(0,229,255,0.08)' }}>
+                  <motion.div
+                    className="h-2 rounded-full"
+                    style={{ background: nbProgress >= 80 ? 'linear-gradient(90deg, #4ade80, #22c55e)' : 'linear-gradient(90deg, #00e5ff, #00b0ff)' }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${nbProgress}%` }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 text-xs text-jarvis-text-secondary border-t border-white/5 pt-2 mt-1">
+                <span>Invested: <span className="text-jarvis-primary font-mono">{formatCurrency(nb.total_invested ?? 0)}</span></span>
+                <span>Mode: <span className={nb.mode === 'live' ? 'text-red-400 font-bold' : 'text-jarvis-accent'}>{(nb.mode ?? 'paper').toUpperCase()}</span></span>
+              </div>
+            </div>
           ) : (
-            <div className="h-20 flex items-center justify-center text-xs text-jarvis-text-secondary/60">
-              Waiting for live ticks…
+            <div className="flex flex-col items-center justify-center py-6">
+              <div className="text-3xl mb-2">🐝</div>
+              <p className="text-xs text-jarvis-text-secondary/70 text-center">No active position<br />
+                <span className="text-jarvis-text-secondary/40">Autopilot will buy when Nifty dips {nbConf?.dip_threshold_pct ?? 1}%+</span>
+              </p>
             </div>
           )}
         </div>
 
-        {/* Model Training Widget */}
-        <div className="rounded-xl p-4" style={{ background: 'rgba(0,15,35,0.7)', border: '1px solid rgba(0,229,255,0.15)' }}>
+        {/* Swing Positions Summary */}
+        <div className="rounded-2xl p-5" style={{ background: 'rgba(0,8,24,0.97)', border: '1px solid rgba(0,229,255,0.1)' }}>
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-jarvis-text-secondary uppercase tracking-widest">Model Training</span>
-            {trainStatus?.status === 'complete' && (
-              <span className="text-xs text-green-400 font-bold">● Ready</span>
-            )}
-            {trainStatus?.status === 'failed' && (
-              <span className="text-xs text-red-400 font-bold">● Failed</span>
-            )}
-            {trainStatus?.status === 'running' && (
-              <motion.span className="text-xs text-yellow-400 font-bold"
-                animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>
-                ● Training…
-              </motion.span>
+            <div className="flex items-center gap-2">
+              <span className="text-base">📈</span>
+              <span className="text-xs font-bold tracking-[0.2em] text-jarvis-primary uppercase">Equity Swing</span>
+            </div>
+            {swingPositions.length > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,229,255,0.1)', color: '#00e5ff' }}>
+                {swingPositions.length} OPEN
+              </span>
             )}
           </div>
 
-          {trainStatus?.status === 'running' && (
+          {swingPositions.length > 0 ? (
             <div className="space-y-2">
-              <div className="text-xs text-jarvis-text-secondary truncate">{trainStatus.progress}</div>
-              {['Step 1', 'Step 2', 'Step 3', 'Step 4', 'Step 5'].map((s, i) => {
-                const stepNum = parseInt(trainStatus.progress?.match(/Step (\d)/)?.[1] ?? '0');
+              {swingPositions.slice(0, 4).map(pos => {
+                const up = (pos.pnl_pct ?? 0) >= 0;
                 return (
-                  <div key={s} className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${i < stepNum ? 'bg-green-400' : i === stepNum - 1 ? 'bg-yellow-400' : 'bg-jarvis-primary/20'}`} />
-                    <div className="text-xs text-jarvis-text-secondary">{s}/5</div>
-                    <div className="flex-1 bg-jarvis-primary/10 rounded-full h-1">
-                      <div className="bg-jarvis-primary h-1 rounded-full transition-all duration-500"
-                        style={{ width: `${i < stepNum ? 100 : i === stepNum - 1 ? 60 : 0}%` }} />
+                  <div key={pos.symbol} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ background: 'rgba(0,229,255,0.03)', border: '1px solid rgba(0,229,255,0.06)' }}>
+                    <div>
+                      <span className="text-xs font-bold text-jarvis-primary">{pos.symbol}</span>
+                      <div className="text-[10px] text-jarvis-text-secondary mt-0.5">
+                        ₹{pos.entry_price?.toFixed(2)} → ₹{pos.current_price?.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-sm font-mono font-bold ${up ? 'text-green-400' : 'text-red-400'}`}>
+                        {up ? '+' : ''}{(pos.pnl_pct ?? 0).toFixed(2)}%
+                      </div>
+                      <div className={`text-[10px] font-mono ${up ? 'text-green-400/70' : 'text-red-400/70'}`}>
+                        {formatCurrency(pos.unrealized_pnl ?? 0)}
+                      </div>
                     </div>
                   </div>
                 );
               })}
+              {swingPositions.length > 4 && (
+                <p className="text-[10px] text-jarvis-text-secondary/50 text-center pt-1">
+                  +{swingPositions.length - 4} more — view in Equity Swing
+                </p>
+              )}
             </div>
-          )}
-
-          {trainStatus?.status === 'idle' && (
-            <div className="space-y-2">
-              <p className="text-xs text-yellow-400/80">⚠ Models not trained. Strategies will generate no signals until trained.</p>
-              <button
-                onClick={handleTrainNow}
-                disabled={trainStarting}
-                className="w-full py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all"
-                style={{ background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.4)', color: '#00e5ff' }}
-              >
-                {trainStarting ? 'Starting…' : 'Train Now (60 days)'}
-              </button>
-            </div>
-          )}
-
-          {trainStatus?.status === 'complete' && (
-            <div className="space-y-1">
-              <p className="text-xs text-green-400">✓ {trainStatus.progress}</p>
-              <button
-                onClick={handleTrainNow}
-                disabled={trainStarting}
-                className="text-xs text-jarvis-text-secondary hover:text-jarvis-primary transition-colors"
-              >
-                Retrain →
-              </button>
-            </div>
-          )}
-
-          {trainStatus?.status === 'failed' && (
-            <div className="space-y-2">
-              <p className="text-xs text-red-400 break-words">{trainStatus.error || 'Training failed'}</p>
-              <button
-                onClick={handleTrainNow}
-                disabled={trainStarting}
-                className="text-xs text-jarvis-text-secondary hover:text-jarvis-primary transition-colors"
-              >
-                Retry →
-              </button>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6">
+              <div className="text-3xl mb-2">📈</div>
+              <p className="text-xs text-jarvis-text-secondary/70 text-center">No open swing positions</p>
             </div>
           )}
         </div>
       </motion.div>
 
-      {/* Market + Portfolio */}
-      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-6">
-        {/* Market Overview */}
-        <Card title="Market Overview" scanLine>
-          <div className="space-y-4">
-            {/* Nifty price */}
-            <motion.div
-              className="flex justify-between items-center p-4 rounded-xl"
-              style={{
-                background: 'rgba(0,229,255,0.04)',
-                border: '1px solid rgba(0,229,255,0.1)',
-              }}
-              whileHover={{ borderColor: 'rgba(0,229,255,0.3)', background: 'rgba(0,229,255,0.07)' }}
-            >
-              <div>
-                <div className="text-xs text-jarvis-text-secondary uppercase tracking-widest mb-1">NIFTY 50</div>
-                <div className="text-3xl font-black font-mono text-jarvis-primary glow-text tabular-nums">
-                  {marketData?.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) ?? '—'}
-                </div>
-              </div>
-              <div className="text-right">
-                <motion.div
-                  className={`text-2xl font-mono font-bold tabular-nums ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}
-                  key={change}
-                  initial={{ scale: 1.15 }}
-                  animate={{ scale: 1 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  {change >= 0 ? '+' : ''}{change.toFixed(2)}
-                </motion.div>
-                <div className={`text-sm font-mono ${changePct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-                </div>
-              </div>
-            </motion.div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { label: 'IV Percentile', value: `${marketData?.iv_percentile.toFixed(1) ?? '—'}%` },
-                { label: 'PCR Ratio',     value: marketData?.pcr.toFixed(2) ?? '—' },
-              ].map(item => (
-                <motion.div
-                  key={item.label}
-                  className="p-3 rounded-lg"
-                  style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.08)' }}
-                  whileHover={{ borderColor: 'rgba(0,229,255,0.25)' }}
-                >
-                  <div className="text-xs text-jarvis-text-secondary uppercase tracking-widest">{item.label}</div>
-                  <div className="text-xl font-mono font-bold text-jarvis-accent mt-1">{item.value}</div>
-                </motion.div>
+      {/* ── MARKET NEWS ─────────────────────────────────────────────── */}
+      <motion.div variants={staggerItem}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Market Intelligence</span>
+          <div className="flex-1 h-px bg-jarvis-primary/10" />
+          <span className="text-[9px] text-jarvis-text-secondary/40">ET Markets · refreshed at 09:00 IST</span>
+        </div>
+        <div
+          className="rounded-2xl p-4"
+          style={{ background: 'rgba(0,8,24,0.97)', border: '1px solid rgba(0,229,255,0.08)' }}
+        >
+          {newsLoading ? (
+            <div className="space-y-3">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-5 rounded animate-pulse" style={{ background: 'rgba(0,229,255,0.04)', width: `${85 - i * 7}%` }} />
               ))}
             </div>
-          </div>
-        </Card>
-
-        {/* Portfolio Summary */}
-        <Card title="Portfolio Summary">
-          <div className="space-y-2">
-            {[
-              { label: 'Total Capital',     value: formatCurrency(portfolio?.total_capital ?? 0),     color: 'text-jarvis-primary' },
-              { label: 'Used Capital',      value: formatCurrency(portfolio?.used_capital ?? 0),      color: 'text-yellow-400' },
-              { label: 'Available Capital', value: formatCurrency(portfolio?.available_capital ?? 0), color: 'text-jarvis-secondary' },
-              { label: 'Daily P&L',         value: formatCurrency(portfolio?.daily_pnl ?? 0),         color: (portfolio?.daily_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400' },
-            ].map((item, i) => (
-              <motion.div
-                key={item.label}
-                className="flex justify-between items-center p-3 rounded-lg"
-                style={{ background: 'rgba(0,229,255,0.03)', border: '1px solid rgba(0,229,255,0.06)' }}
-                whileHover={{ borderColor: 'rgba(0,229,255,0.2)', background: 'rgba(0,229,255,0.06)' }}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.07 + 0.2 }}
-              >
-                <span className="text-sm text-jarvis-text-secondary">{item.label}</span>
-                <span className={`font-mono font-bold text-sm ${item.color}`}>{item.value}</span>
-              </motion.div>
-            ))}
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Active Positions */}
-      <motion.div variants={staggerItem}>
-        <Card title={`F&O Positions ${positions.length > 0 ? `(${positions.length})` : ''}`} scanLine>
-          {positions.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Dir</th>
-                    <th>Entry</th>
-                    <th>LTP</th>
-                    <th>Qty</th>
-                    <th>P&L</th>
-                    <th>%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {positions.map((pos, i) => (
-                    <motion.tr
-                      key={pos.order_id}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.06 }}
-                    >
-                      <td className="font-semibold text-jarvis-primary">{pos.symbol}</td>
-                      <td>
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          pos.direction === 'BUY'
-                            ? 'bg-green-400/15 text-green-400'
-                            : 'bg-red-400/15 text-red-400'
-                        }`}>
-                          {pos.direction}
-                        </span>
-                      </td>
-                      <td>{pos.entry_price.toFixed(2)}</td>
-                      <td>{pos.current_price.toFixed(2)}</td>
-                      <td>{pos.qty}</td>
-                      <td className={pos.unrealized_pnl >= 0 ? 'value-positive' : 'value-negative'}>
-                        {formatCurrency(pos.unrealized_pnl)}
-                      </td>
-                      <td className={pos.pnl_percentage >= 0 ? 'value-positive' : 'value-negative'}>
-                        {formatPercent(pos.pnl_percentage)}
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
+          ) : news.length > 0 ? (
+            <div className="divide-y divide-white/5">
+              {news.slice(0, 7).map((item, i) => (
+                <motion.a
+                  key={i}
+                  href={item.link || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-3 py-2.5 group cursor-pointer"
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                >
+                  <span className="text-jarvis-primary/30 text-xs font-mono mt-0.5 flex-shrink-0 w-4">{i + 1}</span>
+                  <span className="text-xs text-jarvis-text-secondary group-hover:text-jarvis-primary transition-colors leading-relaxed flex-1">
+                    {item.title}
+                  </span>
+                  {item.published && (
+                    <span className="text-[10px] text-jarvis-text-secondary/40 flex-shrink-0 whitespace-nowrap ml-2">{item.published.slice(0, 20)}</span>
+                  )}
+                </motion.a>
+              ))}
             </div>
           ) : (
-            <motion.div
-              className="text-center py-14"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              <motion.div
-                className="text-5xl mb-4"
-                animate={{ y: [0, -8, 0] }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                📊
-              </motion.div>
-              <p className="text-jarvis-text-secondary text-sm uppercase tracking-widest">
-                No active positions
-              </p>
-              <p className="text-jarvis-text-secondary/50 text-xs mt-1">
-                Start an options strategy to place F&amp;O trades
-              </p>
-            </motion.div>
+            <p className="text-xs text-jarvis-text-secondary/50 text-center py-4">
+              News will appear here at 09:00 IST on trading days
+            </p>
           )}
-        </Card>
+        </div>
       </motion.div>
-
-      {/* Swing Positions */}
-      {swingPositions.length > 0 && (() => {
-        const swingPnl = swingPositions.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0);
-        const swingPnlPct = swingPositions.reduce((s, p) => s + (p.pnl_pct ?? 0), 0) / swingPositions.length;
-        return (
-          <motion.div variants={staggerItem}>
-            <Card title={`Swing Positions (${swingPositions.length})`} scanLine>
-              {/* Overall swing P&L row */}
-              <div className="flex items-center justify-between mb-4 px-2 py-2 rounded-lg" style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.1)' }}>
-                <span className="text-xs text-jarvis-text-secondary uppercase tracking-widest">Swing P&L (unrealised)</span>
-                <div className="flex items-center gap-3">
-                  <span className={`text-sm font-mono font-bold ${swingPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {formatCurrency(swingPnl)}
-                  </span>
-                  <span className={`text-xs font-mono px-2 py-0.5 rounded ${swingPnl >= 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'}`}>
-                    {swingPnlPct >= 0 ? '+' : ''}{swingPnlPct.toFixed(2)}%
-                  </span>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-jarvis-text-secondary border-b border-white/10">
-                      <th className="pb-2 text-left">Stock</th>
-                      <th className="pb-2 text-right">Entry</th>
-                      <th className="pb-2 text-right">CMP</th>
-                      <th className="pb-2 text-right">P&L%</th>
-                      <th className="pb-2 text-right">SL</th>
-                      <th className="pb-2 text-right">Target</th>
-                      <th className="pb-2 text-center">Mode</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {swingPositions.map(pos => (
-                      <tr key={pos.symbol} className="border-b border-white/5 hover:bg-white/5">
-                        <td className="py-2 font-bold text-jarvis-primary">{pos.symbol}</td>
-                        <td className="py-2 text-right font-mono">₹{pos.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="py-2 text-right font-mono">₹{pos.current_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="py-2 text-right">
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${(pos.pnl_pct ?? 0) >= 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'}`}>
-                            {(pos.pnl_pct ?? 0) >= 0 ? '+' : ''}{(pos.pnl_pct ?? 0).toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="py-2 text-right font-mono text-red-400">₹{pos.stop_loss.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="py-2 text-right font-mono text-green-400">₹{pos.target1.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="py-2 text-center">
-                          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: pos.mode === 'live' ? 'rgba(255,23,68,0.15)' : 'rgba(0,229,255,0.1)', color: pos.mode === 'live' ? '#ff1744' : '#00e5ff' }}>
-                            {pos.mode.toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </motion.div>
-        );
-      })()}
     </motion.div>
   );
 }
