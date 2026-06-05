@@ -114,16 +114,23 @@ async def get_global_cues(service: MarketService = Depends(get_market_service)):
 
 @router.get("/news")
 async def get_news(service: MarketService = Depends(get_market_service)):
-    """Latest Indian market news headlines from ET Markets RSS."""
+    """Latest Indian/global market news from multiple RSS feeds."""
     if DEMO_MODE:
         return _demo_news()
-    # Return cached news if available (populated by morning news loop in main.py)
-    if _cached_news:
-        return _cached_news
-    items = await service.get_news_summary()
-    _cached_news.clear()
-    _cached_news.extend(items)
+    # Return cached news; always try to fetch if cache is empty
+    if not _cached_news:
+        items = await service.get_news_summary()
+        if items:
+            set_cached_news(items)
     return _cached_news
+
+
+@router.get("/technicals")
+async def get_technicals(service: MarketService = Depends(get_market_service)):
+    """Nifty 50 daily technical indicators: EMA9/21, SMA50, RSI14, MACD, Bollinger, ATR."""
+    if DEMO_MODE:
+        return _demo_technicals()
+    return await service.get_nifty_technicals()
 
 
 # Module-level news cache (populated by background loop at 09:00 IST)
@@ -157,6 +164,34 @@ def _demo_news():
         {"title": "HDFC Bank Q4 results beat estimates; NIM expands", "link": "#", "published": "Yesterday"},
         {"title": "Crude oil steady near $78; no major supply disruptions", "link": "#", "published": "Yesterday"},
     ]
+
+
+def _demo_technicals():
+    import random, math
+    base = 24500.0
+    candles = []
+    c = base - 600
+    for i in range(45):
+        c = round(c + random.uniform(-120, 150), 2)
+        candles.append({
+            "date":  f"2026-04-{(i % 30) + 1:02d}",
+            "close": c,
+            "ema9":  round(c - random.uniform(-30, 50), 2),
+            "ema21": round(c - random.uniform(30, 120), 2),
+            "bb_up": round(c + 180, 2),
+            "bb_lo": round(c - 180, 2),
+        })
+    return {
+        "last_close": base, "ema9": base - 45, "ema21": base - 210,
+        "sma50": base - 380, "rsi14": 58.4, "macd_hist": 42.1,
+        "atr14": 165.0, "bb_upper": base + 220, "bb_lower": base - 220,
+        "bb_position": 62.0, "vol_ratio": 1.15,
+        "momentum_5d": 1.2, "momentum_10d": 2.8, "momentum_20d": 4.1,
+        "trend": "UPTREND", "signal": "BUY", "score": 4,
+        "nb_action": "ACCUMULATE",
+        "nb_reason": "Trend + momentum aligned. Good DCA window.",
+        "candles": candles,
+    }
 
 
 def _demo_ohlcv():

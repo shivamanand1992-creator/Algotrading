@@ -336,8 +336,20 @@ async def _niftybees_monitor_loop() -> None:
 
 
 async def _morning_news_loop() -> None:
-    """Fetch market news at 09:00 IST Mon–Fri and cache for the day."""
+    """Fetch market news at startup and again at 09:00 IST Mon–Fri."""
     _last_fetch_date: _date | None = None
+
+    # Immediate startup fetch so news is ready the moment the server comes up
+    await asyncio.sleep(5)  # let DB settle first
+    try:
+        from backend.api.routes.market_data import get_market_service, set_cached_news
+        svc   = get_market_service()
+        items = await svc.get_news_summary()
+        if items:
+            set_cached_news(items)
+            logger.info(f"[NewsLoop] Startup fetch: {len(items)} headlines.")
+    except Exception as exc:
+        logger.warning(f"[NewsLoop] Startup fetch failed: {exc}")
 
     while True:
         try:
@@ -356,9 +368,9 @@ async def _morning_news_loop() -> None:
                     items = await svc.get_news_summary()
                     if items:
                         set_cached_news(items)
-                        logger.info(f"[NewsLoop] Fetched {len(items)} headlines for {today}.")
+                        logger.info(f"[NewsLoop] Daily refresh: {len(items)} headlines for {today}.")
                     else:
-                        logger.warning("[NewsLoop] No headlines returned.")
+                        logger.warning("[NewsLoop] No headlines returned from any RSS source.")
                 except Exception as exc:
                     logger.error(f"[NewsLoop] error: {exc}")
         except Exception as exc:

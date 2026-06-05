@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { marketApi } from '../../api/client';
 import { Card } from '../ui/Card';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import type { MarketData, MarketRegime, Prediction, OHLCVCandle, GlobalCue, NewsItem } from '../../types/api';
+import type { MarketData, MarketRegime, Prediction, OHLCVCandle, GlobalCue, NewsItem, NiftyTechnicals } from '../../types/api';
 
 type Interval = 'FIVE_MINUTE' | 'FIFTEEN_MINUTE' | 'ONE_HOUR' | 'ONE_DAY';
 
@@ -165,9 +165,11 @@ export function MarketDataView() {
   const [days,       setDays]       = useState(5);
   const [chartLoading, setChartLoading] = useState(true);
   const [loading,    setLoading]    = useState(true);
-  const [globalCues, setGlobalCues] = useState<GlobalCue[]>([]);
-  const [news, setNews]             = useState<NewsItem[]>([]);
+  const [globalCues,  setGlobalCues]  = useState<GlobalCue[]>([]);
+  const [news,        setNews]        = useState<NewsItem[]>([]);
   const [cuesLoading, setCuesLoading] = useState(true);
+  const [technicals,  setTechnicals]  = useState<NiftyTechnicals | null>(null);
+  const [techLoading, setTechLoading] = useState(true);
 
   const fetchAnalysis = useCallback(async () => {
     try {
@@ -275,6 +277,18 @@ export function MarketDataView() {
   // News
   useEffect(() => {
     marketApi.getNews().then(r => setNews(r.data)).catch(() => {});
+  }, []);
+
+  // Nifty technicals (refresh every 5 min)
+  useEffect(() => {
+    const fetch = async () => {
+      setTechLoading(true);
+      try { const r = await marketApi.getTechnicals(); setTechnicals(r.data); }
+      catch {} finally { setTechLoading(false); }
+    };
+    fetch();
+    const iv = setInterval(fetch, 300000);
+    return () => clearInterval(iv);
   }, []);
 
   const handleIntervalChange = (opt: typeof INTERVAL_OPTIONS[0]) => {
@@ -499,6 +513,173 @@ export function MarketDataView() {
           </>
         )}
       </div>
+
+      {/* ── Nifty Technicals ──────────────────────────────────────────── */}
+      {(techLoading || technicals) && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Nifty Technicals & Sentiment</span>
+            <div className="flex-1 h-px bg-jarvis-primary/10" />
+            {technicals && (
+              <span className="text-[9px] text-jarvis-text-secondary/40">Daily · refreshed every 5 min</span>
+            )}
+          </div>
+
+          {techLoading && !technicals ? (
+            <div className="grid grid-cols-4 gap-3">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="h-20 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
+              ))}
+            </div>
+          ) : technicals ? (() => {
+            const t = technicals;
+            const signalColor = t.signal.includes('STRONG') ? '#4ade80'
+              : t.signal === 'BUY' ? '#86efac'
+              : t.signal === 'NEUTRAL' ? '#facc15'
+              : '#f87171';
+            const trendColor = t.trend === 'UPTREND' ? '#4ade80'
+              : t.trend === 'DOWNTREND' ? '#f87171'
+              : '#facc15';
+
+            const indicators = [
+              {
+                label: 'RSI (14)', value: `${t.rsi14}`,
+                status: t.rsi14 > 70 ? 'OVERBOUGHT' : t.rsi14 < 30 ? 'OVERSOLD' : t.rsi14 > 50 ? 'BULLISH' : 'BEARISH',
+                color: t.rsi14 > 70 ? '#f87171' : t.rsi14 < 30 ? '#facc15' : t.rsi14 > 50 ? '#4ade80' : '#f87171',
+                bar: t.rsi14,
+                note: 'Momentum oscillator. 40–70 = ideal zone.',
+              },
+              {
+                label: 'MACD Hist', value: t.macd_hist.toFixed(1),
+                status: t.macd_hist > 0 ? 'POSITIVE' : 'NEGATIVE',
+                color: t.macd_hist > 0 ? '#4ade80' : '#f87171',
+                bar: null,
+                note: t.macd_hist > 0 ? 'Bullish momentum building' : 'Bearish pressure',
+              },
+              {
+                label: 'EMA 9 vs 21', value: t.ema9 > t.ema21 ? 'ABOVE' : 'BELOW',
+                status: t.ema9 > t.ema21 ? 'BULLISH' : 'BEARISH',
+                color: t.ema9 > t.ema21 ? '#4ade80' : '#f87171',
+                bar: null,
+                note: `EMA9: ${t.ema9.toLocaleString('en-IN', { maximumFractionDigits: 0 })}  EMA21: ${t.ema21.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+              },
+              {
+                label: 'Price vs SMA50', value: t.last_close > t.sma50 ? 'ABOVE' : 'BELOW',
+                status: t.last_close > t.sma50 ? 'BULLISH' : 'CAUTION',
+                color: t.last_close > t.sma50 ? '#4ade80' : '#f87171',
+                bar: null,
+                note: `SMA50: ${t.sma50.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+              },
+              {
+                label: 'Bollinger Band', value: `${t.bb_position.toFixed(0)}%`,
+                status: t.bb_position > 80 ? 'NEAR TOP' : t.bb_position < 20 ? 'NEAR BTM' : 'MID BAND',
+                color: t.bb_position > 80 ? '#facc15' : t.bb_position < 20 ? '#86efac' : '#00e5ff',
+                bar: t.bb_position,
+                note: 'Position within Bollinger Band (0=lower, 100=upper)',
+              },
+              {
+                label: 'Volume Ratio', value: `${t.vol_ratio.toFixed(2)}x`,
+                status: t.vol_ratio > 1.3 ? 'HIGH VOL' : t.vol_ratio < 0.8 ? 'LOW VOL' : 'NORMAL',
+                color: t.vol_ratio > 1.3 ? '#4ade80' : t.vol_ratio < 0.8 ? '#a0c4e0' : '#00e5ff',
+                bar: null,
+                note: '5-day avg vol vs 20-day avg vol',
+              },
+              {
+                label: 'Momentum 5D', value: `${t.momentum_5d >= 0 ? '+' : ''}${t.momentum_5d}%`,
+                status: t.momentum_5d > 0 ? 'POSITIVE' : 'NEGATIVE',
+                color: t.momentum_5d > 0 ? '#4ade80' : '#f87171',
+                bar: null,
+                note: `10D: ${t.momentum_10d >= 0 ? '+' : ''}${t.momentum_10d}%  20D: ${t.momentum_20d >= 0 ? '+' : ''}${t.momentum_20d}%`,
+              },
+              {
+                label: 'ATR (14)', value: `${t.atr14.toFixed(0)}pts`,
+                status: t.atr14 > 200 ? 'HIGH VOL' : t.atr14 < 80 ? 'LOW VOL' : 'NORMAL',
+                color: t.atr14 > 200 ? '#f87171' : '#a0c4e0',
+                bar: null,
+                note: 'Average True Range — daily volatility measure',
+              },
+            ];
+
+            return (
+              <div className="space-y-3">
+                {/* Sentiment header */}
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Overall signal */}
+                  <motion.div className="rounded-xl p-4 col-span-1"
+                    style={{ background: `${signalColor}0d`, border: `1px solid ${signalColor}40` }}
+                    initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
+                  >
+                    <div className="text-[10px] font-bold text-jarvis-text-secondary uppercase tracking-wider mb-1">Overall Signal</div>
+                    <div className="text-2xl font-black uppercase tracking-widest" style={{ color: signalColor }}>{t.signal}</div>
+                    <div className="text-[10px] font-bold mt-1 uppercase" style={{ color: trendColor }}>{t.trend}</div>
+                    <div className="flex gap-1 mt-1.5">
+                      {[...Array(6)].map((_, i) => (
+                        <div key={i} className="flex-1 h-1.5 rounded-full"
+                          style={{ background: i < t.score ? signalColor : 'rgba(255,255,255,0.08)' }} />
+                      ))}
+                    </div>
+                    <div className="text-[9px] text-jarvis-text-secondary/50 mt-1">{t.score}/6 indicators bullish</div>
+                  </motion.div>
+
+                  {/* NiftyBees action card */}
+                  <motion.div className="rounded-xl p-4 col-span-2"
+                    style={{ background: 'rgba(0,229,255,0.025)', border: '1px solid rgba(0,229,255,0.15)' }}
+                    initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-base">🐝</span>
+                      <span className="text-[10px] font-bold text-jarvis-primary uppercase tracking-widest">NiftyBees DCA Recommendation</span>
+                    </div>
+                    <div className="text-xl font-black text-jarvis-primary tracking-widest">{t.nb_action}</div>
+                    <p className="text-xs text-jarvis-text-secondary mt-1.5 leading-relaxed">{t.nb_reason}</p>
+                    <div className="grid grid-cols-3 gap-2 mt-3 pt-2 border-t border-white/5">
+                      {[
+                        { l: 'EMA9 > EMA21', v: t.ema9 > t.ema21, icon: t.ema9 > t.ema21 ? '✓' : '✗' },
+                        { l: 'RSI 40–70', v: t.rsi14 >= 40 && t.rsi14 <= 70, icon: (t.rsi14 >= 40 && t.rsi14 <= 70) ? '✓' : '✗' },
+                        { l: 'MACD +ve', v: t.macd_hist > 0, icon: t.macd_hist > 0 ? '✓' : '✗' },
+                      ].map(c => (
+                        <div key={c.l} className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold" style={{ color: c.v ? '#4ade80' : '#f87171' }}>{c.icon}</span>
+                          <span className="text-[10px] text-jarvis-text-secondary">{c.l}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </div>
+
+                {/* Individual indicators */}
+                <div className="grid grid-cols-4 gap-3">
+                  {indicators.map((ind, i) => (
+                    <motion.div
+                      key={ind.label}
+                      className="rounded-xl p-3"
+                      style={{ background: 'rgba(0,229,255,0.025)', border: `1px solid ${ind.color}18` }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[9px] font-bold text-jarvis-text-secondary uppercase tracking-wider">{ind.label}</span>
+                        <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ background: `${ind.color}15`, color: ind.color }}>
+                          {ind.status}
+                        </span>
+                      </div>
+                      <div className="text-base font-mono font-bold" style={{ color: ind.color }}>{ind.value}</div>
+                      {ind.bar !== null && (
+                        <div className="mt-1.5 h-1 rounded-full bg-white/5">
+                          <div className="h-1 rounded-full transition-all duration-700"
+                            style={{ width: `${Math.min(100, Math.max(0, ind.bar))}%`, background: ind.color }} />
+                        </div>
+                      )}
+                      <div className="text-[9px] text-jarvis-text-secondary/40 mt-1 leading-tight">{ind.note}</div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            );
+          })() : null}
+        </div>
+      )}
 
       {/* ── Analysis cards ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

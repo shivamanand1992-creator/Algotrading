@@ -16,6 +16,7 @@ import type {
   NiftyBeesStatus,
   GlobalCue,
   NewsItem,
+  NiftyTechnicals,
 } from '../types/api';
 
 // In production (Railway) frontend is served by the same server, so use relative URLs.
@@ -93,8 +94,9 @@ export const marketApi = {
     api.get<{ timestamp: string; open: number; high: number; low: number; close: number }[]>(
       `/api/market/vix?interval=${interval}&days=${days}`
     ),
-  getGlobalCues: () => api.get<GlobalCue[]>('/api/market/global-cues', { timeout: 20000 }),
-  getNews: () => api.get<NewsItem[]>('/api/market/news', { timeout: 15000 }),
+  getGlobalCues:  () => api.get<GlobalCue[]>('/api/market/global-cues', { timeout: 20000 }),
+  getNews:        () => api.get<NewsItem[]>('/api/market/news', { timeout: 20000 }),
+  getTechnicals:  () => api.get<NiftyTechnicals>('/api/market/technicals', { timeout: 30000 }),
 };
 
 // Risk endpoints

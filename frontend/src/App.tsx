@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { MarketDataView } from './components/market/MarketDataView';
+import { MarketNewsView } from './components/news/MarketNewsView';
 import { HelpView } from './components/help/HelpView';
 import { StocksView } from './components/stocks/StocksView';
 import { NiftyBeesView } from './components/niftybees/NiftyBeesView';
@@ -49,6 +50,7 @@ function App() {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
       case 'market':     return <MarketDataView />;
+      case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;
       case 'niftybees':  return <NiftyBeesView />;
       case 'help':       return <HelpView />;

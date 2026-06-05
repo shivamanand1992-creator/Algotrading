@@ -1,10 +1,27 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, type Variants } from 'framer-motion';
-import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
+import {
+  ComposedChart, Area, Line, ResponsiveContainer,
+  XAxis, YAxis, Tooltip,
+} from 'recharts';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { marketApi, niftyBeesApi, stocksApi } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
-import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } from '../../types/api';
+import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition, NiftyTechCandle } from '../../types/api';
+
+/** Simple EMA calculation for client-side use */
+function calcEMA(prices: number[], period: number): (number | null)[] {
+  const k = 2 / (period + 1);
+  const out: (number | null)[] = new Array(prices.length).fill(null);
+  if (prices.length < period) return out;
+  let prev = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[period - 1] = prev;
+  for (let i = period; i < prices.length; i++) {
+    prev = prices[i] * k + prev * (1 - k);
+    out[i] = parseFloat(prev.toFixed(2));
+  }
+  return out;
+}
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -15,21 +32,11 @@ const staggerItem: Variants = {
   show:   { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
-const SPARKLINE_MAX = 120;
-
-function SparkTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: 'rgba(0,5,20,0.95)', border: '1px solid rgba(0,229,255,0.3)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontFamily: 'monospace', color: '#00e5ff' }}>
-      {payload[0]?.value?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-    </div>
-  );
-}
 
 export function DashboardView() {
   const { connected, marketData: wsMarketData } = useWebSocket();
   const [marketData, setMarketData]     = useState<MarketData | null>(null);
-  const [sparkline, setSparkline]       = useState<{ v: number; t: string }[]>([]);
+  const [emaCandles, setEmaCandles]     = useState<NiftyTechCandle[]>([]);
   const [globalCues, setGlobalCues]     = useState<GlobalCue[]>([]);
   const [news, setNews]                 = useState<NewsItem[]>([]);
   const [nbStatus, setNbStatus]         = useState<NiftyBeesStatus | null>(null);
@@ -103,16 +110,34 @@ export function DashboardView() {
     fetch();
   }, []);
 
-  // Sparkline from WS ticks
+  // Daily EMA chart: fetch 30-day daily OHLCV and compute EMA9 / EMA21
   useEffect(() => {
-    if (wsMarketData) {
-      setMarketData(wsMarketData);
-      setSparkline(prev => {
-        const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const next = [...prev, { v: wsMarketData.ltp, t: now }];
-        return next.length > SPARKLINE_MAX ? next.slice(-SPARKLINE_MAX) : next;
-      });
-    }
+    const fetch = async () => {
+      try {
+        const res = await marketApi.getOHLCV('ONE_DAY', 30);
+        const candles = res.data ?? [];
+        if (candles.length < 9) return;
+        const closes = candles.map(c => c.close);
+        const ema9   = calcEMA(closes, 9);
+        const ema21  = calcEMA(closes, 21);
+        setEmaCandles(candles.map((c, i) => ({
+          date:  c.timestamp.slice(0, 10),
+          close: c.close,
+          ema9:  ema9[i],
+          ema21: ema21[i],
+          bb_up: null,
+          bb_lo: null,
+        })));
+      } catch {}
+    };
+    fetch();
+    const iv = setInterval(fetch, 300000); // refresh every 5 min
+    return () => clearInterval(iv);
+  }, []);
+
+  // WS tick → update market data
+  useEffect(() => {
+    if (wsMarketData) setMarketData(wsMarketData);
   }, [wsMarketData]);
 
   const ltp        = marketData?.ltp ?? 0;
@@ -175,30 +200,52 @@ export function DashboardView() {
               </div>
             </div>
 
-            {/* Right: Sparkline */}
+            {/* Right: 30-day EMA9 + EMA21 chart */}
             <div>
-              {sparkline.length > 4 ? (
-                <ResponsiveContainer width="100%" height={90}>
-                  <AreaChart data={sparkline} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                    <defs>
-                      <linearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="t" hide />
-                    <YAxis domain={['auto', 'auto']} hide />
-                    <Tooltip content={<SparkTooltip />} />
-                    <Area
-                      type="monotone" dataKey="v"
-                      stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={2}
-                      fill="url(#heroGrad)" dot={false} isAnimationActive={false}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              {emaCandles.length > 8 ? (
+                <>
+                  <div className="flex items-center gap-3 mb-1.5 justify-end">
+                    <span className="flex items-center gap-1 text-[9px] font-bold text-green-400/80"><span className="inline-block w-3 h-0.5 bg-green-400" />EMA 9</span>
+                    <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-400/80"><span className="inline-block w-3 h-0.5 bg-yellow-400" />EMA 21</span>
+                    <span className="flex items-center gap-1 text-[9px] text-jarvis-text-secondary/50">30D</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={82}>
+                    <ComposedChart data={emaCandles} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="heroCloseGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"  stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.18} />
+                          <stop offset="100%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" hide />
+                      <YAxis domain={['auto', 'auto']} hide />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0]?.payload as NiftyTechCandle;
+                          return (
+                            <div style={{ background: 'rgba(0,5,20,0.95)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 6, padding: '5px 10px', fontSize: 10, fontFamily: 'monospace' }}>
+                              <div style={{ color: '#a0c4e0', marginBottom: 2 }}>{d?.date}</div>
+                              <div style={{ color: '#00e5ff' }}>Close: {d?.close?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                              {d?.ema9 && <div style={{ color: '#4ade80' }}>EMA9: {d.ema9?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>}
+                              {d?.ema21 && <div style={{ color: '#facc15' }}>EMA21: {d.ema21?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>}
+                            </div>
+                          );
+                        }}
+                      />
+                      {/* Check if EMA9 > EMA21 for a reference fill */}
+                      <Area type="monotone" dataKey="close"
+                        stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={1.5}
+                        fill="url(#heroCloseGrad)" dot={false} isAnimationActive={false}
+                      />
+                      <Line type="monotone" dataKey="ema9"  stroke="#4ade80" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+                      <Line type="monotone" dataKey="ema21" stroke="#facc15" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </>
               ) : (
                 <div className="h-20 flex items-center justify-center text-xs text-jarvis-text-secondary/40 tracking-widest uppercase">
-                  Waiting for ticks…
+                  Loading EMA chart…
                 </div>
               )}
             </div>

@@ -12,8 +12,9 @@ const navItems: NavItem[] = [
   // Equity section
   { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '🐝', section: 'EQUITY' },
   { id: 'stocks',     label: 'Equity Swing',    icon: '📈' },
-  // Market & Analysis
+  // Analysis section
   { id: 'market',     label: 'Market',          icon: '🌐', section: 'ANALYSIS' },
+  { id: 'news',       label: 'Market News',     icon: '📰' },
 ];
 
 const bottomNavItems: NavItem[] = [

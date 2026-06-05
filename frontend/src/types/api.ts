@@ -199,6 +199,40 @@ export interface NewsItem {
   title: string;
   link: string;
   published: string;
+  source?: string;
+  category?: 'indian' | 'global';
+}
+
+export interface NiftyTechCandle {
+  date: string;
+  close: number;
+  ema9: number | null;
+  ema21: number | null;
+  bb_up: number | null;
+  bb_lo: number | null;
+}
+
+export interface NiftyTechnicals {
+  last_close:    number;
+  ema9:          number;
+  ema21:         number;
+  sma50:         number;
+  rsi14:         number;
+  macd_hist:     number;
+  atr14:         number;
+  bb_upper:      number;
+  bb_lower:      number;
+  bb_position:   number;
+  vol_ratio:     number;
+  momentum_5d:   number;
+  momentum_10d:  number;
+  momentum_20d:  number;
+  trend:         string;
+  signal:        string;
+  score:         number;
+  nb_action:     string;
+  nb_reason:     string;
+  candles:       NiftyTechCandle[];
 }
 
 export interface SwingPosition {

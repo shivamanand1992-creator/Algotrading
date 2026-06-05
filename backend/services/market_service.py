@@ -442,7 +442,6 @@ class MarketService:
     # ------------------------------------------------------------------
 
     async def get_global_cues(self) -> list:
-        """Fetch last-close data for major global indices and commodities via yfinance."""
         tickers = [
             {"symbol": "^GSPC",    "name": "S&P 500",    "type": "index"},
             {"symbol": "^IXIC",    "name": "NASDAQ",     "type": "index"},
@@ -487,44 +486,225 @@ class MarketService:
     # Market news
     # ------------------------------------------------------------------
 
-    async def get_news_summary(self) -> list:
-        """Parse ET Markets RSS feed and return headline list."""
+    async def get_news_summary(self, max_items: int = 20) -> list:
+        """Parse multiple Indian/global market RSS feeds and return merged headline list."""
         import xml.etree.ElementTree as ET
-        RSS_URLS = [
-            "https://economictimes.indiatimes.com/markets/rss.cms",
-            "https://feeds.feedburner.com/etspecialssection",
-        ]
-        try:
-            import urllib.request
+        import urllib.request
 
-            def _fetch():
-                for url in RSS_URLS:
-                    try:
-                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req, timeout=8) as resp:
-                            raw = resp.read().decode("utf-8", errors="ignore")
-                        root = ET.fromstring(raw)
-                        channel = root.find("channel")
-                        if channel is None:
-                            continue
-                        items = channel.findall("item")
-                        news = []
-                        for item in items[:12]:
-                            title = item.findtext("title", "").strip()
-                            link  = item.findtext("link", "").strip()
-                            pub   = item.findtext("pubDate", "").strip()
-                            if title:
-                                news.append({"title": title, "link": link, "published": pub})
-                        if news:
-                            return news
-                    except Exception:
-                        continue
+        # Each tuple: (url, source_label, category)
+        RSS_SOURCES = [
+            ("https://economictimes.indiatimes.com/markets/rss.cms",          "ET Markets",  "indian"),
+            ("https://www.moneycontrol.com/rss/MCtopnews.xml",                "Moneycontrol","indian"),
+            ("https://www.business-standard.com/rss/markets-106.rss",         "BS Markets",  "indian"),
+            ("https://www.thehindubusinessline.com/markets/feeder/default.rss","BusinessLine","indian"),
+            ("https://feeds.reuters.com/reuters/businessNews",                 "Reuters",     "global"),
+            ("https://www.cnbc.com/id/10001147/device/rss/rss.html",          "CNBC",        "global"),
+        ]
+
+        def _parse_one(url: str, source: str, category: str) -> list:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; AlgotradingBot/1.0)"},
+                )
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                root = ET.fromstring(raw)
+                channel = root.find("channel")
+                if channel is None:
+                    return []
+                news = []
+                for item in channel.findall("item")[:8]:
+                    title = item.findtext("title", "").strip()
+                    link  = item.findtext("link", "").strip()
+                    pub   = item.findtext("pubDate", "").strip()
+                    if title and len(title) > 10:
+                        news.append({
+                            "title":    title,
+                            "link":     link,
+                            "published": pub[:25] if pub else "",
+                            "source":   source,
+                            "category": category,
+                        })
+                return news
+            except Exception:
                 return []
 
-            return await self._run_sync(_fetch)
+        def _fetch_all():
+            results = []
+            for url, source, cat in RSS_SOURCES:
+                items = _parse_one(url, source, cat)
+                results.extend(items)
+                if len(results) >= max_items:
+                    break
+            return results[:max_items]
+
+        try:
+            items = await self._run_sync(_fetch_all)
+            if items:
+                logger.info(f"[News] Fetched {len(items)} headlines from RSS feeds.")
+            return items
         except Exception as e:
             logger.error(f"get_news_summary error: {e}")
             return []
+
+    # ------------------------------------------------------------------
+    # Nifty daily technical indicators
+    # ------------------------------------------------------------------
+
+    async def get_nifty_technicals(self) -> dict:
+        """Compute Nifty 50 daily technical indicators (EMA9/21, SMA50, RSI14, MACD, BB) from 60d daily OHLCV."""
+        import yfinance as yf
+        import numpy as np
+
+        def _calc():
+            df = yf.Ticker("^NSEI").history(period="90d", interval="1d")
+            if df is None or df.empty or len(df) < 20:
+                return {}
+
+            closes  = df["Close"].values.astype(float)
+            highs   = df["High"].values.astype(float)
+            lows    = df["Low"].values.astype(float)
+            volumes = df["Volume"].values.astype(float)
+            n = len(closes)
+
+            def _ema(arr, period):
+                k = 2 / (period + 1)
+                out = [float("nan")] * len(arr)
+                if len(arr) < period:
+                    return out
+                out[period - 1] = float(np.mean(arr[:period]))
+                for i in range(period, len(arr)):
+                    out[i] = arr[i] * k + out[i - 1] * (1 - k)
+                return out
+
+            ema9_arr  = _ema(closes, 9)
+            ema21_arr = _ema(closes, 21)
+            ema9_val  = ema9_arr[-1]
+            ema21_val = ema21_arr[-1]
+            sma50_val = float(np.mean(closes[-50:])) if n >= 50 else float(np.mean(closes))
+
+            # RSI(14) — Wilder smoothing
+            deltas = np.diff(closes)
+            gains  = np.where(deltas > 0, deltas, 0.0)
+            losses = np.where(deltas < 0, -deltas, 0.0)
+            avg_g  = float(np.mean(gains[:14]))
+            avg_l  = float(np.mean(losses[:14]))
+            for i in range(14, len(deltas)):
+                avg_g = (avg_g * 13 + gains[i]) / 14
+                avg_l = (avg_l * 13 + losses[i]) / 14
+            rsi = 100.0 - (100.0 / (1 + avg_g / avg_l)) if avg_l > 0 else 100.0
+
+            # MACD (12, 26, 9)
+            ema12 = _ema(closes, 12)
+            ema26 = _ema(closes, 26)
+            macd_line = [
+                (e12 - e26) if e12 == e12 and e26 == e26 else float("nan")
+                for e12, e26 in zip(ema12, ema26)
+            ]
+            valid_macd = [m for m in macd_line if m == m]  # drop NaN
+            sig = _ema(valid_macd, 9)
+            macd_hist = valid_macd[-1] - sig[-1] if sig[-1] == sig[-1] else 0.0
+
+            last = closes[-1]
+
+            # Bollinger Bands (20, 2)
+            sma20  = float(np.mean(closes[-20:]))
+            std20  = float(np.std(closes[-20:]))
+            bb_up  = sma20 + 2 * std20
+            bb_lo  = sma20 - 2 * std20
+            bb_pos = ((last - bb_lo) / (bb_up - bb_lo) * 100) if (bb_up - bb_lo) > 0 else 50.0
+
+            # ATR(14)
+            tr_arr = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, n)]
+            atr14  = float(np.mean(tr_arr[-14:])) if len(tr_arr) >= 14 else 0.0
+
+            # Momentum
+            def pct(a, b): return round((a - b) / b * 100, 2) if b > 0 else 0.0
+            mom5  = pct(closes[-1], closes[-6])  if n >= 6  else 0.0
+            mom10 = pct(closes[-1], closes[-11]) if n >= 11 else 0.0
+            mom20 = pct(closes[-1], closes[-21]) if n >= 21 else 0.0
+
+            # Volume ratio (5d avg vs 20d avg)
+            vol_ratio = float(np.mean(volumes[-5:])) / float(np.mean(volumes[-20:])) if n >= 20 and np.mean(volumes[-20:]) > 0 else 1.0
+
+            # Trend
+            if last > ema9_val > ema21_val:
+                trend = "UPTREND"
+            elif last < ema9_val < ema21_val:
+                trend = "DOWNTREND"
+            elif ema9_val > ema21_val:
+                trend = "BULLISH BIAS"
+            else:
+                trend = "SIDEWAYS"
+
+            # Overall score (0–6)
+            score = 0
+            if trend in ("UPTREND", "BULLISH BIAS"): score += 2
+            if 45 < rsi < 70:   score += 1
+            elif 70 <= rsi:      score -= 1   # overbought
+            if macd_hist > 0:   score += 1
+            if mom5 > 0:        score += 1
+            if vol_ratio > 1.1: score += 1
+
+            signal = "STRONG BUY" if score >= 5 else "BUY" if score >= 3 else "NEUTRAL" if score >= 1 else "CAUTION"
+
+            # NiftyBees recommendation
+            if signal in ("STRONG BUY", "BUY") and trend in ("UPTREND", "BULLISH BIAS"):
+                nb_action = "ACCUMULATE"
+                nb_reason = "Trend + momentum aligned. Good DCA window."
+            elif trend == "DOWNTREND" and rsi < 40:
+                nb_action = "DCA SLOWLY"
+                nb_reason = f"Nifty in downtrend (RSI {rsi:.1f}). Small buys on each 1%+ dip."
+            elif trend == "SIDEWAYS":
+                nb_action = "WAIT"
+                nb_reason = "Nifty ranging — wait for EMA9 > EMA21 to confirm uptrend."
+            else:
+                nb_action = "HOLD"
+                nb_reason = "No clear signal. Monitor daily."
+
+            # Build candle list for chart (last 45 days)
+            dates = df.index.tz_convert("Asia/Kolkata") if df.index.tz else df.index
+            candles = []
+            for i in range(max(0, n - 45), n):
+                candles.append({
+                    "date":  str(dates[i].date()),
+                    "close": round(float(closes[i]), 2),
+                    "ema9":  round(ema9_arr[i], 2) if ema9_arr[i] == ema9_arr[i] else None,
+                    "ema21": round(ema21_arr[i], 2) if ema21_arr[i] == ema21_arr[i] else None,
+                    "bb_up": round(sma20 + 2 * std20, 2),
+                    "bb_lo": round(sma20 - 2 * std20, 2),
+                })
+
+            return {
+                "last_close":   round(float(last),      2),
+                "ema9":         round(float(ema9_val),  2),
+                "ema21":        round(float(ema21_val), 2),
+                "sma50":        round(float(sma50_val), 2),
+                "rsi14":        round(float(rsi),       1),
+                "macd_hist":    round(float(macd_hist), 4),
+                "atr14":        round(float(atr14),     2),
+                "bb_upper":     round(float(bb_up),     2),
+                "bb_lower":     round(float(bb_lo),     2),
+                "bb_position":  round(float(bb_pos),    1),
+                "vol_ratio":    round(float(vol_ratio), 2),
+                "momentum_5d":  round(float(mom5),      2),
+                "momentum_10d": round(float(mom10),     2),
+                "momentum_20d": round(float(mom20),     2),
+                "trend":        trend,
+                "signal":       signal,
+                "score":        int(score),
+                "nb_action":    nb_action,
+                "nb_reason":    nb_reason,
+                "candles":      candles,
+            }
+
+        try:
+            result = await self._run_sync(_calc)
+            return result or {}
+        except Exception as e:
+            logger.error(f"get_nifty_technicals error: {e}")
+            return {}
 
     async def get_vix_data(self, interval: str = "FIFTEEN_MINUTE", days: int = 5) -> list:
         """Fetch India VIX (^INDIAVIX) data from Yahoo Finance."""
