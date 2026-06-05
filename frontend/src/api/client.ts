@@ -56,10 +56,12 @@ export function wsUrl(path: string): string {
 
 // System endpoints
 export const systemApi = {
-  getStatus: () => api.get<SystemStatus>('/api/system/status'),
-  setMode: (mode: 'paper' | 'live' | 'backtest') =>
-    api.post('/api/system/mode', { mode }),
-  squareOffAll: () => api.post('/api/system/squareoff'),
+  getStatus:     () => api.get<SystemStatus>('/api/system/status'),
+  setMode:       (mode: 'paper' | 'live' | 'backtest') => api.post('/api/system/mode', { mode }),
+  squareOffAll:  () => api.post('/api/system/squareoff'),
+  getBalance:    () => api.get<{ available_cash: number; net: number; used_margin: number; error?: string; source?: string }>('/api/system/balance'),
+  syncAll:       () => api.post<{ success: boolean; message: string; swing: any; niftybees: any; errors: string[] }>('/api/system/sync', {}, { timeout: 30000 }),
+  testTelegram:  () => api.post<{ sent: boolean; error: string | null }>('/api/system/telegram/test'),
 };
 
 // Strategy endpoints

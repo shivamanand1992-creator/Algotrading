@@ -197,6 +197,106 @@ async def manual_squareoff():
     }
 
 
+@router.get("/balance")
+async def get_account_balance(angel_client=Depends(get_angel_client)):
+    """Fetch live Angel One account balance (available cash, net value, used margin)."""
+    if DEMO_MODE:
+        return {"available_cash": 85000.0, "net": 125000.0, "used_margin": 40000.0, "collateral": 0.0, "source": "demo"}
+    if angel_client is None:
+        return {"available_cash": 0.0, "net": 0.0, "used_margin": 0.0, "error": "broker_not_connected"}
+    try:
+        loop = asyncio.get_event_loop()
+        raw  = await loop.run_in_executor(None, angel_client.get_funds)
+        # rmsLimit keys: net, availablecash, utiliseddebits, collateral
+        avail  = float(raw.get("availablecash",  raw.get("available_cash",  0)) or 0)
+        net    = float(raw.get("net",            0) or 0)
+        used   = float(raw.get("utiliseddebits", raw.get("used_margin", 0)) or 0)
+        collat = float(raw.get("collateral",     0) or 0)
+        return {"available_cash": avail, "net": net, "used_margin": used, "collateral": collat, "source": "live"}
+    except Exception as exc:
+        return {"available_cash": 0.0, "net": 0.0, "used_margin": 0.0, "error": str(exc)}
+
+
+@router.post("/sync")
+async def sync_all_from_broker(angel_client=Depends(get_angel_client)):
+    """Sync all positions from Angel One — swing holdings + NiftyBees holdings."""
+    if DEMO_MODE:
+        return {"success": True, "message": "Demo mode — no sync needed", "imported": [], "niftybees_synced": False}
+
+    results = {"swing": {}, "niftybees": {}, "errors": []}
+
+    # Swing sync
+    try:
+        from backend.api.routes.stocks import _get_svc
+        svc = _get_svc()
+        r   = await svc.sync_from_broker()
+        results["swing"] = r
+    except Exception as exc:
+        results["errors"].append(f"Swing sync: {exc}")
+
+    # NiftyBees sync — check Angel One holdings for NIFTYBEES
+    try:
+        from backend.services.niftybees_service import get_niftybees_service
+        nb = get_niftybees_service(angel_client)
+        if angel_client:
+            loop = asyncio.get_event_loop()
+            holdings = await loop.run_in_executor(None, angel_client.get_holdings)
+            nb_holding = next(
+                (h for h in holdings
+                 if h.get("tradingsymbol", "").upper() in ("NIFTYBEES", "NIFTY BEES")),
+                None
+            )
+            if nb_holding:
+                qty = int(nb_holding.get("quantity", 0))
+                avg = float(nb_holding.get("averageprice", 0))
+                cur = float(nb_holding.get("ltp", avg))
+                if qty > 0 and (nb._position is None or not nb._position.get("active")):
+                    # Restore position from broker
+                    import json as _json
+                    from datetime import date
+                    nb._position = {
+                        "active": True,
+                        "buys": [{"date": str(date.today()), "qty": qty, "price": avg,
+                                  "nifty_at_buy": 0, "nifty_dip_pct": 0,
+                                  "order_id": "broker_sync", "invested": round(qty * avg, 2)}],
+                        "total_qty": qty,
+                        "total_invested": round(qty * avg, 2),
+                        "avg_entry_price": avg,
+                        "mode": nb._config.get("mode", "live"),
+                        "last_buy_date": str(date.today()),
+                        "current_price": cur,
+                        "unrealized_pnl": round((cur - avg) * qty, 2),
+                        "pnl_pct": round((cur - avg) / avg * 100, 2) if avg > 0 else 0.0,
+                        "last_checked": str(date.today()),
+                    }
+                    await loop.run_in_executor(None, nb._save_state)
+                    results["niftybees"] = {"synced": True, "qty": qty, "avg": avg}
+                elif qty > 0:
+                    results["niftybees"] = {"synced": False, "message": "Position already tracked", "qty": qty}
+                else:
+                    results["niftybees"] = {"synced": False, "message": "No NIFTYBEES holding in Angel One"}
+            else:
+                results["niftybees"] = {"synced": False, "message": "NIFTYBEES not found in holdings"}
+    except Exception as exc:
+        results["errors"].append(f"NiftyBees sync: {exc}")
+
+    return {
+        "success": len(results["errors"]) == 0,
+        "message": f"Sync complete. Swing: {results['swing'].get('message', 'done')}",
+        **results,
+    }
+
+
+@router.post("/telegram/test")
+async def test_telegram():
+    """Send a test Telegram message to verify bot configuration."""
+    from backend.services.telegram_service import send, is_configured
+    if not is_configured():
+        return {"sent": False, "error": "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set in env vars"}
+    ok = send("✅ *JARVIS connected!* Your Telegram notifications are working.")
+    return {"sent": ok, "error": None if ok else "Send failed — check bot token and chat ID"}
+
+
 @router.get("/my-ip")
 async def get_outbound_ip():
     """Return the server's outbound public IP — use this to whitelist in Angel One"""

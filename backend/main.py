@@ -308,9 +308,25 @@ async def _niftybees_monitor_loop() -> None:
                 result = await svc.run_monitor()
                 action = result.get("action", "none")
 
-                # Always log buy/sell actions
+                # Always log buy/sell actions + send Telegram
                 if action in ("bought", "sold"):
                     logger.info(f"[NiftyBeesLoop] ACTION={action} | {result.get('details', '')}")
+                    try:
+                        from backend.services.telegram_service import send_trade_notification
+                        pos = svc._position
+                        if pos:
+                            qty   = pos.get("total_qty", 0)
+                            price = pos.get("current_price", pos.get("avg_entry_price", 0))
+                            send_trade_notification(
+                                action=action.upper(),
+                                symbol="NIFTYBEES",
+                                qty=qty,
+                                price=price,
+                                mode=svc._config.get("mode", "paper"),
+                                reason=result.get("details", ""),
+                            )
+                    except Exception as tg_exc:
+                        logger.warning(f"[NiftyBeesLoop] Telegram notify failed: {tg_exc}")
                 # Heartbeat every 30 minutes so we can verify the loop is alive in Railway logs
                 elif (now_ist.hour * 60 + now_ist.minute) % 30 == 0 and hm != _last_heartbeat_hm:
                     _last_heartbeat_hm = hm
@@ -332,6 +348,104 @@ async def _niftybees_monitor_loop() -> None:
         except Exception as exc:
             logger.error(f"_niftybees_monitor_loop error: {exc}")
 
+        await asyncio.sleep(60)
+
+
+async def _eod_telegram_report_loop() -> None:
+    """Send EOD Telegram report at 16:00 IST every weekday."""
+    _last_eod_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+            hm      = (now_ist.hour, now_ist.minute)
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = hm >= (16, 0)
+            not_done_today = _last_eod_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                _last_eod_date = today
+                logger.info("[EODReport] Composing EOD Telegram report…")
+                try:
+                    from backend.services.telegram_service import send_eod_report, is_configured
+                    from backend.services.niftybees_service import get_niftybees_service
+                    from backend.api.routes.stocks import _get_svc as _get_swing_svc
+                    from backend.dependencies import get_angel_client
+                    from backend.api.routes.system import get_account_balance
+
+                    if not is_configured():
+                        logger.info("[EODReport] Telegram not configured — skipping.")
+                    else:
+                        angel = get_angel_client()
+                        nb    = get_niftybees_service(angel)
+                        swing_svc = _get_swing_svc()
+                        swings = list(swing_svc._swing_positions.values())
+
+                        # Fetch balance
+                        balance = {}
+                        if angel:
+                            try:
+                                loop = asyncio.get_event_loop()
+                                raw  = await loop.run_in_executor(None, angel.get_funds)
+                                balance = {
+                                    "available_cash": float(raw.get("availablecash", raw.get("available_cash", 0)) or 0),
+                                    "net":            float(raw.get("net", 0) or 0),
+                                }
+                            except Exception as bal_exc:
+                                logger.warning(f"[EODReport] Balance fetch failed: {bal_exc}")
+
+                        send_eod_report(nb, swings, balance)
+                        logger.info("[EODReport] Telegram EOD report sent.")
+                except Exception as exc:
+                    logger.error(f"[EODReport] Error: {exc}")
+        except Exception as exc:
+            logger.error(f"_eod_telegram_report_loop unexpected error: {exc}")
+        await asyncio.sleep(60)
+
+
+async def _balance_check_loop() -> None:
+    """Check Angel One balance every 2h during market hours; alert via Telegram if low."""
+    _last_alert_date: _date | None = None
+    _low_balance_min = 0  # set by first successful check
+
+    while True:
+        try:
+            now_ist    = datetime.now(_IST)
+            is_weekday = now_ist.weekday() < 5
+            hm         = (now_ist.hour, now_ist.minute)
+            in_hours   = (9, 0) <= hm <= (15, 30)
+            on_the_hour = now_ist.minute < 2  # fire once per hour near :00
+
+            if is_weekday and in_hours and on_the_hour:
+                try:
+                    from backend.dependencies import get_angel_client
+                    from backend.services.niftybees_service import get_niftybees_service
+                    from backend.services.telegram_service import send_low_balance_alert, is_configured
+
+                    angel = get_angel_client()
+                    if angel is None:
+                        await asyncio.sleep(60)
+                        continue
+
+                    loop = asyncio.get_event_loop()
+                    raw  = await loop.run_in_executor(None, angel.get_funds)
+                    avail = float(raw.get("availablecash", raw.get("available_cash", 0)) or 0)
+
+                    nb  = get_niftybees_service(angel)
+                    req = nb._config.get("capital_amount", 10000.0)
+
+                    today = now_ist.date()
+                    if avail < req * 1.1 and _last_alert_date != today and is_configured():
+                        _last_alert_date = today
+                        send_low_balance_alert(available=avail, required=req)
+                        logger.warning(f"[BalanceCheck] Low balance alert sent: ₹{avail:,.0f} < ₹{req:,.0f}")
+                    else:
+                        logger.info(f"[BalanceCheck] Balance OK: ₹{avail:,.0f}")
+                except Exception as exc:
+                    logger.error(f"[BalanceCheck] Error: {exc}")
+        except Exception as exc:
+            logger.error(f"_balance_check_loop unexpected error: {exc}")
         await asyncio.sleep(60)
 
 
@@ -509,6 +623,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
+    asyncio.create_task(_eod_telegram_report_loop())
+    asyncio.create_task(_balance_check_loop())
     asyncio.create_task(_morning_news_loop())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
