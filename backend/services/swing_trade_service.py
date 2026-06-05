@@ -134,6 +134,8 @@ class SwingTradeService:
                 "mode":              self._autopilot_mode,
                 "capital_per_trade": self._autopilot_capital_per_trade,
                 "max_trades":        self._autopilot_max_trades,
+                "last_run":          self._autopilot_last_run.isoformat() if self._autopilot_last_run else None,
+                "last_result":       self._autopilot_last_result,
             },
         }
         state_json = json.dumps(state, default=str)
@@ -175,6 +177,13 @@ class SwingTradeService:
             self._autopilot_mode              = ap.get("mode", "paper")
             self._autopilot_capital_per_trade = float(ap.get("capital_per_trade", 1000.0))
             self._autopilot_max_trades        = int(ap.get("max_trades", 3))
+            if ap.get("last_run"):
+                try:
+                    self._autopilot_last_run = datetime.fromisoformat(ap["last_run"])
+                except Exception:
+                    pass
+            if ap.get("last_result"):
+                self._autopilot_last_result = ap["last_result"]
             if self._autopilot_enabled:
                 logger.info(
                     f"[SwingService] Restored autopilot: enabled={self._autopilot_enabled}, "
@@ -603,6 +612,26 @@ class SwingTradeService:
 
             stock_info = universe_symbols[symbol]
 
+            # If Angel One's ltp == avg_px (common after market close), fetch closing price via yfinance
+            if ltp == avg_px and stock_info.get("yf"):
+                try:
+                    import yfinance as yf
+                    df_yf = await loop.run_in_executor(
+                        None,
+                        lambda t=stock_info["yf"]: yf.download(t, period="2d", interval="1d",
+                                                                progress=False, auto_adjust=True)
+                    )
+                    if df_yf is not None and not df_yf.empty:
+                        if hasattr(df_yf.columns, "get_level_values"):
+                            df_yf.columns = df_yf.columns.get_level_values(0)
+                        df_yf.columns = [c.lower() for c in df_yf.columns]
+                        yf_close = float(df_yf["close"].iloc[-1])
+                        if yf_close > 0:
+                            ltp = yf_close
+                            logger.debug(f"[SwingSync] {symbol}: used yfinance close ₹{ltp:.2f} (AO ltp=avg_px)")
+                except Exception as _yf_exc:
+                    logger.debug(f"[SwingSync] {symbol}: yfinance fallback failed: {_yf_exc}")
+
             if symbol in self._swing_positions:
                 # Always refresh qty and live price for tracked positions
                 existing = self._swing_positions[symbol]
@@ -612,6 +641,10 @@ class SwingTradeService:
                 existing["current_price"]  = round(ltp, 2)
                 existing["unrealized_pnl"] = round((ltp - existing["entry_price"]) * qty, 2)
                 existing["pnl_pct"]        = round((ltp - existing["entry_price"]) / existing["entry_price"] * 100, 2) if existing["entry_price"] > 0 else 0.0
+                # Anything found in broker demat is a real (live) position
+                if existing.get("mode") != "live":
+                    logger.info(f"[SwingSync] {symbol}: mode {existing['mode']}→live (confirmed in broker demat)")
+                    existing["mode"] = "live"
                 updated.append(symbol)
             else:
                 # Recover from ledger — use original entry price from ledger if available
@@ -623,6 +656,8 @@ class SwingTradeService:
                 t2  = sig.target2   if sig else round(entry_price * 1.09, 2)
                 entry_date = ledger_entry["date"] if ledger_entry else datetime.now(_IST).strftime("%Y-%m-%d")
                 order_id   = ledger_entry["order_id"] if ledger_entry else f"RECOVERED-{symbol}"
+                # Resolve token now so refresh_position_prices can get live LTP immediately
+                token = await self._resolve_token(symbol)
                 self._swing_positions[symbol] = {
                     "order_id":       order_id,
                     "symbol":         symbol,
@@ -639,11 +674,12 @@ class SwingTradeService:
                     "unrealized_pnl": round((ltp - entry_price) * qty, 2),
                     "pnl_pct":        round((ltp - entry_price) / entry_price * 100, 2) if entry_price > 0 else 0.0,
                     "status":         "open",
-                    "mode":           ledger_entry["mode"] if ledger_entry else "live",
+                    "mode":           "live",   # in broker demat = real position regardless of how it was placed
+                    "token":          token if token != "0" else "",
                     "confidence":     0.5,
                     "regime":         "recovered",
                 }
-                logger.info(f"[SwingSync] Recovered {symbol} from ledger: qty={qty} entry=₹{entry_price:.2f}")
+                logger.info(f"[SwingSync] Recovered {symbol} from broker: qty={qty} entry=₹{entry_price:.2f} cmp=₹{ltp:.2f}")
                 imported.append(symbol)
 
         # 4. Report live positions not found in broker holdings
@@ -658,6 +694,7 @@ class SwingTradeService:
                 skipped.append(symbol)
 
         if imported or updated:
+            self._last_ltp_refresh = None  # force fresh LTP on next positions poll
             self._save_state()
 
         return {
@@ -710,6 +747,31 @@ class SwingTradeService:
                         f"[SwingService] {symbol} LTP=₹{ltp:.2f} "
                         f"P&L={pos['pnl_pct']:+.2f}% (₹{pos['unrealized_pnl']:+.2f})"
                     )
+                elif pos.get("yf_ticker"):
+                    # yfinance fallback — used when market is closed or token unavailable
+                    try:
+                        import yfinance as yf
+                        df_yf = await loop.run_in_executor(
+                            None,
+                            lambda t=pos["yf_ticker"]: yf.download(
+                                t, period="2d", interval="1d", progress=False, auto_adjust=True
+                            )
+                        )
+                        if df_yf is not None and not df_yf.empty:
+                            if hasattr(df_yf.columns, "get_level_values"):
+                                df_yf.columns = df_yf.columns.get_level_values(0)
+                            df_yf.columns = [c.lower() for c in df_yf.columns]
+                            yf_close = float(df_yf["close"].iloc[-1])
+                            if yf_close > 0:
+                                entry = pos["entry_price"]
+                                qty   = pos["qty"]
+                                pos["current_price"]  = round(yf_close, 2)
+                                pos["unrealized_pnl"] = round((yf_close - entry) * qty, 2)
+                                pos["pnl_pct"]        = round((yf_close - entry) / entry * 100, 2)
+                                pos["last_updated"]   = now.isoformat()
+                                logger.debug(f"[SwingService] {symbol} yfinance close=₹{yf_close:.2f} P&L={pos['pnl_pct']:+.2f}%")
+                    except Exception as _yf_exc:
+                        logger.debug(f"[SwingService] {symbol} yfinance fallback failed: {_yf_exc}")
             except Exception as exc:
                 logger.debug(f"[SwingService] LTP refresh skipped for {symbol}: {exc}")
         self._save_state()
