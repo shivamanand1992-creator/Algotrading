@@ -619,6 +619,26 @@ async def _startup_init_services() -> None:
                 await asyncio.sleep(3)
 
 
+async def _startup_telegram_ping() -> None:
+    """Send a Telegram message on every startup so you know the bot is working."""
+    await asyncio.sleep(10)  # let all services initialise first
+    try:
+        from backend.services.telegram_service import send, is_configured
+        if not is_configured():
+            logger.info("[StartupPing] Telegram not configured — skipping ping.")
+            return
+        from datetime import datetime, timezone, timedelta
+        _IST = timezone(timedelta(hours=5, minutes=30))
+        now  = datetime.now(_IST).strftime("%d %b %Y %H:%M IST")
+        ok = send(f"✅ <b>JARVIS is online</b>\nStarted at {now}\n\nTelegram notifications are working.")
+        if ok:
+            logger.info("[StartupPing] Telegram startup ping sent.")
+        else:
+            logger.error("[StartupPing] Telegram startup ping FAILED — check bot token / chat ID in Railway vars.")
+    except Exception as exc:
+        logger.error(f"[StartupPing] Unexpected error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting FastAPI backend...")
@@ -643,6 +663,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
     asyncio.create_task(_morning_news_loop())
+    asyncio.create_task(_startup_telegram_ping())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
     yield
