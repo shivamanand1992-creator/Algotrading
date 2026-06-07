@@ -388,15 +388,21 @@ async def _eod_telegram_report_loop() -> None:
                             try:
                                 loop = asyncio.get_event_loop()
                                 raw  = await loop.run_in_executor(None, angel.get_funds)
-                                balance = {
-                                    "available_cash": float(raw.get("availablecash", raw.get("available_cash", 0)) or 0),
-                                    "net":            float(raw.get("net", 0) or 0),
-                                }
+                                avail_eod = float(raw.get("availablecash", raw.get("available_cash", 0)) or 0)
+                                net_eod   = float(raw.get("net", 0) or 0)
+                                # Only include balance when Angel One returns real data
+                                if avail_eod > 0 or net_eod > 0:
+                                    balance = {"available_cash": avail_eod, "net": net_eod}
+                                else:
+                                    logger.warning("[EODReport] Balance API returned empty data — omitting from report.")
                             except Exception as bal_exc:
                                 logger.warning(f"[EODReport] Balance fetch failed: {bal_exc}")
 
-                        send_eod_report(nb, swings, balance)
-                        logger.info("[EODReport] Telegram EOD report sent.")
+                        ok = send_eod_report(nb, swings, balance)
+                        if ok:
+                            logger.info("[EODReport] Telegram EOD report sent.")
+                        else:
+                            logger.error("[EODReport] Telegram EOD report FAILED — check bot token / chat ID.")
                 except Exception as exc:
                     logger.error(f"[EODReport] Error: {exc}")
         except Exception as exc:
@@ -431,6 +437,13 @@ async def _balance_check_loop() -> None:
                     loop = asyncio.get_event_loop()
                     raw  = await loop.run_in_executor(None, angel.get_funds)
                     avail = float(raw.get("availablecash", raw.get("available_cash", 0)) or 0)
+                    net   = float(raw.get("net", 0) or 0)
+
+                    # Skip if Angel One returned empty data (common after market hours)
+                    if avail == 0 and net == 0:
+                        logger.debug("[BalanceCheck] rmsLimit returned empty data — skipping alert.")
+                        await asyncio.sleep(60)
+                        continue
 
                     nb  = get_niftybees_service(angel)
                     req = nb._config.get("capital_amount", 10000.0)
@@ -438,8 +451,11 @@ async def _balance_check_loop() -> None:
                     today = now_ist.date()
                     if avail < req * 1.1 and _last_alert_date != today and is_configured():
                         _last_alert_date = today
-                        send_low_balance_alert(available=avail, required=req)
-                        logger.warning(f"[BalanceCheck] Low balance alert sent: ₹{avail:,.0f} < ₹{req:,.0f}")
+                        ok = send_low_balance_alert(available=avail, required=req)
+                        if ok:
+                            logger.warning(f"[BalanceCheck] Low balance alert sent: ₹{avail:,.0f} < ₹{req:,.0f}")
+                        else:
+                            logger.error(f"[BalanceCheck] Low balance alert FAILED to send (Telegram error).")
                     else:
                         logger.info(f"[BalanceCheck] Balance OK: ₹{avail:,.0f}")
                 except Exception as exc:

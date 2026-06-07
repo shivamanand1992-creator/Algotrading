@@ -7,25 +7,32 @@ Get your chat ID by messaging @userinfobot on Telegram.
 """
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from loguru import logger
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID",   "")
+_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID",   "").strip()
 
 
 def is_configured() -> bool:
     return bool(_TOKEN and _CHAT_ID)
 
 
-def send(text: str, parse_mode: str = "Markdown") -> bool:
+def send(text: str, parse_mode: str = "HTML") -> bool:
     """Send a Telegram message. Returns True on success."""
     if not is_configured():
         logger.debug("[Telegram] Not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
         return False
+    # Convert legacy Markdown bold (*text*) to HTML (<b>text</b>) since we use HTML mode
+    # HTML is more robust — no escaping issues with special chars like . ! ( ) -
+    if parse_mode == "HTML":
+        import re
+        text = re.sub(r'\*([^*]+)\*', r'<b>\1</b>', text)
+        text = re.sub(r'_([^_]+)_', r'<i>\1</i>', text)
     try:
         payload = json.dumps({
             "chat_id":    _CHAT_ID,
@@ -43,6 +50,13 @@ def send(text: str, parse_mode: str = "Markdown") -> bool:
         if ok:
             logger.info("[Telegram] Message sent.")
         return ok
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = "(unreadable)"
+        logger.error(f"[Telegram] Send failed HTTP {exc.code}: {body}")
+        return False
     except Exception as exc:
         logger.error(f"[Telegram] Send failed: {exc}")
         return False
