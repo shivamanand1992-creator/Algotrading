@@ -212,8 +212,18 @@ async def get_account_balance(angel_client=Depends(get_angel_client)):
         net    = float(raw.get("net",            0) or 0)
         used   = float(raw.get("utiliseddebits", raw.get("used_margin", 0)) or 0)
         collat = float(raw.get("collateral",     0) or 0)
+        # When Angel One rmsLimit returns empty data (common after market hours),
+        # all values will be 0. Mark as unavailable so the frontend won't show a
+        # false "low balance" warning.
+        if avail == 0 and net == 0:
+            from loguru import logger as _log
+            _log.warning(f"[Balance] rmsLimit returned zero/empty data — raw keys: {list(raw.keys())}")
+            return {"available_cash": 0.0, "net": 0.0, "used_margin": 0.0,
+                    "source": "unavailable", "error": "rms_data_empty"}
         return {"available_cash": avail, "net": net, "used_margin": used, "collateral": collat, "source": "live"}
     except Exception as exc:
+        from loguru import logger as _log
+        _log.warning(f"[Balance] get_funds exception: {exc}")
         return {"available_cash": 0.0, "net": 0.0, "used_margin": 0.0, "error": str(exc)}
 
 

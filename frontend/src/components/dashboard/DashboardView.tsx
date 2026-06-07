@@ -31,7 +31,7 @@ function calcEMA(prices: number[], period: number): (number | null)[] {
   return out;
 }
 
-interface Balance { available_cash: number; net: number; used_margin: number; error?: string; }
+interface Balance { available_cash: number; net: number; used_margin: number; error?: string; source?: string; }
 
 export function DashboardView() {
   const { connected, marketData: wsMarketData } = useWebSocket();
@@ -193,7 +193,10 @@ export function DashboardView() {
   const swingPnlPct     = openSwings.length > 0
     ? openSwings.reduce((s, p) => s + (p.pnl_pct ?? 0), 0) / openSwings.length : 0;
 
-  const balLow = balance && nbConf && balance.available_cash < nbConf.capital_amount * 1.1;
+  // Only treat balance as real data when source=live AND at least one value is non-zero.
+  // Angel One rmsLimit() returns empty data after market hours → source="unavailable".
+  const balDataAvail = balance !== null && balance.source === 'live' && (balance.available_cash > 0 || balance.net > 0);
+  const balLow = balDataAvail && nbConf && balance!.available_cash < nbConf.capital_amount * 1.1;
 
   return (
     <motion.div className="space-y-5" variants={staggerContainer} initial="hidden" animate="show">
@@ -348,14 +351,14 @@ export function DashboardView() {
           <div className="flex items-center gap-6">
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Available Cash</div>
-              <div className={`text-base font-mono font-bold ${balLow ? 'text-red-400' : 'text-green-400'}`}>
-                {balance ? `₹${balance.available_cash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+              <div className={`text-base font-mono font-bold ${balLow ? 'text-red-400' : balDataAvail ? 'text-green-400' : 'text-jarvis-text-secondary'}`}>
+                {balDataAvail ? `₹${balance!.available_cash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
               </div>
             </div>
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Net Value</div>
               <div className="text-base font-mono font-bold text-jarvis-primary">
-                {balance?.net ? `₹${balance.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                {balDataAvail ? `₹${balance!.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
               </div>
             </div>
             <div className="text-right">
@@ -364,11 +367,11 @@ export function DashboardView() {
                 {nbConf ? `₹${nbConf.capital_amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
               </div>
             </div>
-            {balance && nbConf && (
+            {balDataAvail && nbConf && (
               <div className="text-right">
                 <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Chunks Available</div>
                 <div className={`text-base font-mono font-bold ${balLow ? 'text-red-400' : 'text-jarvis-secondary'}`}>
-                  {Math.floor(balance.available_cash / nbConf.capital_amount)}×
+                  {Math.floor(balance!.available_cash / nbConf.capital_amount)}×
                 </div>
               </div>
             )}
