@@ -546,6 +546,7 @@ async def _session_refresh_loop() -> None:
 _PUBLIC_API_PATHS = {
     "/api/auth/login",
     "/api/system/status",  # Railway health check
+    "/api/system/telegram/test",  # safe to expose — only sends to the configured chat ID
     "/health",
 }
 
