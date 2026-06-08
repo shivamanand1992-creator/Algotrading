@@ -329,6 +329,23 @@ class NiftyBeesService:
         ts       = datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
         order_id: Optional[str] = None
 
+        if mode == "live" and self.angel_client is None:
+            logger.error("[NiftyBees] Live BUY skipped — Angel One not connected.")
+            try:
+                from backend.services.telegram_service import send, is_configured
+                if is_configured():
+                    send(
+                        f"⚠️ <b>JARVIS — Manual Action Required</b>\n\n"
+                        f"Nifty is down <b>{dip_pct:.2f}%</b> "
+                        f"(₹{nifty_ltp:,.0f} vs prev close)\n"
+                        f"NiftyBees price: ₹{nb_price:.2f}\n\n"
+                        f"<b>Could not place order — broker not connected.</b>\n\n"
+                        f"Please buy <b>{qty} units of NIFTYBEES</b> manually in Angel One app."
+                    )
+            except Exception:
+                pass
+            return
+
         if mode == "live" and self.angel_client is not None:
             try:
                 token = await self._resolve_niftybees_token()
@@ -345,6 +362,20 @@ class NiftyBeesService:
                 )
             except Exception as exc:
                 logger.error(f"[NiftyBees] Live BUY failed: {exc}")
+                try:
+                    from backend.services.telegram_service import send, is_configured
+                    if is_configured():
+                        send(
+                            f"⚠️ <b>JARVIS — Manual Action Required</b>\n\n"
+                            f"Nifty is down <b>{dip_pct:.2f}%</b> "
+                            f"(₹{nifty_ltp:,.0f} vs prev close)\n"
+                            f"NiftyBees price: ₹{nb_price:.2f}\n\n"
+                            f"<b>Could not place order — Angel One API error:</b>\n"
+                            f"<code>{exc}</code>\n\n"
+                            f"Please buy <b>{qty} units of NIFTYBEES</b> manually in Angel One app."
+                        )
+                except Exception:
+                    pass
                 return
 
         if order_id is None:
