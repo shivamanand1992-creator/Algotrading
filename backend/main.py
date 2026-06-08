@@ -436,6 +436,13 @@ async def _balance_check_loop() -> None:
 
                     loop = asyncio.get_event_loop()
                     raw  = await loop.run_in_executor(None, angel.get_funds)
+
+                    # Angel One sometimes returns a string instead of dict when API is degraded
+                    if not isinstance(raw, dict):
+                        logger.warning(f"[BalanceCheck] get_funds returned non-dict ({type(raw).__name__}) — skipping.")
+                        await asyncio.sleep(60)
+                        continue
+
                     avail = float(raw.get("availablecash", raw.get("available_cash", 0)) or 0)
                     net   = float(raw.get("net", 0) or 0)
 

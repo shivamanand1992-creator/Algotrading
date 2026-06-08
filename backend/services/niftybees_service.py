@@ -239,17 +239,35 @@ class NiftyBeesService:
             return None
 
     async def _get_nifty_ltp(self) -> Optional[float]:
-        if self.angel_client is None:
-            return None
+        # Try Angel One first
+        if self.angel_client is not None:
+            try:
+                loop = asyncio.get_event_loop()
+                ltp  = await loop.run_in_executor(
+                    None, lambda: self.angel_client.get_ltp("NSE", _NIFTY_SYMBOL, _NIFTY_TOKEN)
+                )
+                if ltp:
+                    return float(ltp)
+            except Exception as exc:
+                logger.warning(f"[NiftyBees] get_nifty_ltp Angel One error: {exc} — trying yfinance fallback")
+
+        # yfinance fallback — fetches latest intraday price for Nifty 50
         try:
+            import yfinance as yf
             loop = asyncio.get_event_loop()
-            ltp  = await loop.run_in_executor(
-                None, lambda: self.angel_client.get_ltp("NSE", _NIFTY_SYMBOL, _NIFTY_TOKEN)
-            )
-            return float(ltp) if ltp else None
+            def _yf_ltp():
+                df = yf.download("^NSEI", period="1d", interval="1m", progress=False, auto_adjust=True)
+                if df.empty:
+                    return None
+                return float(df["Close"].iloc[-1])
+            ltp = await loop.run_in_executor(None, _yf_ltp)
+            if ltp:
+                logger.debug(f"[NiftyBees] Nifty LTP via yfinance fallback: ₹{ltp:.2f}")
+                return ltp
         except Exception as exc:
-            logger.warning(f"[NiftyBees] get_nifty_ltp error: {exc}")
-            return None
+            logger.warning(f"[NiftyBees] get_nifty_ltp yfinance fallback error: {exc}")
+
+        return None
 
     async def _resolve_niftybees_token(self) -> str:
         if self._niftybees_token:
