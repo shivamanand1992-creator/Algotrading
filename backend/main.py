@@ -27,6 +27,7 @@ from backend.api.routes import (
     niftybees,
 )
 from backend.api.routes import auth as auth_routes
+from backend.api.routes import sector_analysis
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
@@ -707,6 +708,7 @@ app.include_router(market_data.router)
 app.include_router(risk.router)
 app.include_router(stocks.router)
 app.include_router(niftybees.router)
+app.include_router(sector_analysis.router)
 
 
 @app.get("/health")

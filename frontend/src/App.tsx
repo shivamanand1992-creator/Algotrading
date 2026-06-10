@@ -6,6 +6,7 @@ import { MarketNewsView } from './components/news/MarketNewsView';
 import { HelpView } from './components/help/HelpView';
 import { StocksView } from './components/stocks/StocksView';
 import { NiftyBeesView } from './components/niftybees/NiftyBeesView';
+import { SectorAnalysisView } from './components/sectors/SectorAnalysisView';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -53,6 +54,7 @@ function App() {
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;
       case 'niftybees':  return <NiftyBeesView />;
+      case 'sectors':    return <SectorAnalysisView />;
       case 'help':       return <HelpView />;
       default:           return <DashboardView />;
     }

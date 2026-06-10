@@ -14,6 +14,7 @@ const navItems: NavItem[] = [
   { id: 'stocks',     label: 'Equity Swing',    icon: '📈' },
   // Analysis section
   { id: 'market',     label: 'Market',          icon: '🌐', section: 'ANALYSIS' },
+  { id: 'sectors',    label: 'Sector Rotation', icon: '🔄' },
   { id: 'news',       label: 'Market News',     icon: '📰' },
 ];
 
