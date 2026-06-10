@@ -1,0 +1,275 @@
+/* =========================================================
+   JARVIS HUD — Advanced Visual Layer
+   Cinema-grade terminal aesthetics
+   ========================================================= */
+
+/* ── Order Flow Vectors ─────────────────────────────────── */
+@keyframes vectorShoot {
+  0%   { transform: translateX(-110%) rotate(var(--angle,0deg)); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 0.7; }
+  100% { transform: translateX(210%) rotate(var(--angle,0deg)); opacity: 0; }
+}
+.order-vector {
+  position: absolute;
+  height: 1px;
+  pointer-events: none;
+  border-radius: 2px;
+  animation: vectorShoot var(--dur, 2s) ease-in-out var(--delay, 0s) infinite;
+  transform-origin: left center;
+}
+.order-vector-buy {
+  background: linear-gradient(90deg, transparent 0%, #00e676 40%, #00e676 60%, transparent 100%);
+  box-shadow: 0 0 6px 1px #00e67680, 0 0 18px 2px rgba(0,230,118,0.3);
+}
+.order-vector-sell {
+  background: linear-gradient(90deg, transparent 0%, #ff1744 40%, #ff1744 60%, transparent 100%);
+  box-shadow: 0 0 6px 1px #ff174480, 0 0 18px 2px rgba(255,23,68,0.3);
+}
+
+/* ── HUD Corner Brackets ────────────────────────────────── */
+.hud-corners {
+  position: relative;
+}
+.hud-corners::before,
+.hud-corners::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.3s ease, width 0.3s ease, height 0.3s ease;
+}
+.hud-corners::before {
+  top: -1px; left: -1px;
+  width: 18px; height: 18px;
+  border-top: 2px solid var(--hud-color, rgba(0,229,255,0.7));
+  border-left: 2px solid var(--hud-color, rgba(0,229,255,0.7));
+  opacity: 0.6;
+}
+.hud-corners::after {
+  bottom: -1px; right: -1px;
+  width: 18px; height: 18px;
+  border-bottom: 2px solid var(--hud-color, rgba(0,229,255,0.7));
+  border-right:  2px solid var(--hud-color, rgba(0,229,255,0.7));
+  opacity: 0.6;
+}
+.hud-corners:hover::before,
+.hud-corners:hover::after {
+  opacity: 1;
+  width: 24px; height: 24px;
+}
+
+/* Four-corner variant — all four brackets */
+.hud-quad {
+  position: relative;
+}
+.hud-quad::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  z-index: 10;
+  border-radius: inherit;
+  background:
+    /* top-left H */ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) top    left  / 16px 1.5px no-repeat,
+    /* top-left V */ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) top    left  / 1.5px 16px no-repeat,
+    /* top-right H*/ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) top    right / 16px 1.5px no-repeat,
+    /* top-right V*/ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) top    right / 1.5px 16px no-repeat,
+    /* bot-left H */ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) bottom left  / 16px 1.5px no-repeat,
+    /* bot-left V */ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) bottom left  / 1.5px 16px no-repeat,
+    /* bot-right H*/ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) bottom right / 16px 1.5px no-repeat,
+    /* bot-right V*/ linear-gradient(var(--hud-c,rgba(0,229,255,0.6)), var(--hud-c,rgba(0,229,255,0.6))) bottom right / 1.5px 16px no-repeat;
+  opacity: 0.55;
+  transition: opacity 0.3s;
+}
+.hud-quad:hover::before { opacity: 1; }
+
+/* ── Radar Sweep ────────────────────────────────────────── */
+@keyframes radarSweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes radarRingPulse {
+  0%   { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.radar-sweep {
+  animation: radarSweep 2.4s linear infinite;
+  transform-origin: center center;
+}
+.radar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  animation: radarRingPulse 2s ease-out infinite;
+}
+.radar-ring-delay {
+  animation-delay: 1s;
+}
+
+/* ── Scanline Wipe Reveal ───────────────────────────────── */
+@keyframes scanWipe {
+  0%   { clip-path: inset(0 0 100% 0); opacity: 0; }
+  4%   { opacity: 1; }
+  100% { clip-path: inset(0 0 0% 0);   opacity: 1; }
+}
+.scan-wipe {
+  animation: scanWipe 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.scan-wipe-d1 { animation-delay: 0.08s; }
+.scan-wipe-d2 { animation-delay: 0.16s; }
+.scan-wipe-d3 { animation-delay: 0.24s; }
+.scan-wipe-d4 { animation-delay: 0.32s; }
+.scan-wipe-d5 { animation-delay: 0.40s; }
+.scan-wipe-d6 { animation-delay: 0.48s; }
+.scan-wipe-d7 { animation-delay: 0.56s; }
+.scan-wipe-d8 { animation-delay: 0.64s; }
+
+/* ── Execution Log Feed ─────────────────────────────────── */
+@keyframes logEnter {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.log-enter {
+  animation: logEnter 0.28s ease-out both;
+}
+
+/* ── Typewriter cursor ──────────────────────────────────── */
+@keyframes blinkCaret {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0; }
+}
+.type-cursor {
+  display: inline-block;
+  width: 7px; height: 13px;
+  background: var(--jarvis-primary);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: blinkCaret 1s step-end infinite;
+}
+
+/* ── Price flash on tick ────────────────────────────────── */
+@keyframes flashGreen {
+  0%,100% { background: transparent; }
+  30%     { background: rgba(0,230,118,0.18); border-color: rgba(0,230,118,0.4); }
+}
+@keyframes flashRed {
+  0%,100% { background: transparent; }
+  30%     { background: rgba(255,23,68,0.18); border-color: rgba(255,23,68,0.4); }
+}
+.flash-up   { animation: flashGreen 0.6s ease-out; }
+.flash-down { animation: flashRed   0.6s ease-out; }
+
+/* ── Ambient deep glow ──────────────────────────────────── */
+@keyframes deepGlow {
+  0%,100% { box-shadow: 0 0 24px rgba(0,229,255,0.04), inset 0 0 24px rgba(0,229,255,0.015); }
+  50%     { box-shadow: 0 0 48px rgba(0,229,255,0.10), inset 0 0 40px rgba(0,229,255,0.04); }
+}
+.deep-glow { animation: deepGlow 5s ease-in-out infinite; }
+
+/* ── Live dot (replaces plain dot) ─────────────────────── */
+@keyframes livePulse {
+  0%,100% { transform: scale(1); opacity: 1; }
+  50%     { transform: scale(1.6); opacity: 0.5; }
+}
+.live-dot {
+  position: relative;
+  display: inline-block;
+  border-radius: 50%;
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: radarRingPulse 2s ease-out infinite;
+}
+
+/* ── 3D tilt card ───────────────────────────────────────── */
+.tilt-card {
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* ── Glowing progress bar ───────────────────────────────── */
+@keyframes barGlow {
+  0%,100% { box-shadow: 0 0 6px currentColor; }
+  50%     { box-shadow: 0 0 16px currentColor, 0 0 32px currentColor; }
+}
+.bar-glow { animation: barGlow 2s ease-in-out infinite; }
+
+/* ── Matrix particle canvas ─────────────────────────────── */
+#jarvis-particles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Data stream ticker (horizontal marquee) ────────────── */
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-track {
+  display: flex;
+  animation: ticker 40s linear infinite;
+  width: max-content;
+}
+.ticker-track:hover { animation-play-state: paused; }
+
+/* ── Sector card reveal delay grid ─────────────────────── */
+.reveal-grid > *:nth-child(1)  { animation-delay: 0.00s; }
+.reveal-grid > *:nth-child(2)  { animation-delay: 0.06s; }
+.reveal-grid > *:nth-child(3)  { animation-delay: 0.12s; }
+.reveal-grid > *:nth-child(4)  { animation-delay: 0.18s; }
+.reveal-grid > *:nth-child(5)  { animation-delay: 0.24s; }
+.reveal-grid > *:nth-child(6)  { animation-delay: 0.30s; }
+.reveal-grid > *:nth-child(7)  { animation-delay: 0.36s; }
+.reveal-grid > *:nth-child(8)  { animation-delay: 0.42s; }
+
+/* ── Data readout label ─────────────────────────────────── */
+.data-readout {
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--jarvis-text-secondary);
+}
+
+/* ── Glitch flicker on hover ────────────────────────────── */
+@keyframes glitch {
+  0%,96%,100% { transform: translate(0); }
+  97%  { transform: translate(-2px, 1px); }
+  98%  { transform: translate(2px,-1px) skewX(2deg); }
+  99%  { transform: translate(-1px, 0); }
+}
+.hover-glitch:hover { animation: glitch 0.4s ease-in-out; }
+
+/* ── Scanning diagonal beam (hero overlay) ──────────────── */
+@keyframes diagonalBeam {
+  0%   { transform: translateX(-200%) skewX(-20deg); opacity: 0; }
+  10%  { opacity: 0.12; }
+  90%  { opacity: 0.05; }
+  100% { transform: translateX(300%) skewX(-20deg); opacity: 0; }
+}
+.diagonal-beam {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 80px;
+  background: linear-gradient(90deg, transparent, rgba(0,229,255,0.12), transparent);
+  pointer-events: none;
+  animation: diagonalBeam 6s ease-in-out 2s infinite;
+}
+
+/* ── VIX / metric value counter ─────────────────────────── */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.count-reveal { animation: countUp 0.5s ease-out both; }

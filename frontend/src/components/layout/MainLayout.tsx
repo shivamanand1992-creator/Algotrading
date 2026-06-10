@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
+import { ParticleCanvas } from '../ui/ParticleCanvas';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -11,13 +12,16 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, activeView, onNavigate, onLogout }: MainLayoutProps) {
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header onLogout={onLogout} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar activeView={activeView} onNavigate={onNavigate} />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <ParticleCanvas />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <Header onLogout={onLogout} />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar activeView={activeView} onNavigate={onNavigate} />
+          <main className="flex-1 overflow-y-auto p-6">
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   );

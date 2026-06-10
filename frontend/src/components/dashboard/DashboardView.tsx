@@ -8,6 +8,9 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { marketApi, niftyBeesApi, stocksApi, systemApi } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
 import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition, NiftyTechCandle } from '../../types/api';
+import { OrderFlowVectors } from '../ui/OrderFlowVectors';
+import { ExecutionLogFeed, type LogEntry } from '../ui/ExecutionLogFeed';
+import { useTilt } from '../../hooks/useTilt';
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -17,6 +20,40 @@ const staggerItem: Variants = {
   hidden: { opacity: 0, y: 20 },
   show:   { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
+
+function CueCard({ cue }: { cue: GlobalCue }) {
+  const up   = (cue.change_pct ?? 0) >= 0;
+  const tilt = useTilt(6);
+  return (
+    <div
+      ref={tilt.ref}
+      onMouseMove={tilt.onMouseMove}
+      onMouseLeave={tilt.onMouseLeave}
+      className="scan-wipe tilt-card rounded-xl px-4 py-3 flex flex-col justify-between"
+      style={{
+        background: 'rgba(0,229,255,0.03)',
+        border: `1px solid ${cue.ltp === null ? 'rgba(0,229,255,0.06)' : up ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}`,
+      }}
+    >
+      <div className="flex justify-between items-start">
+        <span className="text-[10px] font-bold text-jarvis-text-secondary uppercase tracking-wider">{cue.name}</span>
+        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cue.type === 'index' ? 'bg-blue-400/10 text-blue-400' : cue.type === 'commodity' ? 'bg-amber-400/10 text-amber-400' : 'bg-purple-400/10 text-purple-400'}`}>
+          {cue.type.toUpperCase()}
+        </span>
+      </div>
+      <div className="mt-1">
+        <span className="text-sm font-mono font-bold text-jarvis-primary tabular-nums">
+          {cue.ltp !== null ? cue.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
+        </span>
+        {cue.change_pct !== null && (
+          <span className={`ml-2 text-xs font-mono font-bold ${up ? 'text-green-400' : 'text-red-400'}`}>
+            {up ? '+' : ''}{cue.change_pct.toFixed(2)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function calcEMA(prices: number[], period: number): (number | null)[] {
   const k = 2 / (period + 1);
@@ -47,7 +84,10 @@ export function DashboardView() {
   const [syncing, setSyncing]           = useState(false);
   const [syncMsg, setSyncMsg]           = useState('');
   const [lastUpdated, setLastUpdated]   = useState<Date | null>(null);
+  const [logEntries, setLogEntries]     = useState<LogEntry[]>([]);
+  const [ltpFlashDir, setLtpFlashDir]   = useState<'up' | 'down' | null>(null);
   const prevLtp = useRef<number>(0);
+  const logCounter = useRef<number>(0);
 
   // ── Market data (30s) ────────────────────────────────────────────
   const fetchMarket = useCallback(async () => {
@@ -142,9 +182,27 @@ export function DashboardView() {
       .finally(() => setNewsLoading(false));
   }, []);
 
-  // ── WS tick → market data ────────────────────────────────────────
+  // ── WS tick → market data + log entry ───────────────────────────
   useEffect(() => {
     if (wsMarketData) {
+      const prev = prevLtp.current;
+      if (prev > 0 && wsMarketData.ltp !== prev) {
+        const dir = wsMarketData.ltp > prev ? 'up' : 'down';
+        setLtpFlashDir(dir);
+        setTimeout(() => setLtpFlashDir(null), 650);
+        // Add to execution log
+        const now = new Date();
+        const t   = now.toTimeString().slice(0, 8);
+        setLogEntries(prev => [
+          ...prev.slice(-19),
+          {
+            id: ++logCounter.current,
+            time: t,
+            type: 'info',
+            message: `NIFTY50 ${dir === 'up' ? '▲' : '▼'} ${wsMarketData.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${wsMarketData.change_percentage >= 0 ? '+' : ''}${wsMarketData.change_percentage.toFixed(2)}%)`,
+          },
+        ]);
+      }
       setMarketData(wsMarketData);
       setLastUpdated(new Date());
     }
@@ -178,8 +236,8 @@ export function DashboardView() {
   const change    = marketData?.change ?? 0;
   const changePct = marketData?.change_percentage ?? 0;
   const isUp      = change >= 0;
-  const ltpFlash  = ltp !== prevLtp.current && ltp > 0;
-  prevLtp.current = ltp;
+  // Update prevLtp tracking (flash direction is tracked separately in WS effect)
+  if (ltp > 0 && ltp !== prevLtp.current) prevLtp.current = ltp;
 
   const nb       = nbStatus?.position ?? null;
   const nbConf   = nbStatus?.config;
@@ -241,11 +299,13 @@ export function DashboardView() {
       {/* ── HERO: Nifty 50 ────────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div
-          className="relative overflow-hidden rounded-2xl neon-border"
+          className={`relative overflow-hidden rounded-2xl neon-border deep-glow ${ltpFlashDir === 'up' ? 'flash-up' : ltpFlashDir === 'down' ? 'flash-down' : ''}`}
           style={{ background: 'linear-gradient(135deg, rgba(0,8,24,0.97) 0%, rgba(0,20,45,0.97) 100%)' }}
         >
           <div className="scan-line" />
-          <div className="px-8 py-6 grid grid-cols-3 gap-6 items-center">
+          {/* Animated order flow vectors */}
+          <OrderFlowVectors count={8} buyBias={isUp ? 0.65 : 0.35} />
+          <div className="px-8 py-6 grid grid-cols-3 gap-6 items-center" style={{ position: 'relative', zIndex: 2 }}>
             {/* Price */}
             <div className="col-span-2">
               <div className="flex items-center gap-3 mb-1">
@@ -256,7 +316,7 @@ export function DashboardView() {
                   className="text-6xl font-black font-mono tabular-nums glow-text"
                   style={{ color: '#00e5ff', letterSpacing: '-1px' }}
                   key={ltp}
-                  animate={ltpFlash ? { scale: [1, 1.02, 1] } : {}}
+                  animate={ltpFlashDir ? { scale: [1, 1.02, 1] } : {}}
                   transition={{ duration: 0.25 }}
                 >
                   {ltp > 0 ? ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
@@ -392,36 +452,10 @@ export function DashboardView() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-3">
-            {globalCues.map(cue => {
-              const up = (cue.change_pct ?? 0) >= 0;
-              return (
-                <motion.div
-                  key={cue.symbol}
-                  className="rounded-xl px-4 py-3 flex flex-col justify-between"
-                  style={{ background: 'rgba(0,229,255,0.03)', border: `1px solid ${cue.ltp === null ? 'rgba(0,229,255,0.06)' : up ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}` }}
-                  whileHover={{ scale: 1.02 }}
-                  transition={{ type: 'spring', stiffness: 300 }}
-                >
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-bold text-jarvis-text-secondary uppercase tracking-wider">{cue.name}</span>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${cue.type === 'index' ? 'bg-blue-400/10 text-blue-400' : cue.type === 'commodity' ? 'bg-amber-400/10 text-amber-400' : 'bg-purple-400/10 text-purple-400'}`}>
-                      {cue.type.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="mt-1">
-                    <span className="text-sm font-mono font-bold text-jarvis-primary tabular-nums">
-                      {cue.ltp !== null ? cue.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
-                    </span>
-                    {cue.change_pct !== null && (
-                      <span className={`ml-2 text-xs font-mono font-bold ${up ? 'text-green-400' : 'text-red-400'}`}>
-                        {up ? '+' : ''}{cue.change_pct.toFixed(2)}%
-                      </span>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })}
+          <div className="grid grid-cols-4 gap-3 reveal-grid">
+            {globalCues.map(cue => (
+              <CueCard key={cue.symbol} cue={cue} />
+            ))}
           </div>
         )}
       </motion.div>
@@ -642,6 +676,19 @@ export function DashboardView() {
           )}
         </div>
       </motion.div>
+      {/* ── EXECUTION LOG ─────────────────────────────────────────── */}
+      <motion.div variants={staggerItem}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Live Stream</span>
+          <div className="flex-1 h-px bg-jarvis-primary/10" />
+        </div>
+        <ExecutionLogFeed
+          entries={logEntries}
+          maxLines={6}
+          title="Market Tick Feed"
+        />
+      </motion.div>
+
     </motion.div>
   );
 }

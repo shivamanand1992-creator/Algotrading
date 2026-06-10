@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { systemApi } from '../../api/client';
 import type { SystemStatus } from '../../types/api';
+import { RadarPulse } from '../ui/RadarPulse';
 
 function STSLogo() {
   return (
@@ -64,8 +65,10 @@ export function Header({ onLogout }: HeaderProps) {
       initial={{ y: -60, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.5, ease: 'easeOut' }}
-      style={{ borderRadius: 0 }}
+      style={{ borderRadius: 0, position: 'relative', overflow: 'hidden' }}
     >
+      {/* Scanning diagonal beam */}
+      <div className="diagonal-beam" />
       <div className="flex items-center justify-between gap-4">
         {/* Logo */}
         <div className="flex items-center space-x-3 min-w-fit">
@@ -106,7 +109,11 @@ export function Header({ onLogout }: HeaderProps) {
           <div className="text-right">
             <div className="text-xs font-semibold text-jarvis-text-secondary uppercase tracking-wider">System</div>
             <div className="flex items-center justify-end space-x-2 mt-1">
-              <span className={`w-2 h-2 rounded-full ${statusColor(systemStatus?.status)} pulse-glow`} />
+              <RadarPulse
+                size={20}
+                active={systemStatus?.status === 'healthy' || systemStatus?.status === 'degraded'}
+                color={systemStatus?.status === 'healthy' ? '#4ade80' : systemStatus?.status === 'degraded' ? '#facc15' : '#6b7280'}
+              />
               <span className="text-xs font-mono text-jarvis-text-primary uppercase">
                 {systemStatus?.status || 'Unknown'}
               </span>
