@@ -136,32 +136,42 @@ class MarketService:
                 if not prev_close_found:
                     try:
                         import yfinance as yf
-                        def _yf_prev():
-                            return yf.Ticker("^NSEI").history(period="5d", interval="1d")
-                        yf_df = await self._run_sync(_yf_prev)
-                        if yf_df is not None and not yf_df.empty:
-                            closes = yf_df["Close"].dropna()
-                            if len(closes) >= 1:
-                                # Determine if the last row is today's partial candle
-                                today_ist = datetime.now(_IST).date()
-                                last_idx  = closes.index[-1]
-                                try:
-                                    last_date = last_idx.date() if hasattr(last_idx, "date") else last_idx
-                                except Exception:
-                                    last_date = None
+                        today_ist = datetime.now(_IST).date()
 
-                                if last_date == today_ist and len(closes) >= 2:
-                                    # Last row is today's partial data → use the row before it
-                                    self._cached_prev_close = float(closes.iloc[-2])
-                                else:
-                                    # Last row is the most recent closed day → that IS prev-close
-                                    self._cached_prev_close = float(closes.iloc[-1])
-                                logger.debug(
-                                    f"YFinance prev close: {self._cached_prev_close:.2f} "
-                                    f"(last_date={last_date}, today={today_ist})"
-                                )
+                        def _yf_prev():
+                            df = yf.download(
+                                "^NSEI", period="5d", interval="1d",
+                                progress=False, auto_adjust=True,
+                            )
+                            if df.empty:
+                                return None
+                            closes = df["Close"].dropna()
+                            # Build a date → close map for all rows STRICTLY before today
+                            past: dict = {}
+                            for ts, val in closes.items():
+                                try:
+                                    d = ts.date() if hasattr(ts, "date") else ts
+                                    if d < today_ist:
+                                        past[d] = float(val)
+                                except Exception:
+                                    pass
+                            if past:
+                                # Most recent trading day before today
+                                return past[max(past.keys())]
+                            # Fallback: if no row is before today (e.g., weekend edge case)
+                            # just use the last row as an approximation
+                            return float(closes.iloc[-1])
+
+                        prev_close_val = await self._run_sync(_yf_prev)
+                        if prev_close_val and prev_close_val > 0:
+                            self._cached_prev_close = float(prev_close_val)
+                            logger.debug(
+                                f"YFinance prev close: {self._cached_prev_close:.2f} "
+                                f"(today_ist={today_ist})"
+                            )
                     except Exception as yf_err:
                         logger.warning(f"YFinance prev-close fallback failed: {yf_err}")
+
 
                 self._cache_ts = datetime.now(_IST)
 
