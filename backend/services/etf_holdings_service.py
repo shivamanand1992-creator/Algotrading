@@ -54,8 +54,10 @@ _YF_MAP: Dict[str, str] = {
 
 
 def _is_etf(row: dict) -> bool:
-    sym  = (row.get("tradingsymbol") or "").upper()
-    itype = (row.get("instrumenttype") or "").upper()
+    # Angel One returns tradingsymbol as "NIFTYBEES-EQ" — strip the -EQ suffix
+    raw_sym = (row.get("tradingsymbol") or "").upper()
+    sym     = raw_sym.replace("-EQ", "").replace("-BE", "")
+    itype   = (row.get("instrumenttype") or "").upper()
 
     if itype in {"AMFI", "ETF", "MUTUALFUND"}:
         return True
@@ -155,7 +157,15 @@ class ETFHoldingsService:
             logger.warning(f"[ETFHoldings] get_holdings returned {type(raw).__name__} — skipping.")
             return {"holdings": self._holdings, "sells": []}
 
+        logger.info(
+            f"[ETFHoldings] {len(raw)} total holding(s) from broker: "
+            + ", ".join(
+                f"{r.get('tradingsymbol','?')}({r.get('instrumenttype','?')})"
+                for r in raw
+            )
+        )
         etfs = [r for r in raw if _is_etf(r)]
+        logger.info(f"[ETFHoldings] {len(etfs)} ETF(s) detected after filter.")
         if not etfs:
             self._holdings = []
             return {"holdings": [], "sells": []}
