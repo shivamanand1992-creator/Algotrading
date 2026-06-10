@@ -16,6 +16,8 @@ const navItems: NavItem[] = [
   { id: 'market',     label: 'Market',          icon: '🌐', section: 'ANALYSIS' },
   { id: 'sectors',    label: 'Sector Rotation', icon: '🔄' },
   { id: 'news',       label: 'Market News',     icon: '📰' },
+  // Portfolio section
+  { id: 'holdings',   label: 'ETF Holdings',    icon: '🗂️', section: 'PORTFOLIO' },
 ];
 
 const bottomNavItems: NavItem[] = [

@@ -28,6 +28,7 @@ from backend.api.routes import (
 )
 from backend.api.routes import auth as auth_routes
 from backend.api.routes import sector_analysis
+from backend.api.routes import etf_holdings
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
@@ -517,6 +518,39 @@ async def _morning_news_loop() -> None:
         await asyncio.sleep(60)
 
 
+async def _etf_holdings_monitor_loop() -> None:
+    """
+    Every 5 minutes during market hours (09:15–15:30 IST, weekdays):
+    sync ETF holdings from broker, check 5% profit target, auto-sell if hit.
+    """
+    while True:
+        try:
+            now_ist    = datetime.now(_IST)
+            is_weekday = now_ist.weekday() < 5
+            hm         = (now_ist.hour, now_ist.minute)
+            in_hours   = (9, 15) <= hm <= (15, 30)
+
+            if is_weekday and in_hours and now_ist.minute % 5 == 0:
+                try:
+                    from backend.services.etf_holdings_service import get_etf_holdings_service
+                    from backend.dependencies import get_angel_client
+                    svc    = get_etf_holdings_service(get_angel_client())
+                    result = await svc.sync_and_check()
+                    sells  = result.get("sells", [])
+                    if sells:
+                        logger.info(f"[ETFHoldings] Auto-sold (5% target): {sells}")
+                    else:
+                        logger.debug(
+                            f"[ETFHoldings] {len(result.get('holdings', []))} ETF(s) checked — no target hits."
+                        )
+                except Exception as exc:
+                    logger.error(f"[ETFHoldings] monitor error: {exc}")
+        except Exception as exc:
+            logger.error(f"_etf_holdings_monitor_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)
+
+
 async def _session_refresh_loop() -> None:
     """
     Force a full Angel One re-login at 08:55 IST and again at 12:30 IST on trading days.
@@ -668,6 +702,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
+    asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
     asyncio.create_task(_morning_news_loop())
@@ -709,6 +744,7 @@ app.include_router(risk.router)
 app.include_router(stocks.router)
 app.include_router(niftybees.router)
 app.include_router(sector_analysis.router)
+app.include_router(etf_holdings.router)
 
 
 @app.get("/health")
