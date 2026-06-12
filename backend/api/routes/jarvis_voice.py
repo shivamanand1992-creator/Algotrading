@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from loguru import logger
 
-from backend.auth import verify_token
+from backend.auth import get_current_user
 from backend.services.jarvis_voice_service import get_jarvis_voice_service
 
 router = APIRouter(prefix="/api/jarvis", tags=["jarvis"])
@@ -35,12 +35,12 @@ class SpeakRequest(BaseModel):
 
 
 @router.get("/topics")
-async def list_topics(_: str = Depends(verify_token)):
+async def list_topics(_: str = Depends(get_current_user)):
     return TOPICS
 
 
 @router.get("/config")
-async def get_config(_: str = Depends(verify_token)):
+async def get_config(_: str = Depends(get_current_user)):
     import os
     return {
         "claude_configured":     bool(os.environ.get("ANTHROPIC_API_KEY")),
@@ -52,7 +52,7 @@ async def get_config(_: str = Depends(verify_token)):
 @router.post("/speak")
 async def jarvis_speak(
     body: SpeakRequest,
-    _: str = Depends(verify_token),
+    _: str = Depends(get_current_user),
 ):
     try:
         context = await _build_context(body.topic)

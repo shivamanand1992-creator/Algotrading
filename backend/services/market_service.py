@@ -181,32 +181,30 @@ class MarketService:
             import yfinance as yf
 
             def _yf_prev():
-                df = yf.download(
-                    "^NSEI", period="7d", interval="1d",
-                    progress=False, auto_adjust=True,
-                )
-                if df.empty:
+                # Use Ticker.history() — avoids the multi-level column issue
+                # that yf.download() has in yfinance >= 0.2.x
+                ticker = yf.Ticker("^NSEI")
+                hist   = ticker.history(period="7d", interval="1d")
+                if hist is None or hist.empty:
                     return None
-                closes = df["Close"].dropna()
-                past: dict = {}
-                for ts, val in closes.items():
-                    try:
-                        # Normalise timezone-aware timestamps to IST date
-                        if hasattr(ts, "tzinfo") and ts.tzinfo is not None:
-                            import pytz as _pytz
-                            d = ts.astimezone(_pytz.timezone("Asia/Kolkata")).date()
-                        elif hasattr(ts, "date"):
-                            d = ts.date()
-                        else:
-                            d = ts
-                        if d < today_ist:
-                            past[d] = float(val)
-                    except Exception:
-                        pass
-                if past:
-                    return past[max(past.keys())]
-                # Do NOT fall back to iloc[-1] — it might be today's live candle.
-                return None
+                # index is DatetimeIndex; convert to IST if tz-aware
+                try:
+                    import pytz as _pytz
+                    _ist = _pytz.timezone("Asia/Kolkata")
+                    if hist.index.tzinfo is not None:
+                        hist.index = hist.index.tz_convert(_ist)
+                    elif hasattr(hist.index, "tz_localize"):
+                        hist.index = hist.index.tz_localize("UTC").tz_convert(_ist)
+                except Exception:
+                    pass
+                # Keep only rows strictly before today_ist
+                try:
+                    past = hist[hist.index.date < today_ist]
+                except Exception:
+                    past = hist.iloc[:-1] if len(hist) > 1 else hist.iloc[:0]
+                if past.empty:
+                    return None
+                return float(past["Close"].iloc[-1])
 
             prev_val = await self._run_sync(_yf_prev)
             if prev_val and prev_val > 0:
