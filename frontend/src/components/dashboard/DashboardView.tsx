@@ -11,6 +11,7 @@ import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition, N
 import { OrderFlowVectors } from '../ui/OrderFlowVectors';
 import { ExecutionLogFeed, type LogEntry } from '../ui/ExecutionLogFeed';
 import { useTilt } from '../../hooks/useTilt';
+import { VaayuGlobe } from '../ui/VaayuGlobe';
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -296,52 +297,42 @@ export function DashboardView() {
         </div>
       </motion.div>
 
-      {/* ── HERO: Nifty 50 ────────────────────────────────────────── */}
+      {/* ── HERO: Globe + Nifty ────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div
-          className={`relative overflow-hidden rounded-2xl neon-border deep-glow ${ltpFlashDir === 'up' ? 'flash-up' : ltpFlashDir === 'down' ? 'flash-down' : ''}`}
-          style={{ background: 'linear-gradient(135deg, rgba(0,8,24,0.97) 0%, rgba(0,20,45,0.97) 100%)' }}
+          className={`relative overflow-hidden rounded-2xl ${ltpFlashDir === 'up' ? 'flash-up' : ltpFlashDir === 'down' ? 'flash-down' : ''}`}
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,5,18,0.85) 0%, rgba(0,15,40,0.85) 100%)',
+            border: '1px solid rgba(0,229,255,0.12)',
+            backdropFilter: 'blur(8px)',
+          }}
         >
           <div className="scan-line" />
-          {/* Animated order flow vectors */}
-          <OrderFlowVectors count={8} buyBias={isUp ? 0.65 : 0.35} />
-          <div className="px-8 py-6 grid grid-cols-3 gap-6 items-center" style={{ position: 'relative', zIndex: 2 }}>
-            {/* Price */}
-            <div className="col-span-2">
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-[10px] font-bold tracking-[0.3em] text-jarvis-primary/60 uppercase">Nifty 50 Index</span>
-              </div>
-              <div className="flex items-end gap-5">
-                <motion.div
-                  className="text-6xl font-black font-mono tabular-nums glow-text"
-                  style={{ color: '#00e5ff', letterSpacing: '-1px' }}
-                  key={ltp}
-                  animate={ltpFlashDir ? { scale: [1, 1.02, 1] } : {}}
-                  transition={{ duration: 0.25 }}
-                >
-                  {ltp > 0 ? ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
-                </motion.div>
-                <div className="mb-2">
-                  <div className={`text-2xl font-mono font-bold tabular-nums ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                    {isUp ? '+' : ''}{change.toFixed(2)}
-                  </div>
-                  <div className={`text-base font-mono ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                    {isUp ? '▲' : '▼'} {Math.abs(changePct).toFixed(2)}%
-                  </div>
-                </div>
-              </div>
+          <OrderFlowVectors count={6} buyBias={isUp ? 0.65 : 0.35} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0, position: 'relative', zIndex: 2 }}>
+            {/* Globe */}
+            <div style={{ flexShrink: 0, padding: '8px 0 8px 8px' }}>
+              <VaayuGlobe
+                ltp={ltp}
+                change={change}
+                changePct={changePct}
+                isUp={isUp}
+                size={260}
+              />
             </div>
 
-            {/* EMA9 + EMA21 chart */}
-            <div>
+            {/* Right: EMA chart + data strips */}
+            <div style={{ flex: 1, padding: '16px 20px 16px 0' }}>
+              {/* EMA Chart */}
               {emaCandles.length > 8 ? (
                 <>
-                  <div className="flex items-center gap-3 mb-1.5 justify-end">
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-green-400/80"><span className="inline-block w-3 h-0.5 bg-green-400" />EMA 9</span>
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-400/80"><span className="inline-block w-3 h-0.5 bg-yellow-400" />EMA 21</span>
-                    <span className="flex items-center gap-1 text-[9px] text-jarvis-text-secondary/50">30D</span>
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <span className="text-[9px] font-bold tracking-[0.25em] text-jarvis-primary/40 uppercase">Nifty 50 · 30D</span>
+                    <span className="flex items-center gap-1 text-[9px] font-bold text-green-400/70"><span className="inline-block w-3 h-0.5 bg-green-400" />EMA 9</span>
+                    <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-400/70"><span className="inline-block w-3 h-0.5 bg-yellow-400" />EMA 21</span>
                   </div>
-                  <ResponsiveContainer width="100%" height={82}>
+                  <ResponsiveContainer width="100%" height={140}>
                     <ComposedChart data={emaCandles} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
                       <defs>
                         <linearGradient id="heroCloseGrad" x1="0" y1="0" x2="0" y2="1">
@@ -375,10 +366,33 @@ export function DashboardView() {
                   </ResponsiveContainer>
                 </>
               ) : (
-                <div className="h-20 flex items-center justify-center text-xs text-jarvis-text-secondary/40 tracking-widest uppercase">
-                  Loading EMA chart…
+                <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="text-xs text-jarvis-text-secondary/40 tracking-widest uppercase">Loading chart…</span>
                 </div>
               )}
+
+              {/* Quick stats row */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                {[
+                  { label: 'OPEN',  value: marketData?.open  ? marketData.open.toLocaleString('en-IN', { maximumFractionDigits: 0 })  : '—' },
+                  { label: 'HIGH',  value: marketData?.high   ? marketData.high.toLocaleString('en-IN', { maximumFractionDigits: 0 })   : '—', color: '#4ade80' },
+                  { label: 'LOW',   value: marketData?.low    ? marketData.low.toLocaleString('en-IN', { maximumFractionDigits: 0 })    : '—', color: '#f87171' },
+                  { label: 'PCR',   value: marketData?.pcr          ? marketData.pcr.toFixed(2)    : '—', color: '#a78bfa' },
+                  { label: 'IV %',  value: marketData?.iv_percentile ? `${marketData.iv_percentile.toFixed(0)}%` : '—', color: '#fbbf24' },
+                ].map(item => (
+                  <div key={item.label} style={{
+                    flex: 1,
+                    padding: '6px 8px',
+                    background: 'rgba(0,229,255,0.03)',
+                    border: '1px solid rgba(0,229,255,0.07)',
+                    borderRadius: 6,
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: 8, color: 'rgba(160,196,224,0.4)', letterSpacing: '0.1em', marginBottom: 2 }}>{item.label}</div>
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: item.color || '#00e5ff' }}>{item.value}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

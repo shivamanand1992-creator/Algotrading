@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-const CHARS = '01₹JARVIS NIFTY50 BUY SELL ΔΣΦ'.split('');
+const CHARS = '01₹VAAYU NIFTY50 BUY SELL ΔΣΦ'.split('');
 const FONT_SIZE = 11;
 
 export function ParticleCanvas() {

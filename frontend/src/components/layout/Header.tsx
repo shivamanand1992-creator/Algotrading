@@ -2,32 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { systemApi } from '../../api/client';
 import type { SystemStatus } from '../../types/api';
-import { RadarPulse } from '../ui/RadarPulse';
-
-function STSLogo() {
-  return (
-    <svg width="44" height="44" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <polygon points="21,2 38,11.5 38,30.5 21,40 4,30.5 4,11.5"
-        fill="rgba(0,229,255,0.07)" stroke="#00e5ff" strokeWidth="1.2" />
-      <polygon points="21,7 34,14.5 34,27.5 21,35 8,27.5 8,14.5"
-        fill="none" stroke="rgba(0,229,255,0.25)" strokeWidth="0.6" />
-      <polyline points="10,29 16,22 22,25 32,13"
-        stroke="#00e5ff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-        filter="url(#glow)" />
-      <circle cx="16" cy="22" r="2.2" fill="#00e5ff" />
-      <circle cx="22" cy="25" r="1.6" fill="#1de9b6" />
-      <circle cx="32" cy="13" r="2.5" fill="#00e5ff" filter="url(#glow)" />
-      <polyline points="29,11 32,13 30,16"
-        stroke="#00e5ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <defs>
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="1.8" result="blur" />
-          <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-        </filter>
-      </defs>
-    </svg>
-  );
-}
 
 interface HeaderProps {
   onLogout?: () => void;
@@ -47,110 +21,167 @@ export function Header({ onLogout }: HeaderProps) {
       try {
         const res = await systemApi.getStatus();
         setSystemStatus(res.data);
-      } catch (e) {
-        console.error('Failed to fetch system status:', e);
-      }
+      } catch (e) {}
     };
     fetchStatus();
     const interval = setInterval(fetchStatus, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const statusColor = (s?: string) =>
-    s === 'healthy' ? 'bg-green-400' : s === 'degraded' ? 'bg-yellow-400' : 'bg-gray-500';
+  const brokerOk = systemStatus?.broker_connected;
+  const sysOk    = systemStatus?.status === 'healthy';
 
   return (
-    <motion.header
-      className="glass-panel border-b border-jarvis-primary/20 px-6 py-3"
-      initial={{ y: -60, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.5, ease: 'easeOut' }}
-      style={{ borderRadius: 0, position: 'relative', overflow: 'hidden' }}
+    <header
+      style={{
+        height: 52,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 20px 0 16px',
+        background: 'rgba(2,4,16,0.92)',
+        borderBottom: '1px solid rgba(0,229,255,0.1)',
+        position: 'relative',
+        zIndex: 10,
+        flexShrink: 0,
+      }}
     >
-      {/* Scanning diagonal beam */}
+      {/* Scanning beam */}
       <div className="diagonal-beam" />
-      <div className="flex items-center justify-between gap-4">
-        {/* Logo */}
-        <div className="flex items-center space-x-3 min-w-fit">
-          <motion.div
-            className="sts-logo-badge"
-            animate={{ rotate: [0, 3, -3, 0] }}
-            transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <STSLogo />
-          </motion.div>
-          <div>
-            <h1 className="text-lg font-black text-jarvis-primary glow-text tracking-widest neon-flicker">
-              SHIVAM TRADING
-            </h1>
-            <p className="text-xs text-jarvis-text-secondary tracking-wider">
-              Algorithmic Trading System
-            </p>
-          </div>
-        </div>
 
-        {/* Center — clock */}
-        <div className="text-center flex-1">
-          <motion.div
-            className="text-2xl font-mono text-jarvis-primary glow-text tabular-nums"
-            key={currentTime.getSeconds()}
-            animate={{ opacity: [0.85, 1] }}
-            transition={{ duration: 0.5 }}
-          >
-            {currentTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </motion.div>
-          <div className="text-xs text-jarvis-text-secondary mt-0.5">
-            {currentTime.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-          </div>
-        </div>
+      {/* Left — VAAYU wordmark */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Hexagon logo */}
+        <svg width={30} height={30} viewBox="0 0 30 30" style={{ flexShrink: 0 }}>
+          <defs>
+            <filter id="hdr-glow">
+              <feGaussianBlur stdDeviation="1.5" result="blur" />
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <polygon points="15,2 27,8.5 27,21.5 15,28 3,21.5 3,8.5"
+            fill="rgba(0,229,255,0.08)" stroke="rgba(0,229,255,0.5)" strokeWidth="1"
+            filter="url(#hdr-glow)" />
+          <polygon points="15,6 24,11 24,19 15,24 6,19 6,11"
+            fill="none" stroke="rgba(0,229,255,0.2)" strokeWidth="0.5" />
+          <text x="15" y="19" textAnchor="middle"
+            style={{ fontFamily: 'monospace', fontSize: 10, fontWeight: 900, fill: '#00e5ff', letterSpacing: 1 }}>
+            V
+          </text>
+        </svg>
 
-        {/* Right — status + mode toggle */}
-        <div className="flex items-center space-x-5 min-w-fit">
-          <div className="text-right">
-            <div className="text-xs font-semibold text-jarvis-text-secondary uppercase tracking-wider">System</div>
-            <div className="flex items-center justify-end space-x-2 mt-1">
-              <RadarPulse
-                size={20}
-                active={systemStatus?.status === 'healthy' || systemStatus?.status === 'degraded'}
-                color={systemStatus?.status === 'healthy' ? '#4ade80' : systemStatus?.status === 'degraded' ? '#facc15' : '#6b7280'}
-              />
-              <span className="text-xs font-mono text-jarvis-text-primary uppercase">
-                {systemStatus?.status || 'Unknown'}
-              </span>
-            </div>
+        <div>
+          <div style={{
+            fontSize: 14,
+            fontFamily: "'Courier New', monospace",
+            fontWeight: 900,
+            color: '#00e5ff',
+            letterSpacing: '0.35em',
+            lineHeight: 1,
+            textShadow: '0 0 12px rgba(0,229,255,0.5)',
+          }}>
+            VAAYU
           </div>
-          {onLogout && (
-            <>
-              <div className="w-px h-8 bg-jarvis-primary/20" />
-              <button
-                onClick={onLogout}
-                title="Sign out"
-                style={{
-                  background: 'transparent',
-                  border: '1px solid rgba(0,229,255,0.25)',
-                  color: 'rgba(0,229,255,0.6)',
-                  padding: '5px 10px',
-                  fontSize: 10,
-                  letterSpacing: 2,
-                  cursor: 'pointer',
-                  fontFamily: "'Courier New', monospace",
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={e => {
-                  (e.target as HTMLButtonElement).style.borderColor = '#00e5ff';
-                  (e.target as HTMLButtonElement).style.color = '#00e5ff';
-                }}
-                onMouseLeave={e => {
-                  (e.target as HTMLButtonElement).style.borderColor = 'rgba(0,229,255,0.25)';
-                  (e.target as HTMLButtonElement).style.color = 'rgba(0,229,255,0.6)';
-                }}
-              >
-                LOGOUT
-              </button>
-            </>
-          )}
+          <div style={{
+            fontSize: 8,
+            fontFamily: 'monospace',
+            color: 'rgba(160,196,224,0.4)',
+            letterSpacing: '0.2em',
+            marginTop: 1,
+          }}>
+            ALGOTRADING
+          </div>
         </div>
       </div>
-    </motion.header>
+
+      {/* Center — clock */}
+      <div style={{ textAlign: 'center', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+        <motion.div
+          style={{
+            fontSize: 20,
+            fontFamily: "'Courier New', monospace",
+            fontWeight: 700,
+            color: '#00e5ff',
+            letterSpacing: '0.1em',
+            textShadow: '0 0 10px rgba(0,229,255,0.4)',
+            tabularNums: true,
+          } as React.CSSProperties}
+          key={currentTime.getSeconds()}
+          animate={{ opacity: [0.85, 1] }}
+          transition={{ duration: 0.5 }}
+        >
+          {currentTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        </motion.div>
+        <div style={{ fontSize: 8, color: 'rgba(160,196,224,0.35)', marginTop: 1, letterSpacing: '0.1em' }}>
+          {currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
+        </div>
+      </div>
+
+      {/* Right — status + logout */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        {/* Status indicators */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <StatusPill label="SYS" ok={sysOk} />
+          <StatusPill label="BROKER" ok={!!brokerOk} />
+        </div>
+
+        {onLogout && (
+          <>
+            <div style={{ width: 1, height: 20, background: 'rgba(0,229,255,0.12)' }} />
+            <button
+              onClick={onLogout}
+              title="Sign out"
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(0,229,255,0.2)',
+                color: 'rgba(0,229,255,0.5)',
+                padding: '4px 10px',
+                fontSize: 9,
+                letterSpacing: '0.15em',
+                cursor: 'pointer',
+                fontFamily: "'Courier New', monospace",
+                borderRadius: 4,
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,229,255,0.5)';
+                (e.currentTarget as HTMLButtonElement).style.color = '#00e5ff';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,229,255,0.2)';
+                (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,229,255,0.5)';
+              }}
+            >
+              EXIT
+            </button>
+          </>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function StatusPill({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <motion.div
+        style={{
+          width: 5, height: 5,
+          borderRadius: '50%',
+          background: ok ? '#4ade80' : '#6b7280',
+          flexShrink: 0,
+        }}
+        animate={ok ? { scale: [1, 1.5, 1], opacity: [1, 0.5, 1] } : {}}
+        transition={{ duration: 2, repeat: Infinity }}
+      />
+      <span style={{
+        fontSize: 8,
+        fontFamily: 'monospace',
+        letterSpacing: '0.1em',
+        color: ok ? 'rgba(74,222,128,0.7)' : 'rgba(107,114,128,0.7)',
+      }}>
+        {label}
+      </span>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { ReactNode } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ParticleCanvas } from '../ui/ParticleCanvas';
+import { CityBackground } from '../ui/CityBackground';
 import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 
 interface MainLayoutProps {
@@ -13,18 +14,23 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, activeView, onNavigate, onLogout }: MainLayoutProps) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+      {/* Layered backgrounds: city at z=0, particles at z=1 */}
+      <CityBackground />
       <ParticleCanvas />
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+
+      {/* App shell above backgrounds */}
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         <Header onLogout={onLogout} />
-        <div className="flex flex-1 overflow-hidden">
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <Sidebar activeView={activeView} onNavigate={onNavigate} />
-          <main className="flex-1 overflow-y-auto p-6">
+          <main style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
             {children}
           </main>
         </div>
       </div>
-      {/* JARVIS voice panel — fixed bottom-right, available on all pages */}
+
+      {/* VAAYU voice panel — fixed bottom-right */}
       <JarvisVoicePanel />
     </div>
   );

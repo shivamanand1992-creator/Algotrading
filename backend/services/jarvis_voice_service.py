@@ -18,7 +18,7 @@ from loguru import logger
 # ── Prompt templates ──────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are JARVIS, the AI assistant for Shivam's algorithmic trading system. "
+    "You are VAAYU, the AI assistant for Shivam's algorithmic trading system. "
     "Generate spoken briefings in a sophisticated, confident tone — like a "
     "British AI assistant. Use natural speech (no bullet points, no markdown, "
     "no asterisks). Address the user as 'sir' once. Keep it under 120 words "

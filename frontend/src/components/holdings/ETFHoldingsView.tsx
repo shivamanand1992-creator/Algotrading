@@ -161,7 +161,7 @@ export function ETFHoldingsView() {
       <div className="glass-panel rounded-lg p-4 text-xs text-jarvis-text-secondary space-y-1">
         <div className="font-semibold text-jarvis-primary/70 mb-2">HOW IT WORKS</div>
         <div>• Holdings are synced from your Angel One demat account every 5 minutes during market hours.</div>
-        <div>• When any ETF reaches a <span className="text-jarvis-primary">+5% gain</span> from your average buy price, JARVIS automatically places a SELL order for the full quantity.</div>
+        <div>• When any ETF reaches a <span className="text-jarvis-primary">+5% gain</span> from your average buy price, VAAYU automatically places a SELL order for the full quantity.</div>
         <div>• If the auto-sell order fails, you will receive a Telegram alert to sell manually.</div>
         <div>• Only ETFs are tracked here (NIFTYBEES, BANKBEES, GOLDBEES, etc.). Regular stocks are shown in the Stocks section.</div>
       </div>

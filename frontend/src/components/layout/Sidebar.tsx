@@ -1,5 +1,4 @@
 import React from 'react';
-import { HUDCorners } from '../ui/HUDCorners';
 
 interface NavItem {
   id: string;
@@ -9,20 +8,17 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { id: 'dashboard',  label: 'Dashboard',      icon: '📊' },
-  // Equity section
-  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '🐝', section: 'EQUITY' },
-  { id: 'stocks',     label: 'Equity Swing',    icon: '📈' },
-  // Analysis section
-  { id: 'market',     label: 'Market',          icon: '🌐', section: 'ANALYSIS' },
-  { id: 'sectors',    label: 'Sector Rotation', icon: '🔄' },
-  { id: 'news',       label: 'Market News',     icon: '📰' },
-  // Portfolio section
-  { id: 'holdings',   label: 'ETF Holdings',    icon: '🗂️', section: 'PORTFOLIO' },
+  { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
+  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡', section: 'EQUITY' },
+  { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
+  { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
+  { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
+  { id: 'news',       label: 'Market News',     icon: '≡' },
+  { id: 'holdings',   label: 'ETF Holdings',    icon: '⊞', section: 'PORTFOLIO' },
 ];
 
 const bottomNavItems: NavItem[] = [
-  { id: 'help', label: 'Help & Guide', icon: '❓' },
+  { id: 'help', label: 'Help & Guide', icon: '?' },
 ];
 
 interface SidebarProps {
@@ -34,79 +30,143 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
   let lastSection: string | undefined;
 
   return (
-    <aside className="w-64 glass-panel border-r border-jarvis-primary/30 flex flex-col" style={{ position: 'relative' }}>
-      <nav className="flex-1 py-4">
+    <aside
+      style={{
+        width: 56,
+        minWidth: 56,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'rgba(2,6,18,0.85)',
+        borderRight: '1px solid rgba(0,229,255,0.1)',
+        position: 'relative',
+        zIndex: 10,
+      }}
+    >
+      {/* Top accent line */}
+      <div style={{ height: 2, background: 'linear-gradient(90deg, transparent, rgba(0,229,255,0.6), transparent)' }} />
+
+      <nav style={{ flex: 1, paddingTop: 8, paddingBottom: 8 }}>
         {navItems.map((item) => {
           const showDivider = item.section && item.section !== lastSection;
           lastSection = item.section ?? lastSection;
           const isActive = activeView === item.id;
+
           return (
             <React.Fragment key={item.id}>
               {showDivider && (
-                <div className="mx-4 my-2 flex items-center gap-2">
-                  <div className="flex-1 h-px bg-jarvis-primary/15" />
-                  <span className="text-[9px] font-bold tracking-widest text-jarvis-primary/40 uppercase">
-                    {item.section}
-                  </span>
-                  <div className="flex-1 h-px bg-jarvis-primary/15" />
-                </div>
+                <div style={{ margin: '8px 8px', height: 1, background: 'rgba(0,229,255,0.08)' }} />
               )}
-              {isActive ? (
-                <HUDCorners
-                  className="mx-1 rounded-lg"
-                  color="rgba(0,229,255,0.6)"
-                  style={{ display: 'block' }}
-                >
-                  <button
-                    onClick={() => onNavigate(item.id)}
-                    className="w-full px-5 py-3.5 flex items-center space-x-3 transition-all duration-300 rounded-lg bg-jarvis-primary/20 border-r-4 border-jarvis-primary text-jarvis-primary deep-glow"
-                  >
-                    <span className="text-xl">{item.icon}</span>
-                    <span className="font-medium text-sm">{item.label}</span>
-                    {/* Active glow pulse */}
-                    <span
-                      className="live-dot ml-auto"
-                      style={{ width: 6, height: 6, background: '#00e5ff', color: '#00e5ff', flexShrink: 0 }}
-                    />
-                  </button>
-                </HUDCorners>
-              ) : (
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
                 <button
                   onClick={() => onNavigate(item.id)}
-                  className="w-full px-6 py-3.5 flex items-center space-x-3 transition-all duration-300 text-jarvis-text-secondary hover:bg-jarvis-primary/10 hover:text-jarvis-primary hover-glitch"
+                  title={item.label}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    margin: '2px 0',
+                    borderRadius: 8,
+                    border: isActive ? '1px solid rgba(0,229,255,0.35)' : '1px solid transparent',
+                    background: isActive ? 'rgba(0,229,255,0.12)' : 'transparent',
+                    color: isActive ? '#00e5ff' : 'rgba(160,196,224,0.45)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 18,
+                    fontFamily: 'monospace',
+                    fontWeight: isActive ? 900 : 400,
+                    transition: 'all 0.2s',
+                    position: 'relative',
+                    boxShadow: isActive ? '0 0 12px rgba(0,229,255,0.2)' : 'none',
+                  }}
+                  onMouseEnter={e => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,229,255,0.06)';
+                      (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,229,255,0.75)';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLButtonElement).style.color = 'rgba(160,196,224,0.45)';
+                    }
+                  }}
                 >
-                  <span className="text-xl">{item.icon}</span>
-                  <span className="font-medium text-sm">{item.label}</span>
+                  {item.icon}
+                  {/* Active left-bar indicator */}
+                  {isActive && (
+                    <div style={{
+                      position: 'absolute',
+                      left: -9,
+                      top: '20%',
+                      width: 2,
+                      height: '60%',
+                      background: '#00e5ff',
+                      borderRadius: 1,
+                      boxShadow: '0 0 6px #00e5ff',
+                    }} />
+                  )}
                 </button>
-              )}
+              </div>
             </React.Fragment>
           );
         })}
       </nav>
 
-      <div className="border-t border-jarvis-primary/30">
+      {/* Bottom section */}
+      <div style={{ borderTop: '1px solid rgba(0,229,255,0.08)', paddingTop: 8, paddingBottom: 8 }}>
         {bottomNavItems.map((item) => {
           const isActive = activeView === item.id;
           return (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.id)}
-              className={`w-full px-6 py-4 flex items-center space-x-3 transition-all duration-300 ${
-                isActive
-                  ? 'bg-jarvis-primary/20 border-r-4 border-jarvis-primary text-jarvis-primary'
-                  : 'text-jarvis-text-secondary hover:bg-jarvis-primary/10 hover:text-jarvis-primary'
-              }`}
-            >
-              <span className="text-xl">{item.icon}</span>
-              <span className="font-medium text-sm">{item.label}</span>
-            </button>
+            <div key={item.id} style={{ display: 'flex', justifyContent: 'center' }}>
+              <button
+                onClick={() => onNavigate(item.id)}
+                title={item.label}
+                style={{
+                  width: 40,
+                  height: 40,
+                  margin: '2px 0',
+                  borderRadius: 8,
+                  border: isActive ? '1px solid rgba(0,229,255,0.35)' : '1px solid transparent',
+                  background: isActive ? 'rgba(0,229,255,0.12)' : 'transparent',
+                  color: isActive ? '#00e5ff' : 'rgba(160,196,224,0.35)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 15,
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,229,255,0.06)';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,229,255,0.7)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'rgba(160,196,224,0.35)';
+                  }
+                }}
+              >
+                {item.icon}
+              </button>
+            </div>
           );
         })}
-        <div className="p-5 border-t border-jarvis-primary/30">
-          <div className="text-xs text-jarvis-text-secondary text-center">
-            <div className="data-readout">v1.0.0</div>
-            <div className="mt-1 data-readout">Shivam Trading System</div>
-          </div>
+
+        {/* Version dot */}
+        <div style={{ textAlign: 'center', paddingTop: 8 }}>
+          <div style={{
+            width: 6, height: 6,
+            borderRadius: '50%',
+            background: 'rgba(0,229,255,0.3)',
+            margin: '0 auto',
+            boxShadow: '0 0 6px rgba(0,229,255,0.2)',
+          }} />
         </div>
       </div>
     </aside>
