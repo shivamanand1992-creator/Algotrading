@@ -1,9 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, type Variants } from 'framer-motion';
-import {
-  AreaChart, Area, ResponsiveContainer,
-  XAxis, YAxis, Tooltip,
-} from 'recharts';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { marketApi, niftyBeesApi, stocksApi, systemApi } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
@@ -65,6 +61,142 @@ function HudStat({
         </div>
       )}
     </motion.div>
+  );
+}
+
+// ── SVG Candlestick chart ─────────────────────────────────────────────────
+function CandlestickChart({ candles }: { candles: IntradayCandle[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tooltip, setTooltip] = useState<{ candle: IntradayCandle; pct: number } | null>(null);
+
+  if (candles.length < 2) {
+    return (
+      <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 10, color: 'rgba(160,196,224,0.3)', fontFamily: 'monospace', letterSpacing: '0.2em' }}>
+          {candles.length === 0 ? 'AWAITING MARKET DATA...' : 'NOT ENOUGH DATA'}
+        </span>
+      </div>
+    );
+  }
+
+  const W = 800, H = 120;
+  const PAD = { left: 8, right: 8, top: 10, bottom: 22 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const minP = Math.min(...candles.map(c => c.low))  * 0.9998;
+  const maxP = Math.max(...candles.map(c => c.high)) * 1.0002;
+  const range = maxP - minP || 1;
+
+  const toY = (p: number) => PAD.top + chartH - ((p - minP) / range) * chartH;
+  const slotW = chartW / candles.length;
+  const bodyW = Math.max(2, slotW * 0.6);
+  const labelEvery = Math.max(1, Math.floor(candles.length / 7));
+  const gridPrices = [minP + range * 0.25, minP + range * 0.5, minP + range * 0.75];
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', userSelect: 'none' }}
+      onMouseMove={e => {
+        if (!containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const pct  = (e.clientX - rect.left) / rect.width;
+        const idx  = Math.min(candles.length - 1, Math.max(0, Math.floor(pct * candles.length)));
+        setTooltip({ candle: candles[idx], pct: Math.min(0.82, Math.max(0.05, pct)) });
+      }}
+      onMouseLeave={() => setTooltip(null)}
+    >
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height={130}
+        preserveAspectRatio="none"
+        style={{ display: 'block', overflow: 'visible' }}
+      >
+        {/* Horizontal grid lines */}
+        {gridPrices.map((p, i) => (
+          <line key={i}
+            x1={PAD.left} y1={toY(p)} x2={W - PAD.right} y2={toY(p)}
+            stroke="rgba(0,229,255,0.07)" strokeWidth={0.8} strokeDasharray="3 5"
+          />
+        ))}
+
+        {/* Candles */}
+        {candles.map((c, i) => {
+          const cx     = PAD.left + (i + 0.5) * slotW;
+          const isBull = c.close >= c.open;
+          const col    = isBull ? '#4ade80' : '#f87171';
+          const fill   = isBull ? 'rgba(74,222,128,0.55)' : 'rgba(248,113,113,0.55)';
+          const topY   = toY(Math.max(c.open, c.close));
+          const botY   = toY(Math.min(c.open, c.close));
+          const bodyH  = Math.max(1, botY - topY);
+          const isLast = i === candles.length - 1;
+          return (
+            <g key={i}>
+              {/* Wick */}
+              <line
+                x1={cx} y1={toY(c.high)}
+                x2={cx} y2={toY(c.low)}
+                stroke={col} strokeWidth={isLast ? 1.2 : 0.9} opacity={0.78}
+              />
+              {/* Body */}
+              <rect
+                x={cx - bodyW / 2} y={topY}
+                width={bodyW} height={bodyH}
+                fill={fill} stroke={col}
+                strokeWidth={isLast ? 1 : 0.6} rx={0.8}
+              />
+              {/* Last candle extra glow ring */}
+              {isLast && (
+                <rect
+                  x={cx - bodyW / 2 - 2} y={topY - 2}
+                  width={bodyW + 4} height={bodyH + 4}
+                  fill="none" stroke={col}
+                  strokeWidth={1.2} rx={2} opacity={0.3}
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {/* X-axis labels */}
+        {candles.map((c, i) => {
+          if (i % labelEvery !== 0) return null;
+          const cx = PAD.left + (i + 0.5) * slotW;
+          return (
+            <text key={`lbl-${i}`} x={cx} y={H - 3}
+              textAnchor="middle"
+              style={{ fontSize: 8, fill: 'rgba(160,196,224,0.35)', fontFamily: 'monospace' }}
+            >
+              {c.time}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* Hover tooltip */}
+      {tooltip && (
+        <div style={{
+          position: 'absolute',
+          left: `${tooltip.pct * 100}%`,
+          top: 4,
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,5,20,0.97)',
+          border: '1px solid rgba(0,229,255,0.25)',
+          borderRadius: 6, padding: '5px 10px',
+          fontSize: 9.5, fontFamily: 'monospace',
+          pointerEvents: 'none', zIndex: 10,
+          whiteSpace: 'nowrap',
+        }}>
+          <div style={{ color: 'rgba(0,229,255,0.5)', marginBottom: 3, letterSpacing: '0.1em' }}>{tooltip.candle.time}</div>
+          <div style={{ color: '#a0c4e0' }}>O <span style={{ color: '#00e5ff' }}>{tooltip.candle.open.toFixed(1)}</span></div>
+          <div style={{ color: '#a0c4e0' }}>H <span style={{ color: '#4ade80' }}>{tooltip.candle.high.toFixed(1)}</span></div>
+          <div style={{ color: '#a0c4e0' }}>L <span style={{ color: '#f87171' }}>{tooltip.candle.low.toFixed(1)}</span></div>
+          <div style={{ color: '#a0c4e0' }}>C <span style={{ color: tooltip.candle.close >= tooltip.candle.open ? '#4ade80' : '#f87171' }}>{tooltip.candle.close.toFixed(1)}</span></div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -278,11 +410,6 @@ export function DashboardView() {
   const balDataAvail = balance !== null && balance.source === 'live' && (balance.available_cash > 0 || balance.net > 0);
   const balLow = balDataAvail && nbConf && balance!.available_cash < nbConf.capital_amount * 1.1;
 
-  // Intraday chart Y-domain
-  const closes = intradayCandles.map(c => c.close).filter(Boolean);
-  const chartMin = closes.length ? Math.min(...closes) * 0.9995 : 'auto';
-  const chartMax = closes.length ? Math.max(...closes) * 1.0005 : 'auto';
-
   return (
     <motion.div className="space-y-5" variants={staggerContainer} initial="hidden" animate="show">
 
@@ -446,57 +573,7 @@ export function DashboardView() {
                 {intradayCandles.length > 0 ? `${intradayCandles[0].time} – ${intradayCandles[intradayCandles.length - 1].time}` : 'Loading...'}
               </span>
             </div>
-            {intradayCandles.length > 2 ? (
-              <ResponsiveContainer width="100%" height={130}>
-                <AreaChart data={intradayCandles} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="intradayGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%"   stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.25} />
-                      <stop offset="100%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="time"
-                    tick={{ fontSize: 9, fill: 'rgba(160,196,224,0.35)', fontFamily: 'monospace' }}
-                    tickLine={false}
-                    axisLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis domain={[chartMin, chartMax]} hide />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0]?.payload as IntradayCandle;
-                      return (
-                        <div style={{
-                          background: 'rgba(0,5,20,0.95)',
-                          border: '1px solid rgba(0,229,255,0.2)',
-                          borderRadius: 6, padding: '6px 10px',
-                          fontSize: 10, fontFamily: 'monospace',
-                        }}>
-                          <div style={{ color: '#a0c4e0', marginBottom: 3 }}>{d?.time}</div>
-                          <div style={{ color: '#00e5ff' }}>C: {d?.close?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                          <div style={{ color: '#4ade80' }}>H: {d?.high?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                          <div style={{ color: '#f87171' }}>L: {d?.low?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Area
-                    type="monotone" dataKey="close"
-                    stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={1.5}
-                    fill="url(#intradayGrad)"
-                    dot={false} isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 10, color: 'rgba(160,196,224,0.3)', fontFamily: 'monospace', letterSpacing: '0.2em' }}>
-                  {intradayCandles.length === 0 ? 'AWAITING MARKET DATA...' : 'NOT ENOUGH DATA'}
-                </span>
-              </div>
-            )}
+            <CandlestickChart candles={intradayCandles} />
           </div>
         </div>
       </motion.div>

@@ -4,6 +4,7 @@ import { useJarvisVoice } from '../../hooks/useJarvisVoice';
 import { useWakeWord } from '../../hooks/useWakeWord';
 import { AudioVisualizer } from './AudioVisualizer';
 import { api } from '../../api/client';
+import { setVaayuConvState } from '../../stores/vaayuStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -256,8 +257,10 @@ export function JarvisVoicePanel() {
   const scrollRef      = useRef<HTMLDivElement>(null);
   const recogRef       = useRef<any>(null);
   const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stateRef       = useRef<ConvState>('closed');
-  stateRef.current     = convState;
+  const stateRef        = useRef<ConvState>('closed');
+  stateRef.current      = convState;
+  const bargeInRef      = useRef<any>(null);
+  const startListenRef  = useRef<() => void>(() => {});
 
   // Load topics from API
   useEffect(() => {
@@ -293,6 +296,38 @@ export function JarvisVoicePanel() {
     setTranscript('');
     setListenTimer(1.0);
   }, []);
+
+  // ── Barge-in control ─────────────────────────────────────────────
+  const stopBargeIn = useCallback(() => {
+    if (bargeInRef.current) {
+      bargeInRef.current.onresult = null;
+      bargeInRef.current.onend    = null;
+      try { bargeInRef.current.stop(); } catch {}
+      bargeInRef.current = null;
+    }
+  }, []);
+
+  const startBargeIn = useCallback(() => {
+    stopBargeIn();
+    const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecog) return;
+    const recog = new SpeechRecog();
+    recog.continuous     = true;
+    recog.interimResults = true;
+    recog.lang           = 'en-IN';
+    bargeInRef.current   = recog;
+    recog.onresult = (e: any) => {
+      const t = e.results[e.results.length - 1][0].transcript.trim();
+      if (t.length >= 2) {
+        console.debug('[VAAYU barge-in]', t);
+        stopBargeIn();
+        voice.stop();
+        setTimeout(() => startListenRef.current(), 150);
+      }
+    };
+    recog.onend = () => { bargeInRef.current = null; };
+    try { recog.start(); } catch {}
+  }, [stopBargeIn, voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Start listening for user question ────────────────────────────
   const startListening = useCallback(() => {
@@ -348,6 +383,9 @@ export function JarvisVoicePanel() {
 
     try { recog.start(); } catch {}
   }, [stopListening]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep startListenRef in sync so barge-in can call latest closure
+  useEffect(() => { startListenRef.current = startListening; }, [startListening]);
 
   // ── Handle user's spoken question ────────────────────────────────
   const handleUserQuestion = useCallback(async (question: string) => {
@@ -445,6 +483,26 @@ export function JarvisVoicePanel() {
       });
     }
   }, [voice.script, voice.state]);
+
+  // ── Barge-in: listen for speech while VAAYU is talking ───────────
+  useEffect(() => {
+    if (convState !== 'speaking') {
+      stopBargeIn();
+      return;
+    }
+    // 1.5s grace so VAAYU's own audio doesn't self-trigger
+    const timer = setTimeout(startBargeIn, 1500);
+    return () => { clearTimeout(timer); stopBargeIn(); };
+  }, [convState, startBargeIn, stopBargeIn]);
+
+  // ── Sync conv state → global store (drives VaayuGlobe rings) ─────
+  useEffect(() => {
+    if (!convOpen) { setVaayuConvState('idle'); return; }
+    if (convState === 'speaking')                                    setVaayuConvState('speaking');
+    else if (convState === 'listening')                              setVaayuConvState('listening');
+    else if (convState === 'processing' || convState === 'loading')  setVaayuConvState('processing');
+    else                                                             setVaayuConvState('idle');
+  }, [convOpen, convState]);
 
   const micReady   = wakePermission === 'granted';
   const isSpeaking = convState === 'speaking';

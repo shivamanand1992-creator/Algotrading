@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion } from 'framer-motion';
+import { useVaayuConvState } from '../../stores/vaayuStore';
 
 interface VaayuGlobeProps {
   ltp?:       number;
@@ -8,30 +10,25 @@ interface VaayuGlobeProps {
   size?:      number;
 }
 
-// Globe constants — orthographic projection, 25° tilt from equatorial plane
-const R    = 155;   // globe radius (px)
-const CX   = 200;   // center x
-const CY   = 200;   // center y
-const TILT = 25;    // degrees
+const R    = 155;
+const CX   = 200;
+const CY   = 200;
+const TILT = 25;
 
-// pre-compute trig
 const sinT = Math.sin((TILT * Math.PI) / 180);
 const cosT = Math.cos((TILT * Math.PI) / 180);
 
-/** Project a (lat, lon) to SVG (x, y). lon is degrees from front-center meridian. */
 function project(latDeg: number, lonDeg: number): [number, number] {
   const lat = (latDeg * Math.PI) / 180;
   const lon = (lonDeg * Math.PI) / 180;
   const x3  = R * Math.cos(lat) * Math.sin(lon);
   const y3  = R * Math.sin(lat);
   const z3  = R * Math.cos(lat) * Math.cos(lon);
-  // Apply tilt rotation around x-axis
   const xp  = x3;
   const yp  = y3 * cosT - z3 * sinT;
   return [CX + xp, CY - yp];
 }
 
-/** Build SVG 'd' for a full latitude ring. */
 function latRingPath(latDeg: number): string {
   const pts: [number, number][] = [];
   for (let lon = -180; lon <= 180; lon += 6) {
@@ -40,7 +37,6 @@ function latRingPath(latDeg: number): string {
   return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ') + ' Z';
 }
 
-/** Build SVG 'd' for a longitude great-circle (visible half only). */
 function lonHalfPath(lonDeg: number): string {
   const pts: [number, number][] = [];
   for (let lat = -80; lat <= 80; lat += 6) {
@@ -49,18 +45,16 @@ function lonHalfPath(lonDeg: number): string {
   return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
 }
 
-// Fixed market locations [lat, lon, label, color]
 const MARKET_DOTS: [number, number, string, string][] = [
-  [ 18.9,  72.8,  'NIFTY',  '#00e5ff' ],  // Mumbai
-  [ 40.7, -74.0,  'NYSE',   '#a78bfa' ],  // New York
-  [ 51.5,  -0.1,  'LSE',    '#34d399' ],  // London
-  [ 35.7, 139.7,  'NIKKEI', '#f472b6' ],  // Tokyo
-  [ 31.2, 121.5,  'SSE',    '#fbbf24' ],  // Shanghai
+  [ 18.9,  72.8,  'NIFTY',  '#00e5ff' ],
+  [ 40.7, -74.0,  'NYSE',   '#a78bfa' ],
+  [ 51.5,  -0.1,  'LSE',    '#34d399' ],
+  [ 35.7, 139.7,  'NIKKEI', '#f472b6' ],
+  [ 31.2, 121.5,  'SSE',    '#fbbf24' ],
 ];
 
-// Build scan sector path (wedge from center)
 function sweepSector(): string {
-  const arcAngle = 70; // degrees of sweep
+  const arcAngle = 70;
   const [x1, y1] = project(0,  0);
   const [x2, y2] = project(0, arcAngle);
   const [x3, y3] = project(20, arcAngle / 2);
@@ -71,13 +65,86 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
   const latitudes  = [-60, -30, 0, 30, 60];
   const longitudes = [-90, -60, -30, 0, 30, 60, 90];
 
+  const convState  = useVaayuConvState();
+  const isSpeaking = convState === 'speaking';
+  const isListening = convState === 'listening';
+  const isActive   = isSpeaking || isListening;
+
+  // Globe radius in rendered pixels (for positioning overlay rings)
+  const globeR = R * (size / 400);
+
+  const ringColor = isSpeaking ? '#00e5ff' : '#a855f7';
+  const ringColorAlpha = isSpeaking ? 'rgba(0,229,255,0.55)' : 'rgba(168,85,247,0.55)';
+
   return (
-    <div style={{ width: size, height: size, position: 'relative', flexShrink: 0 }}>
+    <motion.div
+      style={{ width: size, height: size, position: 'relative', flexShrink: 0 }}
+      animate={
+        isSpeaking
+          ? { scale: [1, 1.008, 0.994, 1.008, 1] }
+          : isListening
+            ? { scale: [1, 1.004, 1] }
+            : { scale: 1 }
+      }
+      transition={
+        isSpeaking
+          ? { duration: 0.18, repeat: Infinity, ease: 'easeInOut' }
+          : isListening
+            ? { duration: 2, repeat: Infinity, ease: 'easeInOut' }
+            : { duration: 0.3 }
+      }
+    >
+      {/* Expanding state rings — rendered outside SVG as absolute divs */}
+      {isActive && [0, 1, 2].map(i => (
+        <motion.div
+          key={`ring-${i}-${convState}`}
+          style={{
+            position: 'absolute',
+            top:  '50%',
+            left: '50%',
+            width:  globeR * 2,
+            height: globeR * 2,
+            marginLeft: -globeR,
+            marginTop:  -globeR,
+            borderRadius: '50%',
+            border: `1.5px solid ${ringColorAlpha}`,
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+          initial={{ scale: 1, opacity: 0.7 }}
+          animate={{ scale: 1.45, opacity: 0 }}
+          transition={{
+            duration: 2.4,
+            repeat: Infinity,
+            delay: i * 0.8,
+            ease: 'easeOut',
+          }}
+        />
+      ))}
+
+      {/* Inner steady glow when active */}
+      {isActive && (
+        <motion.div
+          style={{
+            position: 'absolute',
+            top: '50%', left: '50%',
+            width: globeR * 2.1, height: globeR * 2.1,
+            marginLeft: -(globeR * 1.05), marginTop: -(globeR * 1.05),
+            borderRadius: '50%',
+            background: `radial-gradient(circle, ${isSpeaking ? 'rgba(0,229,255,0.04)' : 'rgba(168,85,247,0.04)'} 0%, transparent 70%)`,
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+          animate={{ opacity: [0.4, 1, 0.4] }}
+          transition={{ duration: isSpeaking ? 1 : 2, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      )}
+
       <svg
         viewBox="0 0 400 400"
         width={size}
         height={size}
-        style={{ overflow: 'visible' }}
+        style={{ overflow: 'visible', position: 'relative', zIndex: 2 }}
       >
         <defs>
           <radialGradient id="globe-fill" cx="45%" cy="40%" r="60%">
@@ -106,16 +173,20 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           </clipPath>
         </defs>
 
-        {/* ── Outer glow rings ─────────────────────────────────────── */}
-        <circle cx={CX} cy={CY} r={R + 18} fill="none" stroke="rgba(0,229,255,0.06)" strokeWidth={12} />
-        <circle cx={CX} cy={CY} r={R + 6}  fill="none" stroke="rgba(0,229,255,0.15)" strokeWidth={1} />
+        {/* Outer glow rings — extra glow when active */}
+        <circle cx={CX} cy={CY} r={R + 18} fill="none"
+          stroke={isActive ? ringColorAlpha : 'rgba(0,229,255,0.06)'}
+          strokeWidth={isActive ? 8 : 12} />
+        <circle cx={CX} cy={CY} r={R + 6}  fill="none"
+          stroke={isActive ? ringColor : 'rgba(0,229,255,0.15)'}
+          strokeWidth={isActive ? 1.5 : 1} />
         <circle cx={CX} cy={CY} r={R + 28} fill="url(#globe-glow-grad)" />
 
-        {/* ── Globe body ───────────────────────────────────────────── */}
+        {/* Globe body */}
         <circle cx={CX} cy={CY} r={R} fill="url(#globe-fill)" />
         <circle cx={CX} cy={CY} r={R} fill="url(#globe-atmo)" />
 
-        {/* ── Grid (clipped to globe) ───────────────────────────────── */}
+        {/* Grid */}
         <g clipPath="url(#globe-clip)" opacity={0.5}>
           {latitudes.map(lat => (
             <path key={`lat-${lat}`} d={latRingPath(lat)}
@@ -127,13 +198,10 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           ))}
         </g>
 
-        {/* ── Radar sweep (rotating) ────────────────────────────────── */}
+        {/* Radar sweep */}
         <g clipPath="url(#globe-clip)">
           <g className="radar-sweep" style={{ transformOrigin: `${CX}px ${CY}px` }}>
-            <path d={sweepSector()}
-              fill="url(#sweep-grad)"
-              opacity={0.55}
-            />
+            <path d={sweepSector()} fill="url(#sweep-grad)" opacity={0.55} />
             <defs>
               <linearGradient id="sweep-grad" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%"   stopColor="rgba(0,229,255,0.5)" />
@@ -143,16 +211,15 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           </g>
         </g>
 
-        {/* ── Market location dots ──────────────────────────────────── */}
+        {/* Market dots */}
         {MARKET_DOTS.map(([lat, lon, label, color]) => {
           const [px, py] = project(lat, lon);
-          // Only show if roughly on front face (simplified)
           const z = Math.cos((lat * Math.PI) / 180) * Math.cos((lon * Math.PI) / 180);
           if (z < 0) return null;
           return (
             <g key={label} filter="url(#dot-glow)">
               <circle cx={px} cy={py} r={4}  fill={color} opacity={0.9} />
-              <circle cx={px} cy={py} r={8}  fill="none" stroke={color} strokeWidth={0.8} opacity={0.4} className="radar-ring" style={{ color }} />
+              <circle cx={px} cy={py} r={8}  fill="none" stroke={color} strokeWidth={0.8} opacity={0.4} className="radar-ring" />
               <text x={px + 8} y={py + 4}
                 style={{ fontSize: 8, fontFamily: 'monospace', fill: color, opacity: 0.8, letterSpacing: 0.5 }}>
                 {label}
@@ -161,7 +228,7 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           );
         })}
 
-        {/* ── Outer HUD ring with tick marks ───────────────────────── */}
+        {/* HUD ring ticks */}
         <g opacity={0.6}>
           {Array.from({ length: 36 }, (_, i) => {
             const angle  = (i / 36) * 2 * Math.PI;
@@ -169,16 +236,13 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
             const r2     = R + 14 + (i % 3 === 0 ? 4 : 0);
             return (
               <line key={i}
-                x1={CX + r1 * Math.cos(angle)}
-                y1={CY + r1 * Math.sin(angle)}
-                x2={CX + r2 * Math.cos(angle)}
-                y2={CY + r2 * Math.sin(angle)}
-                stroke="rgba(0,229,255,0.4)"
+                x1={CX + r1 * Math.cos(angle)} y1={CY + r1 * Math.sin(angle)}
+                x2={CX + r2 * Math.cos(angle)} y2={CY + r2 * Math.sin(angle)}
+                stroke={isActive ? ringColor : 'rgba(0,229,255,0.4)'}
                 strokeWidth={i % 3 === 0 ? 1.2 : 0.6}
               />
             );
           })}
-          {/* Degree labels at 4 cardinal points */}
           {['N', 'E', 'S', 'W'].map((d, i) => {
             const a = (i / 4) * 2 * Math.PI - Math.PI / 2;
             return (
@@ -193,21 +257,31 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           })}
         </g>
 
-        {/* ── Centre data display ───────────────────────────────────── */}
+        {/* State label inside globe */}
+        {isActive && (
+          <text x={CX} y={CY - 48}
+            textAnchor="middle"
+            style={{
+              fontSize: 8, fontFamily: 'monospace', letterSpacing: '0.3em',
+              fill: isSpeaking ? 'rgba(0,229,255,0.8)' : 'rgba(168,85,247,0.8)',
+              textTransform: 'uppercase',
+            }}>
+            {isSpeaking ? '◈ SPEAKING' : '◈ LISTENING'}
+          </text>
+        )}
+
+        {/* Centre data */}
         <g filter="url(#dot-glow)">
-          {/* VAAYU label */}
           <text x={CX} y={CY - 28}
             textAnchor="middle"
-            style={{ fontSize: 9, fontFamily: 'monospace', fill: 'rgba(0,229,255,0.55)', letterSpacing: '0.3em', textTransform: 'uppercase' }}>
+            style={{ fontSize: 9, fontFamily: 'monospace', fill: 'rgba(0,229,255,0.55)', letterSpacing: '0.3em' }}>
             VAAYU · NIFTY 50
           </text>
-          {/* LTP */}
           <text x={CX} y={CY + 4}
             textAnchor="middle"
             style={{ fontSize: ltp > 0 ? 26 : 14, fontFamily: 'monospace', fill: '#00e5ff', fontWeight: 900, letterSpacing: '-1px' }}>
             {ltp > 0 ? ltp.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—'}
           </text>
-          {/* Change */}
           {ltp > 0 && (
             <text x={CX} y={CY + 24}
               textAnchor="middle"
@@ -217,10 +291,10 @@ export function VaayuGlobe({ ltp = 0, change = 0, changePct = 0, isUp = true, si
           )}
         </g>
 
-        {/* ── Atmosphere shimmer overlay ────────────────────────────── */}
+        {/* Atmosphere shimmer */}
         <circle cx={CX} cy={CY} r={R}
           fill="none" stroke="rgba(0,229,255,0.08)" strokeWidth={8} />
       </svg>
-    </div>
+    </motion.div>
   );
 }
