@@ -18,13 +18,24 @@ from loguru import logger
 # ── Prompt templates ──────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are VAAYU, the AI assistant for Shivam's algorithmic trading system. "
-    "Generate spoken briefings in a sophisticated, confident tone — like a "
-    "British AI assistant. Use natural speech (no bullet points, no markdown, "
-    "no asterisks). Address the user as 'sir' once. Keep it under 120 words "
-    "unless the topic is 'full_briefing' (then up to 200 words). "
-    "Speak naturally — numbers should be spoken: 23,530 becomes 'twenty-three "
-    "thousand five hundred thirty'."
+    "You are VAAYU, Shivam's personal AI trading assistant. "
+    "Speak warmly and confidently — like a sharp friend who knows markets deeply. "
+    "No bullet points, no markdown, no asterisks, no numbered lists. "
+    "Address as 'sir' occasionally (not every sentence). "
+    "Keep briefings under 120 words (250 for full_briefing). "
+    "Speak naturally for audio: 23,622 becomes 'twenty three thousand six hundred'. "
+    "If market data is limited, work with what you have — never refuse to respond. "
+    "Always give value: use available data, name actual numbers, give one clear takeaway."
+)
+
+_CHAT_SYSTEM = (
+    "You are VAAYU, Shivam's personal AI trading assistant embedded in his dashboard. "
+    "You are conversational, warm, and direct — answer the user's question in 40-70 words. "
+    "No bullet points, no markdown. "
+    "Address as 'sir' once per response at most. "
+    "Speak naturally for text-to-speech: say 'twenty three thousand' not '23,000'. "
+    "Use the market context provided. Be specific with numbers. "
+    "If you don't have data for something, say so in one short sentence then move on."
 )
 
 _TOPIC_PROMPTS: dict[str, str] = {
@@ -80,6 +91,47 @@ class JarvisVoiceService:
                 logger.warning(f"[JARVIS TTS] ElevenLabs failed: {exc}")
 
         return audio, script
+
+    # ── Public: conversational response ──────────────────────────────────
+
+    async def generate_chat_response(
+        self, message: str, context: dict
+    ) -> Tuple[Optional[bytes], str]:
+        """Return (audio_bytes | None, script_text) for a conversational reply."""
+        loop   = asyncio.get_event_loop()
+        script = await loop.run_in_executor(None, self._make_chat_script, message, context)
+
+        audio: Optional[bytes] = None
+        if self._el_key:
+            try:
+                audio = await self._tts(script)
+            except Exception as exc:
+                logger.warning(f"[VAAYU Chat TTS] ElevenLabs failed: {exc}")
+
+        return audio, script
+
+    def _make_chat_script(self, message: str, context: dict) -> str:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return "Ready to help, sir. Please configure the Anthropic API key for conversational responses."
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            prompt = (
+                f"Current market context:\n{_format_context(context)}\n\n"
+                f"User says: {message}"
+            )
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=180,
+                system=_CHAT_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return msg.content[0].text.strip()
+        except Exception as exc:
+            logger.error(f"[VAAYU Chat Claude] {exc}")
+            return "I apologise, sir. I had a brief issue processing that — please try again."
 
     # ── Script generation via Claude ──────────────────────────────────────
 

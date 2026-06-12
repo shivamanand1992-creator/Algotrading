@@ -50,17 +50,17 @@ function TopNav({ activeView, onNavigate }: { activeView: string; onNavigate: (v
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '0 10px',
+              gap: 6,
+              padding: '0 13px',
               height: 36,
               background: active ? 'rgba(0,229,255,0.07)' : 'transparent',
               border: 'none',
               borderBottom: active ? '2px solid #00e5ff' : '2px solid transparent',
-              color: active ? '#00e5ff' : 'rgba(160,196,224,0.4)',
+              color: active ? '#00e5ff' : 'rgba(160,196,224,0.45)',
               cursor: 'pointer',
               fontFamily: "'Courier New', monospace",
-              fontSize: 9,
-              letterSpacing: '0.15em',
+              fontSize: 11,
+              letterSpacing: '0.12em',
               fontWeight: active ? 700 : 400,
               transition: 'all 0.15s ease',
               textShadow: active ? '0 0 10px rgba(0,229,255,0.6)' : 'none',
@@ -81,7 +81,7 @@ function TopNav({ activeView, onNavigate }: { activeView: string; onNavigate: (v
               }
             }}
           >
-            <span style={{ fontSize: 13 }}>{item.icon}</span>
+            <span style={{ fontSize: 15 }}>{item.icon}</span>
             <span>{item.label}</span>
           </button>
         );

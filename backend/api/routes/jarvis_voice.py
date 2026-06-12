@@ -1,7 +1,8 @@
 """
-JARVIS Voice API
-================
+VAAYU Voice API
+===============
 POST /api/jarvis/speak  — generate AI briefing + TTS audio
+POST /api/jarvis/chat   — conversational follow-up question
 GET  /api/jarvis/topics — list available briefing topics
 GET  /api/jarvis/config — check which services are configured
 """
@@ -34,6 +35,11 @@ class SpeakRequest(BaseModel):
     topic: str = "market_summary"
 
 
+class ChatRequest(BaseModel):
+    message: str
+    context_topic: str = "full_briefing"
+
+
 @router.get("/topics")
 async def list_topics(_: str = Depends(get_current_user)):
     return TOPICS
@@ -64,7 +70,27 @@ async def jarvis_speak(
             "audio":  base64.b64encode(audio_bytes).decode() if audio_bytes else None,
         }
     except Exception as exc:
-        logger.error(f"[JARVIS Speak] {exc}")
+        logger.error(f"[VAAYU Speak] {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/chat")
+async def jarvis_chat(
+    body: ChatRequest,
+    _: str = Depends(get_current_user),
+):
+    """Conversational follow-up — user asks a question, VAAYU responds."""
+    try:
+        context = await _build_context(body.context_topic)
+        svc     = get_jarvis_voice_service()
+        audio_bytes, script = await svc.generate_chat_response(body.message, context)
+
+        return {
+            "script": script,
+            "audio":  base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+        }
+    except Exception as exc:
+        logger.error(f"[VAAYU Chat] {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -79,17 +105,25 @@ async def _build_context(topic: str) -> dict:
         except Exception:
             return None
 
-    # Always: market LTP + change
+    # Always: market LTP + change — use cached values when live data returns 0
     try:
         from backend.dependencies import get_market_service
         mkt = get_market_service()
         if mkt:
-            md = await _safe(mkt.get_current_market_data())
-            if md:
-                ctx["ltp"]        = md.ltp
-                ctx["change"]     = md.change
-                ctx["change_pct"] = md.change_percentage
-                ctx["prev_close"] = mkt._cached_prev_close
+            md      = await _safe(mkt.get_current_market_data())
+            # md.ltp may be 0 when market is closed — fall back to cached LTP
+            ltp_val = (md.ltp if md and md.ltp > 0 else 0) or getattr(mkt, '_cached_ltp', 0)
+            prev    = getattr(mkt, '_cached_prev_close', 0) or 0.0
+
+            if ltp_val > 0:
+                ctx["ltp"]       = ltp_val
+                ctx["prev_close"] = prev if prev > 0 else None
+                if prev > 0:
+                    ctx["change"]     = round(ltp_val - prev, 2)
+                    ctx["change_pct"] = round((ltp_val - prev) / prev * 100, 2)
+                elif md:
+                    ctx["change"]     = md.change
+                    ctx["change_pct"] = md.change_percentage
     except Exception:
         pass
 

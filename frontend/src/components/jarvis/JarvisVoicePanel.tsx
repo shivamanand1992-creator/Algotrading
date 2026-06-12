@@ -1,456 +1,699 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useJarvisVoice } from '../../hooks/useJarvisVoice';
 import { useWakeWord } from '../../hooks/useWakeWord';
 import { AudioVisualizer } from './AudioVisualizer';
 import { api } from '../../api/client';
 
+// ── Types ─────────────────────────────────────────────────────────────────
+
+type ConvState = 'closed' | 'loading' | 'speaking' | 'listening' | 'processing';
+
+interface Message {
+  id:   number;
+  role: 'vaayu' | 'user';
+  text: string;
+  time: string;
+}
+
 interface Topic { id: string; label: string; icon: string; desc: string; }
 
 const FALLBACK_TOPICS: Topic[] = [
-  { id: 'market_summary', label: 'Market Summary',  icon: '◈', desc: 'Nifty status & trend' },
-  { id: 'my_positions',   label: 'My Positions',    icon: '⬡', desc: 'Portfolio P&L' },
+  { id: 'market_summary', label: 'Market Summary', icon: '◈', desc: 'Nifty status & trend' },
+  { id: 'my_positions',   label: 'My Positions',   icon: '⬡', desc: 'Portfolio P&L' },
   { id: 'news_brief',     label: 'News Brief',      icon: '≡', desc: 'AI-summarised headlines' },
   { id: 'global_cues',    label: 'Global Cues',     icon: '⊕', desc: 'US, Asia & commodities' },
   { id: 'nifty_trend',    label: 'Nifty Trend',     icon: '↗', desc: 'Technical deep-dive' },
   { id: 'full_briefing',  label: 'Full Briefing',   icon: '⊞', desc: '90-second overview' },
 ];
 
-// ── VAAYU hexagon avatar ──────────────────────────────────────────────────
+const now = () => new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+let msgCounter = 0;
 
-function VaayuAvatar({ speaking }: { speaking: boolean }) {
+// ── Small avatar (used in chat bubbles) ───────────────────────────────────
+
+function VaayuDot({ speaking }: { speaking: boolean }) {
   return (
-    <svg width={96} height={96} viewBox="0 0 96 96" style={{ overflow: 'visible' }}>
-      <defs>
-        <radialGradient id="vav-bg" cx="50%" cy="50%" r="50%">
-          <stop offset="0%"   stopColor="rgba(124,58,237,0.15)" />
-          <stop offset="60%"  stopColor="rgba(0,229,255,0.08)" />
-          <stop offset="100%" stopColor="rgba(0,50,120,0.02)" />
-        </radialGradient>
-        <filter id="vav-glow">
-          <feGaussianBlur stdDeviation={speaking ? '3' : '1.5'} result="blur" />
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
+    <div style={{
+      width: 28, height: 28, borderRadius: '50%',
+      background: 'linear-gradient(135deg, rgba(0,229,255,0.2), rgba(124,58,237,0.3))',
+      border: `1.5px solid ${speaking ? 'rgba(0,229,255,0.8)' : 'rgba(0,229,255,0.35)'}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0,
+      boxShadow: speaking ? '0 0 10px rgba(0,229,255,0.4)' : 'none',
+    }}>
+      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 900, color: '#00e5ff' }}>V</span>
+    </div>
+  );
+}
 
-      {/* Outer pulse rings */}
-      {speaking && (
-        <>
-          <circle cx={48} cy={48} r={46} fill="none" stroke="rgba(0,229,255,0.15)"
-            strokeWidth={1} className="radar-ring" style={{ color: '#00e5ff' }} />
-          <circle cx={48} cy={48} r={46} fill="none" stroke="rgba(124,58,237,0.12)"
-            strokeWidth={1} className="radar-ring radar-ring-delay" style={{ color: '#7c3aed' }} />
-        </>
+// ── Chat bubble ───────────────────────────────────────────────────────────
+
+function Bubble({ msg, speaking }: { msg: Message; speaking: boolean }) {
+  const isVaayu = msg.role === 'vaayu';
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      style={{
+        display: 'flex',
+        flexDirection: isVaayu ? 'row' : 'row-reverse',
+        alignItems: 'flex-start',
+        gap: 8,
+        marginBottom: 10,
+      }}
+    >
+      {isVaayu && <VaayuDot speaking={speaking && msg === undefined} />}
+      <div style={{
+        maxWidth: '84%',
+        padding: '9px 13px',
+        borderRadius: isVaayu ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
+        background: isVaayu
+          ? 'rgba(0,229,255,0.05)'
+          : 'rgba(124,58,237,0.12)',
+        border: `1px solid ${isVaayu ? 'rgba(0,229,255,0.12)' : 'rgba(124,58,237,0.25)'}`,
+      }}>
+        <div style={{
+          fontSize: 6.5, color: isVaayu ? 'rgba(0,229,255,0.45)' : 'rgba(160,120,255,0.55)',
+          fontFamily: 'monospace', letterSpacing: '0.15em', marginBottom: 4,
+          display: 'flex', justifyContent: 'space-between', gap: 16,
+        }}>
+          <span>{isVaayu ? 'VAAYU' : 'YOU'}</span>
+          <span>{msg.time}</span>
+        </div>
+        <p style={{
+          fontSize: 11.5, lineHeight: 1.55,
+          color: isVaayu ? 'rgba(200,225,240,0.9)' : 'rgba(200,185,255,0.9)',
+          fontFamily: "'Courier New', monospace",
+          margin: 0, whiteSpace: 'pre-wrap',
+        }}>
+          {msg.text}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Listening indicator ───────────────────────────────────────────────────
+
+function ListeningBar({ transcript, timeout }: { transcript: string; timeout: number }) {
+  return (
+    <div style={{
+      padding: '10px 14px',
+      background: 'rgba(124,58,237,0.08)',
+      border: '1px solid rgba(124,58,237,0.25)',
+      borderRadius: 10,
+      display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      {/* Animated mic */}
+      <motion.div
+        style={{ flexShrink: 0, display: 'flex', gap: 2, alignItems: 'flex-end' }}
+      >
+        {[3, 5, 4, 6, 3].map((h, i) => (
+          <motion.div
+            key={i}
+            style={{ width: 2, background: '#7c3aed', borderRadius: 2 }}
+            animate={{ height: [h, h + 4, h] }}
+            transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
+          />
+        ))}
+      </motion.div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {transcript ? (
+          <p style={{
+            margin: 0, fontSize: 11, color: 'rgba(200,185,255,0.9)',
+            fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            "{transcript}"
+          </p>
+        ) : (
+          <p style={{ margin: 0, fontSize: 10, color: 'rgba(124,58,237,0.7)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+            LISTENING…
+          </p>
+        )}
+      </div>
+
+      {/* Timeout arc */}
+      <svg width={20} height={20} style={{ flexShrink: 0 }}>
+        <circle cx={10} cy={10} r={8} fill="none" stroke="rgba(124,58,237,0.15)" strokeWidth={2} />
+        <circle cx={10} cy={10} r={8} fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth={2}
+          strokeDasharray={`${50.3 * timeout} 50.3`}
+          strokeLinecap="round"
+          transform="rotate(-90 10 10)"
+        />
+      </svg>
+    </div>
+  );
+}
+
+// ── FAB Button ────────────────────────────────────────────────────────────
+
+function FabButton({ convOpen, convState, micReady, onClick }: {
+  convOpen: boolean; convState: ConvState; micReady: boolean; onClick: () => void;
+}) {
+  const active   = convOpen && convState !== 'closed';
+  const isLoading = convState === 'loading';
+
+  return (
+    <div style={{ position: 'relative', width: 60, height: 60 }}>
+      {/* Pulse ring when idle + mic active */}
+      {micReady && !convOpen && (
+        <motion.div
+          style={{
+            position: 'absolute', inset: -5, borderRadius: '50%',
+            border: '1px solid rgba(0,229,255,0.3)', pointerEvents: 'none',
+          }}
+          animate={{ scale: [1, 1.22, 1], opacity: [0.5, 0.05, 0.5] }}
+          transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+        />
       )}
 
-      {/* Hexagon outer */}
-      <polygon
-        points="48,6 84,27 84,69 48,90 12,69 12,27"
-        fill="url(#vav-bg)"
-        stroke={speaking ? 'rgba(0,229,255,0.8)' : 'rgba(0,229,255,0.35)'}
-        strokeWidth="1.5"
-        filter="url(#vav-glow)"
-      />
-      {/* Hexagon inner */}
-      <polygon
-        points="48,16 76,32 76,64 48,80 20,64 20,32"
-        fill="none"
-        stroke="rgba(124,58,237,0.3)"
-        strokeWidth="0.8"
-      />
+      {/* Listening ring when conversation is listening */}
+      {convState === 'listening' && (
+        <motion.div
+          style={{
+            position: 'absolute', inset: -6, borderRadius: '50%',
+            border: '2px solid rgba(124,58,237,0.7)', pointerEvents: 'none',
+          }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.8, 0.3, 0.8] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      )}
 
-      {/* Grid lines */}
-      <line x1="28" y1="48" x2="68" y2="48" stroke="rgba(0,229,255,0.15)" strokeWidth="0.6" />
-      <line x1="48" y1="22" x2="48" y2="74" stroke="rgba(0,229,255,0.15)" strokeWidth="0.6" />
+      {/* Mic status dot */}
+      <div style={{
+        position: 'absolute', top: 2, right: 2, width: 8, height: 8,
+        borderRadius: '50%',
+        background: convState === 'listening'
+          ? '#a855f7'
+          : micReady ? '#4ade80' : '#6b7280',
+        border: '1.5px solid rgba(2,4,18,0.9)',
+        zIndex: 2,
+        boxShadow: convState === 'listening'
+          ? '0 0 6px rgba(168,85,247,0.8)'
+          : micReady ? '0 0 5px rgba(74,222,128,0.6)' : 'none',
+      }} />
 
-      {/* "V" lettermark */}
-      <text x="48" y="57" textAnchor="middle"
+      <motion.button
+        onClick={onClick}
+        animate={
+          convState === 'speaking'
+            ? { scale: [1, 1.1, 1], boxShadow: ['0 0 0px rgba(0,229,255,0)', '0 0 24px rgba(0,229,255,0.6)', '0 0 0px rgba(0,229,255,0)'] }
+            : convState === 'listening'
+              ? { boxShadow: ['0 0 0px rgba(168,85,247,0)', '0 0 18px rgba(168,85,247,0.5)', '0 0 0px rgba(168,85,247,0)'] }
+              : isLoading
+                ? { rotate: 360 }
+                : {}
+        }
+        transition={
+          convState === 'speaking' || convState === 'listening'
+            ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' }
+            : isLoading
+              ? { duration: 2, repeat: Infinity, ease: 'linear' }
+              : {}
+        }
+        title={convOpen ? 'Close VAAYU' : micReady ? 'Ask VAAYU (or clap)' : 'Ask VAAYU'}
         style={{
-          fontFamily: 'monospace',
-          fontSize:   28,
-          fontWeight: 900,
-          fill:       speaking ? 'rgba(0,229,255,1)' : 'rgba(0,229,255,0.75)',
-          filter:     speaking ? 'url(#vav-glow)' : 'none',
-          letterSpacing: 2,
+          width: 60, height: 60, borderRadius: '50%',
+          background: active
+            ? 'linear-gradient(135deg, rgba(0,229,255,0.2), rgba(80,20,160,0.4))'
+            : 'linear-gradient(135deg, rgba(2,4,18,0.95), rgba(0,15,50,0.95))',
+          border: `1.5px solid ${active ? 'rgba(0,229,255,0.65)' : 'rgba(0,229,255,0.25)'}`,
+          boxShadow: active ? '0 0 20px rgba(0,229,255,0.3)' : '0 4px 20px rgba(0,0,0,0.5)',
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          outline: 'none',
         }}
       >
-        V
-      </text>
-
-      {/* Corner accent dots */}
-      {[[-1,-1],[1,-1],[1,1],[-1,1]].map(([dx, dy], i) => (
-        <circle key={i}
-          cx={48 + dx! * 32} cy={48 + dy! * 22} r={2.5}
-          fill={speaking ? '#00e5ff' : 'rgba(0,229,255,0.4)'}
-        />
-      ))}
-    </svg>
+        <svg width={26} height={26} viewBox="0 0 26 26" fill="none">
+          <polygon points="13,2 22,7.5 22,18.5 13,24 4,18.5 4,7.5"
+            fill="rgba(0,229,255,0.07)" stroke="rgba(0,229,255,0.55)" strokeWidth="1.2" />
+          <text x="13" y="17.5" textAnchor="middle"
+            style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 900, fill: '#00e5ff' }}>
+            V
+          </text>
+        </svg>
+      </motion.button>
+    </div>
   );
 }
 
-// ── Typewriter text ───────────────────────────────────────────────────────
-
-function TypewriterText({ text, speed = 18 }: { text: string; speed?: number }) {
-  const [displayed, setDisplayed] = useState('');
-  const idxRef = useRef(0);
-
-  useEffect(() => {
-    setDisplayed('');
-    idxRef.current = 0;
-    if (!text) return;
-    const iv = setInterval(() => {
-      if (idxRef.current >= text.length) { clearInterval(iv); return; }
-      setDisplayed(text.slice(0, ++idxRef.current));
-    }, speed);
-    return () => clearInterval(iv);
-  }, [text, speed]);
-
-  return (
-    <p style={{
-      fontSize: 12, lineHeight: 1.6, color: 'rgba(160,196,224,0.9)',
-      fontFamily: "'Courier New', monospace", whiteSpace: 'pre-wrap',
-    }}>
-      {displayed}
-      {displayed.length < text.length && (
-        <span className="type-cursor" style={{ width: 6, height: 12 }} />
-      )}
-    </p>
-  );
-}
-
-// ── Main panel ────────────────────────────────────────────────────────────
+// ── Main Panel ────────────────────────────────────────────────────────────
 
 export function JarvisVoicePanel() {
-  const [open,   setOpen]   = useState(false);
-  const [topics, setTopics] = useState<Topic[]>(FALLBACK_TOPICS);
-  const voice = useJarvisVoice();
+  const [convOpen,     setConvOpen]     = useState(false);
+  const [convState,    setConvState]    = useState<ConvState>('closed');
+  const [messages,     setMessages]     = useState<Message[]>([]);
+  const [transcript,   setTranscript]   = useState('');
+  const [listenTimer,  setListenTimer]  = useState(1.0);  // 0→1 countdown for arc
+  const [topics,       setTopics]       = useState<Topic[]>(FALLBACK_TOPICS);
+  const [showTopics,   setShowTopics]   = useState(false);
 
+  const voice          = useJarvisVoice();
+  const scrollRef      = useRef<HTMLDivElement>(null);
+  const recogRef       = useRef<any>(null);
+  const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stateRef       = useRef<ConvState>('closed');
+  stateRef.current     = convState;
+
+  // Load topics from API
   useEffect(() => {
     api.get<Topic[]>('/api/jarvis/topics')
       .then(r => { if (r.data?.length) setTopics(r.data); })
       .catch(() => {});
   }, []);
 
-  const handleTopic = (id: string) => {
-    setOpen(false);
-    voice.speak(id);
-  };
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, transcript]);
 
-  // Always-on wake detection: clap or say "Vaayu" to start briefing
-  const { permission: wakePermission } = useWakeWord({
-    onWake: (source) => {
-      // Only trigger when idle — don't interrupt an ongoing briefing
-      if (voice.state === 'idle' || voice.state === 'error') {
-        setOpen(false);
-        voice.speak('market_summary');
-        console.debug(`[VAAYU] Wake triggered by ${source}`);
+  // ── Add message to chat ──────────────────────────────────────────
+  const addMessage = useCallback((role: 'vaayu' | 'user', text: string) => {
+    setMessages(prev => [...prev, { id: ++msgCounter, role, text, time: now() }]);
+  }, []);
+
+  // ── Stop listening ───────────────────────────────────────────────
+  const stopListening = useCallback(() => {
+    if (recogRef.current) {
+      recogRef.current.onend  = null;
+      recogRef.current.onresult = null;
+      try { recogRef.current.stop(); } catch {}
+      recogRef.current = null;
+    }
+    if (listenTimerRef.current) {
+      clearInterval(listenTimerRef.current);
+      listenTimerRef.current = null;
+    }
+    setTranscript('');
+    setListenTimer(1.0);
+  }, []);
+
+  // ── Start listening for user question ────────────────────────────
+  const startListening = useCallback(() => {
+    stopListening();
+    setConvState('listening');
+    setTranscript('');
+
+    const TIMEOUT_S = 12;
+    let elapsed = 0;
+    listenTimerRef.current = setInterval(() => {
+      elapsed += 0.1;
+      setListenTimer(1 - elapsed / TIMEOUT_S);
+      if (elapsed >= TIMEOUT_S) {
+        stopListening();
+        setConvState('closed');
+        setConvOpen(false);
       }
+    }, 100);
+
+    const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecog) {
+      // No speech recognition — just show a text-based idle
+      return;
+    }
+
+    const recog = new SpeechRecog();
+    recog.continuous      = false;
+    recog.interimResults  = true;
+    recog.lang            = 'en-IN';
+    recog.maxAlternatives = 1;
+    recogRef.current = recog;
+
+    recog.onresult = (e: any) => {
+      const result = e.results[0];
+      const text   = result[0].transcript;
+      setTranscript(text);
+      if (result.isFinal && text.trim()) {
+        handleUserQuestion(text.trim());
+      }
+    };
+
+    recog.onspeechend = () => {
+      try { recog.stop(); } catch {}
+    };
+
+    recog.onerror = (e: any) => {
+      console.debug('[VAAYU listen] error:', e.error);
+    };
+
+    recog.onend = () => {
+      // If we got a transcript, it's been handled; otherwise no-op
+    };
+
+    try { recog.start(); } catch {}
+  }, [stopListening]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Handle user's spoken question ────────────────────────────────
+  const handleUserQuestion = useCallback(async (question: string) => {
+    stopListening();
+
+    // Detect exit phrases
+    const lower = question.toLowerCase();
+    if (
+      lower.includes("thank you") || lower.includes("thanks") ||
+      lower.includes("goodbye")   || lower.includes("bye") ||
+      lower.includes("that's all") || lower.includes("stop")
+    ) {
+      addMessage('user', question);
+      setConvState('loading');
+      voice.chat("The user wants to end the conversation. Say a brief warm goodbye.", () => {
+        setConvState('closed');
+        setConvOpen(false);
+        setMessages([]);
+      });
+      addMessage('vaayu', '…');
+      return;
+    }
+
+    addMessage('user', question);
+    // Placeholder while processing
+    const placeholderId = ++msgCounter;
+    setMessages(prev => [...prev, { id: placeholderId, role: 'vaayu', text: '…', time: now() }]);
+    setConvState('processing');
+
+    voice.chat(question, () => {
+      // After VAAYU responds, listen for next question
+      setTimeout(startListening, 600);
+    });
+
+    // Replace placeholder with actual script once available (watched via effect below)
+  }, [stopListening, addMessage, voice, startListening]);
+
+  // Replace placeholder "…" with actual script when it arrives
+  useEffect(() => {
+    if (voice.state === 'speaking' && voice.script) {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'vaayu' && last.text === '…') {
+          setConvState('speaking');
+          return [...prev.slice(0, -1), { ...last, text: voice.script }];
+        }
+        return prev;
+      });
+    }
+  }, [voice.state, voice.script]);
+
+  // ── Close conversation ────────────────────────────────────────────
+  const closeConv = useCallback(() => {
+    stopListening();
+    voice.stop();
+    setConvOpen(false);
+    setConvState('closed');
+    setMessages([]);
+    setTranscript('');
+  }, [stopListening, voice]);
+
+  // ── Open conversation (greet + brief) ────────────────────────────
+  const openConversation = useCallback((topicId = 'market_summary') => {
+    setConvOpen(true);
+    setMessages([]);
+    setConvState('loading');
+    // Placeholder vaayu bubble
+    setMessages([{ id: ++msgCounter, role: 'vaayu', text: '…', time: now() }]);
+
+    voice.speak(topicId, () => {
+      // After greeting brief → start listening
+      setTimeout(startListening, 500);
+    });
+  }, [voice, startListening]);
+
+  // ── Wake word handler (disabled while conv is open) ───────────────
+  const { permission: wakePermission } = useWakeWord({
+    enabled: !convOpen,
+    onWake: (source) => {
+      console.debug('[VAAYU] woken by', source);
+      openConversation('market_summary');
     },
   });
 
-  const isSpeaking = voice.state === 'speaking';
-  const isLoading  = voice.state === 'loading';
-  const isActive   = isSpeaking || isLoading;
+  // When voice generates script, update last placeholder bubble
+  useEffect(() => {
+    if ((voice.state === 'speaking' || voice.state === 'loading') && voice.script) {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'vaayu' && last.text === '…') {
+          if (voice.state === 'speaking') setConvState('speaking');
+          return [...prev.slice(0, -1), { ...last, text: voice.script }];
+        }
+        return prev;
+      });
+    }
+  }, [voice.script, voice.state]);
+
   const micReady   = wakePermission === 'granted';
+  const isSpeaking = convState === 'speaking';
+  const isListening = convState === 'listening';
+
+  const handleFabClick = () => {
+    if (convOpen) {
+      if (isListening) {
+        // Close while listening
+        closeConv();
+      } else {
+        setShowTopics(s => !s);
+      }
+    } else {
+      setShowTopics(s => !s);
+    }
+  };
 
   return (
     <div style={{ position: 'fixed', bottom: 28, right: 28, zIndex: 1000 }}>
 
-      {/* ── Speaking panel ── */}
+      {/* ── Conversation panel ── */}
       <AnimatePresence>
-        {isActive && (
+        {convOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.92 }}
+            initial={{ opacity: 0, y: 24, scale: 0.93 }}
             animate={{ opacity: 1, y: 0,  scale: 1 }}
-            exit={{    opacity: 0, y: 20, scale: 0.92 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+            exit={{    opacity: 0, y: 24, scale: 0.93 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
             style={{
-              position:     'absolute',
-              bottom:       72,
-              right:        0,
-              width:        340,
-              background:   'rgba(2,4,18,0.97)',
-              border:       '1px solid rgba(0,229,255,0.22)',
-              borderRadius: 16,
-              padding:      '20px 18px',
-              backdropFilter: 'blur(16px)',
-              boxShadow:    '0 0 40px rgba(0,229,255,0.10), 0 8px 32px rgba(0,0,0,0.7)',
+              position: 'absolute', bottom: 72, right: 0, width: 360,
+              background: 'rgba(2,4,18,0.97)',
+              border: '1px solid rgba(0,229,255,0.2)',
+              borderRadius: 18,
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 0 50px rgba(0,229,255,0.08), 0 12px 40px rgba(0,0,0,0.75)',
+              overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
             }}
           >
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="live-dot" style={{ width: 7, height: 7, background: '#00e5ff', color: '#00e5ff' }} />
-                <span style={{ fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.25em', color: 'rgba(0,229,255,0.6)', textTransform: 'uppercase' }}>
-                  VAAYU VOICE INTERFACE
+            {/* Panel header */}
+            <div style={{
+              padding: '12px 16px', display: 'flex',
+              alignItems: 'center', justifyContent: 'space-between',
+              borderBottom: '1px solid rgba(0,229,255,0.07)',
+              background: 'rgba(0,229,255,0.025)',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <motion.div
+                  style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: isSpeaking ? '#00e5ff' : isListening ? '#a855f7' : 'rgba(0,229,255,0.35)',
+                  }}
+                  animate={isSpeaking || isListening ? { scale: [1, 1.5, 1], opacity: [1, 0.4, 1] } : {}}
+                  transition={{ duration: 1.4, repeat: Infinity }}
+                />
+                <span style={{
+                  fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.2em',
+                  color: isSpeaking ? '#00e5ff' : isListening ? '#a855f7' : 'rgba(0,229,255,0.55)',
+                  fontWeight: 700,
+                }}>
+                  {isSpeaking ? 'VAAYU SPEAKING' : isListening ? 'LISTENING' : convState === 'processing' ? 'THINKING…' : 'VAAYU'}
                 </span>
               </div>
-              <button
-                onClick={voice.stop}
-                style={{ background: 'rgba(255,23,68,0.1)', border: '1px solid rgba(255,23,68,0.25)', color: '#ff1744', borderRadius: 6, padding: '3px 10px', fontSize: 10, cursor: 'pointer', letterSpacing: 1, fontFamily: 'monospace' }}
-              >
-                STOP
-              </button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {/* Topic selector mini button */}
+                <button
+                  onClick={() => setShowTopics(s => !s)}
+                  style={{
+                    background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.15)',
+                    color: 'rgba(0,229,255,0.6)', borderRadius: 6, padding: '3px 8px',
+                    fontSize: 9, cursor: 'pointer', letterSpacing: 1, fontFamily: 'monospace',
+                  }}
+                >
+                  TOPICS
+                </button>
+                <button
+                  onClick={closeConv}
+                  style={{
+                    background: 'rgba(255,23,68,0.08)', border: '1px solid rgba(255,23,68,0.2)',
+                    color: '#ff1744', borderRadius: 6, padding: '3px 10px',
+                    fontSize: 9, cursor: 'pointer', letterSpacing: 1, fontFamily: 'monospace',
+                  }}
+                >
+                  CLOSE
+                </button>
+              </div>
             </div>
 
-            {/* Avatar + visualizer */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-              <motion.div
-                animate={isSpeaking ? { scale: [1, 1.04, 1] } : {}}
-                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                <VaayuAvatar speaking={isSpeaking} />
-              </motion.div>
-
-              {isLoading && (
-                <div style={{ textAlign: 'center' }}>
-                  <div className="radar-sweep" style={{ display: 'inline-block', transformOrigin: 'center', width: 32, height: 32 }}>
-                    <svg width={32} height={32} viewBox="0 0 32 32">
-                      <circle cx={16} cy={16} r={14} fill="none" stroke="rgba(0,229,255,0.2)" strokeWidth={1.5} />
-                      <path d="M16,16 L16,2 A14,14 0 0 1 28,9 Z" fill="rgba(0,229,255,0.4)" />
-                      <circle cx={16} cy={16} r={3} fill="#00e5ff" />
-                    </svg>
+            {/* Topic mini-panel (shown when Topics clicked) */}
+            <AnimatePresence>
+              {showTopics && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  style={{ overflow: 'hidden', borderBottom: '1px solid rgba(0,229,255,0.07)' }}
+                >
+                  <div style={{ padding: '10px 12px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5 }}>
+                    {topics.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          setShowTopics(false);
+                          stopListening();
+                          voice.stop();
+                          setConvState('loading');
+                          const plId = ++msgCounter;
+                          setMessages(prev => [...prev, { id: plId, role: 'vaayu', text: '…', time: now() }]);
+                          voice.speak(t.id, () => setTimeout(startListening, 500));
+                        }}
+                        style={{
+                          background: 'rgba(0,229,255,0.03)',
+                          border: '1px solid rgba(0,229,255,0.1)',
+                          borderRadius: 7, padding: '6px 4px',
+                          cursor: 'pointer', textAlign: 'center',
+                          color: 'rgba(0,229,255,0.8)', fontSize: 9,
+                          fontFamily: 'monospace', letterSpacing: '0.05em',
+                        }}
+                      >
+                        <div style={{ fontSize: 14, marginBottom: 2 }}>{t.icon}</div>
+                        {t.label}
+                      </button>
+                    ))}
                   </div>
-                  <p style={{ fontSize: 11, color: 'rgba(0,229,255,0.6)', fontFamily: 'monospace', marginTop: 6, letterSpacing: 2 }}>
-                    GENERATING BRIEFING…
-                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Chat messages */}
+            <div
+              ref={scrollRef}
+              style={{
+                flex: 1, overflowY: 'auto', padding: '14px 14px 6px',
+                maxHeight: 320, minHeight: 120,
+              }}
+            >
+              {messages.map(msg => (
+                <Bubble key={msg.id} msg={msg} speaking={isSpeaking && msg.id === messages[messages.length - 1]?.id} />
+              ))}
+            </div>
+
+            {/* Waveform when speaking */}
+            <AnimatePresence>
+              {isSpeaking && (
+                <motion.div
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  style={{ padding: '0 14px', flexShrink: 0 }}
+                >
+                  <AudioVisualizer analyser={voice.analyser} isSpeaking={isSpeaking} width={332} height={48} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Listening bar */}
+            <div style={{ padding: '8px 14px 14px', flexShrink: 0 }}>
+              <AnimatePresence>
+                {isListening && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  >
+                    <ListeningBar transcript={transcript} timeout={listenTimer} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {convState === 'processing' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 12px', background: 'rgba(0,229,255,0.04)',
+                  border: '1px solid rgba(0,229,255,0.1)', borderRadius: 8,
+                }}>
+                  <motion.div
+                    style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(0,229,255,0.6)', borderTopColor: '#00e5ff' }}
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                  />
+                  <span style={{ fontSize: 10, color: 'rgba(0,229,255,0.6)', fontFamily: 'monospace', letterSpacing: '0.15em' }}>
+                    GENERATING RESPONSE…
+                  </span>
                 </div>
               )}
-
-              {isSpeaking && (
-                <AudioVisualizer
-                  analyser={voice.analyser}
-                  isSpeaking={isSpeaking}
-                  width={300}
-                  height={72}
-                />
+              {!isListening && convState === 'closed' && (
+                <p style={{ margin: 0, fontSize: 9.5, color: 'rgba(160,196,224,0.35)', fontFamily: 'monospace', textAlign: 'center' }}>
+                  Conversation ended — clap or click ◈ to restart
+                </p>
               )}
             </div>
-
-            {/* Transcript */}
-            {voice.script && isSpeaking && (
-              <div style={{
-                marginTop: 14, padding: '10px 12px',
-                background: 'rgba(0,229,255,0.02)',
-                border: '1px solid rgba(0,229,255,0.07)',
-                borderRadius: 8, maxHeight: 120, overflowY: 'auto',
-              }}>
-                <TypewriterText text={voice.script} speed={14} />
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Topic selector panel ── */}
+      {/* ── Topic quick-launch panel (when conv is closed) ── */}
       <AnimatePresence>
-        {open && !isActive && (
+        {showTopics && !convOpen && (
           <motion.div
             initial={{ opacity: 0, y: 12, scale: 0.95 }}
             animate={{ opacity: 1, y: 0,  scale: 1 }}
             exit={{    opacity: 0, y: 12, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 340, damping: 28 }}
             style={{
-              position:     'absolute',
-              bottom:       72,
-              right:        0,
-              width:        300,
-              background:   'rgba(2,4,18,0.97)',
-              border:       '1px solid rgba(0,229,255,0.18)',
-              borderRadius: 16,
-              padding:      '16px 14px',
+              position: 'absolute', bottom: 72, right: 0, width: 300,
+              background: 'rgba(2,4,18,0.97)',
+              border: '1px solid rgba(0,229,255,0.18)',
+              borderRadius: 16, padding: '16px 14px',
               backdropFilter: 'blur(16px)',
-              boxShadow:    '0 0 30px rgba(0,229,255,0.08), 0 8px 24px rgba(0,0,0,0.6)',
+              boxShadow: '0 0 30px rgba(0,229,255,0.08), 0 8px 24px rgba(0,0,0,0.6)',
             }}
           >
-            {/* Panel header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div>
-                <div style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.2em', color: '#00e5ff', fontWeight: 700 }}>
-                  VAAYU BRIEFING
-                </div>
-                <div style={{ fontSize: 9, color: 'rgba(160,196,224,0.4)', marginTop: 1, letterSpacing: 1 }}>
-                  Select a briefing topic
-                </div>
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.2em', color: '#00e5ff', fontWeight: 700 }}>
+                ASK VAAYU
+              </span>
               <button
-                onClick={() => setOpen(false)}
-                style={{ background: 'transparent', border: 'none', color: 'rgba(160,196,224,0.4)', fontSize: 16, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+                onClick={() => setShowTopics(false)}
+                style={{ background: 'transparent', border: 'none', color: 'rgba(160,196,224,0.4)', fontSize: 16, cursor: 'pointer' }}
               >
                 ✕
               </button>
             </div>
-
-            {/* Topic grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {topics.map(t => (
                 <button
                   key={t.id}
-                  onClick={() => handleTopic(t.id)}
-                  className="hud-corners"
+                  onClick={() => { setShowTopics(false); openConversation(t.id); }}
                   style={{
-                    background:   'rgba(0,229,255,0.03)',
-                    border:       '1px solid rgba(0,229,255,0.1)',
-                    borderRadius: 10,
-                    padding:      '10px 8px',
-                    cursor:       'pointer',
-                    textAlign:    'left',
-                    transition:   'all 0.2s',
-                    '--hud-color': 'rgba(0,229,255,0.35)',
-                  } as React.CSSProperties}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLElement).style.background = 'rgba(0,229,255,0.07)';
-                    (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,229,255,0.25)';
+                    background: 'rgba(0,229,255,0.03)', border: '1px solid rgba(0,229,255,0.1)',
+                    borderRadius: 10, padding: '10px 8px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
                   }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLElement).style.background = 'rgba(0,229,255,0.03)';
-                    (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,229,255,0.1)';
-                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,229,255,0.07)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,229,255,0.03)'; }}
                 >
-                  <div style={{ fontSize: 16, marginBottom: 4, color: '#00e5ff', fontFamily: 'monospace', fontWeight: 700 }}>{t.icon}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,229,255,0.9)', fontFamily: 'monospace', letterSpacing: 0.5 }}>
-                    {t.label}
-                  </div>
-                  <div style={{ fontSize: 9, color: 'rgba(160,196,224,0.45)', marginTop: 2, lineHeight: 1.3 }}>
-                    {t.desc}
-                  </div>
+                  <div style={{ fontSize: 16, marginBottom: 4, color: '#00e5ff', fontFamily: 'monospace' }}>{t.icon}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,229,255,0.9)', fontFamily: 'monospace' }}>{t.label}</div>
+                  <div style={{ fontSize: 9, color: 'rgba(160,196,224,0.45)', marginTop: 2 }}>{t.desc}</div>
                 </button>
               ))}
             </div>
-
-            {/* Error state */}
-            {voice.state === 'error' && (
-              <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(255,23,68,0.06)', border: '1px solid rgba(255,23,68,0.18)', borderRadius: 8 }}>
-                <p style={{ fontSize: 10, color: '#ff1744', fontFamily: 'monospace', margin: 0 }}>
-                  ⚠ {voice.error || 'Briefing failed. Check API keys.'}
-                </p>
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── FAB button ── */}
-      <div style={{ position: 'relative', width: 60, height: 60 }}>
-
-        {/* Listening pulse ring — visible when mic is active and VAAYU is idle */}
-        {micReady && !isActive && (
-          <motion.div
-            style={{
-              position:     'absolute',
-              inset:        -5,
-              borderRadius: '50%',
-              border:       '1px solid rgba(0,229,255,0.3)',
-              pointerEvents: 'none',
-            }}
-            animate={{ scale: [1, 1.22, 1], opacity: [0.5, 0.05, 0.5] }}
-            transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
-          />
-        )}
-
-        {/* Tiny mic-status dot (top-right of FAB) */}
-        {wakePermission !== 'pending' && (
-          <div style={{
-            position:     'absolute',
-            top:          2,
-            right:        2,
-            width:        8,
-            height:       8,
-            borderRadius: '50%',
-            background:   micReady ? '#4ade80' : '#6b7280',
-            border:       '1.5px solid rgba(2,4,18,0.9)',
-            zIndex:       2,
-            boxShadow:    micReady ? '0 0 5px rgba(74,222,128,0.6)' : 'none',
-          }} />
-        )}
-
-        {/* Mic denied hint */}
-        {wakePermission === 'denied' && !open && !isActive && (
-          <div style={{
-            position:     'absolute',
-            bottom:       68,
-            right:        0,
-            background:   'rgba(2,4,18,0.95)',
-            border:       '1px solid rgba(248,113,113,0.25)',
-            borderRadius: 8,
-            padding:      '6px 10px',
-            whiteSpace:   'nowrap',
-            fontSize:     9,
-            fontFamily:   'monospace',
-            color:        'rgba(248,113,113,0.8)',
-            letterSpacing: '0.08em',
-            pointerEvents: 'none',
-          }}>
-            Allow mic for wake word
-          </div>
-        )}
-
-      <motion.button
-        onClick={() => {
-          if (isActive) { voice.stop(); } else { setOpen(o => !o); }
-        }}
-        animate={
-          isSpeaking
-            ? { scale: [1, 1.12, 1], boxShadow: ['0 0 0px rgba(0,229,255,0)', '0 0 28px rgba(0,229,255,0.65)', '0 0 0px rgba(0,229,255,0)'] }
-            : isLoading
-              ? { rotate: 360 }
-              : {}
-        }
-        transition={
-          isSpeaking
-            ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' }
-            : isLoading
-              ? { duration: 2, repeat: Infinity, ease: 'linear' }
-              : {}
-        }
-        title={
-          isActive
-            ? 'Stop VAAYU'
-            : micReady
-              ? 'Ask VAAYU (or clap / say "Vaayu")'
-              : open
-                ? 'Close'
-                : 'Ask VAAYU'
-        }
-        style={{
-          width:        60,
-          height:       60,
-          borderRadius: '50%',
-          background:   isActive
-            ? 'linear-gradient(135deg, rgba(0,229,255,0.22), rgba(80,20,160,0.35))'
-            : open
-              ? 'linear-gradient(135deg, rgba(0,229,255,0.15), rgba(40,10,100,0.5))'
-              : 'linear-gradient(135deg, rgba(2,4,18,0.95), rgba(0,15,50,0.95))',
-          border:       `1.5px solid ${isActive ? 'rgba(0,229,255,0.65)' : 'rgba(0,229,255,0.25)'}`,
-          boxShadow:    isActive ? '0 0 20px rgba(0,229,255,0.35)' : '0 4px 20px rgba(0,0,0,0.5)',
-          cursor:       'pointer',
-          display:      'flex',
-          alignItems:   'center',
-          justifyContent: 'center',
-          outline:      'none',
-          position:     'relative',
-        }}
-      >
-        {isActive ? (
-          <svg width={28} height={28} viewBox="0 0 28 28" fill="none">
-            <circle cx={14} cy={14} r={13} fill="none" stroke="rgba(0,229,255,0.3)" strokeWidth={1} />
-            {[4,7,10].map((r, i) => (
-              <circle key={i} cx={14} cy={14} r={r} fill="none" stroke="rgba(0,229,255,0.5)" strokeWidth={1.2} />
-            ))}
-            <circle cx={14} cy={14} r={3} fill="#00e5ff" />
-          </svg>
-        ) : (
-          <svg width={26} height={26} viewBox="0 0 26 26" fill="none">
-            <polygon points="13,2 22,7.5 22,18.5 13,24 4,18.5 4,7.5"
-              fill="rgba(0,229,255,0.07)" stroke="rgba(0,229,255,0.55)" strokeWidth="1.2" />
-            <text x="13" y="17.5" textAnchor="middle"
-              style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 900, fill: '#00e5ff' }}>
-              V
-            </text>
-          </svg>
-        )}
-      </motion.button>
-      </div>  {/* end FAB wrapper */}
+      {/* ── FAB ── */}
+      <FabButton
+        convOpen={convOpen}
+        convState={convState}
+        micReady={micReady}
+        onClick={handleFabClick}
+      />
     </div>
   );
 }

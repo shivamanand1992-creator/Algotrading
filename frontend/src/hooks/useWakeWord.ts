@@ -108,11 +108,20 @@ export function useWakeWord({ enabled = true, onWake }: Options) {
           )
           .join(' ');
 
+        // Debug: log what's being heard (visible in DevTools console)
+        if (text.trim()) console.debug('[VAAYU wake] heard:', text.trim());
+
         if (
-          text.includes('vaayu')  ||
-          text.includes('vayu')   ||
-          text.includes('vajyu')  ||
-          text.includes('bayu')   // common mis-recognition
+          text.includes('vaayu')   ||
+          text.includes('vayu')    ||
+          text.includes('vajyu')   ||
+          text.includes('bayu')    ||
+          text.includes('wayu')    ||
+          text.includes('vayoo')   ||
+          text.includes('bayou')   ||
+          text.includes('buy you') ||
+          text.includes('why you') ||
+          text.includes('wai u')
         ) {
           fire('voice');
         }

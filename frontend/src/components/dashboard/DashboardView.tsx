@@ -47,20 +47,20 @@ function HudStat({
         background: `linear-gradient(90deg, ${color}08, transparent 60%)`,
       }} />
       <div style={{
-        fontSize: 7, color: 'rgba(160,196,224,0.4)',
-        letterSpacing: '0.2em', textTransform: 'uppercase',
+        fontSize: 9, color: 'rgba(160,196,224,0.45)',
+        letterSpacing: '0.15em', textTransform: 'uppercase',
         marginBottom: 5, fontFamily: 'monospace',
       }}>
         {label}
       </div>
       <div style={{
-        fontSize: 16, fontFamily: "'Courier New', monospace",
+        fontSize: 20, fontFamily: "'Courier New', monospace",
         fontWeight: 900, color, lineHeight: 1,
       }}>
         {value}
       </div>
       {sublabel && (
-        <div style={{ fontSize: 8, color: 'rgba(160,196,224,0.35)', marginTop: 3, fontFamily: 'monospace' }}>
+        <div style={{ fontSize: 9.5, color: 'rgba(160,196,224,0.4)', marginTop: 4, fontFamily: 'monospace' }}>
           {sublabel}
         </div>
       )}
@@ -742,49 +742,71 @@ export function DashboardView() {
         </div>
       </motion.div>
 
-      {/* ── MARKET NEWS ───────────────────────────────────────────── */}
+      {/* ── MARKET NEWS CARDS ─────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div className="flex items-center gap-2 mb-3">
           <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Market Intelligence</span>
           <div className="flex-1 h-px bg-jarvis-primary/10" />
-          <span className="text-[9px] text-jarvis-text-secondary/40">ET Markets · auto-refreshed at 09:00 IST</span>
+          <span className="text-[9px] text-jarvis-text-secondary/40">ET Markets · refreshed at open</span>
         </div>
-        <div className="rounded-2xl p-4" style={{ background: 'rgba(0,8,24,0.97)', border: '1px solid rgba(0,229,255,0.08)' }}>
-          {newsLoading ? (
-            <div className="space-y-3">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-5 rounded animate-pulse" style={{ background: 'rgba(0,229,255,0.04)', width: `${85 - i * 7}%` }} />
-              ))}
-            </div>
-          ) : news.length > 0 ? (
-            <div className="divide-y divide-white/5">
-              {news.slice(0, 7).map((item, i) => (
-                <motion.a
-                  key={i}
-                  href={item.link || '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-start gap-3 py-2.5 group cursor-pointer"
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                >
-                  <span className="text-jarvis-primary/30 text-xs font-mono mt-0.5 flex-shrink-0 w-4">{i + 1}</span>
-                  <span className="text-xs text-jarvis-text-secondary group-hover:text-jarvis-primary transition-colors leading-relaxed flex-1">
-                    {item.title}
+        {newsLoading ? (
+          <div className="grid grid-cols-2 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-24 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
+            ))}
+          </div>
+        ) : news.length > 0 ? (
+          <div className="grid grid-cols-2 gap-3">
+            {news.slice(0, 8).map((item, i) => (
+              <motion.a
+                key={i}
+                href={item.link || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block group cursor-pointer rounded-xl p-4"
+                style={{
+                  background: 'rgba(0,8,24,0.97)',
+                  border: '1px solid rgba(0,229,255,0.07)',
+                  textDecoration: 'none',
+                  transition: 'all 0.2s',
+                }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,229,255,0.2)';
+                  (e.currentTarget as HTMLElement).style.background  = 'rgba(0,229,255,0.04)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,229,255,0.07)';
+                  (e.currentTarget as HTMLElement).style.background  = 'rgba(0,8,24,0.97)';
+                }}
+              >
+                {/* Source + index */}
+                <div className="flex items-center justify-between mb-2">
+                  <span
+                    className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(0,229,255,0.08)', color: 'rgba(0,229,255,0.6)', letterSpacing: '0.1em' }}
+                  >
+                    {item.source || 'NEWS'}
                   </span>
-                  {item.source && (
-                    <span className="text-[9px] text-jarvis-text-secondary/40 flex-shrink-0 whitespace-nowrap">{item.source}</span>
-                  )}
-                </motion.a>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-jarvis-text-secondary/50 text-center py-4">
-              News will appear here at 09:00 IST on trading days
-            </p>
-          )}
-        </div>
+                  <span className="text-[9px] font-mono text-jarvis-primary/25">#{i + 1}</span>
+                </div>
+                {/* Headline */}
+                <p
+                  className="text-xs leading-relaxed m-0 group-hover:text-jarvis-primary transition-colors"
+                  style={{ color: 'rgba(200,220,240,0.85)', lineHeight: 1.5 }}
+                >
+                  {item.title}
+                </p>
+              </motion.a>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(0,8,24,0.97)', border: '1px solid rgba(0,229,255,0.08)' }}>
+            <p className="text-xs text-jarvis-text-secondary/50">News will appear here on trading days</p>
+          </div>
+        )}
       </motion.div>
 
       {/* ── EXECUTION LOG ─────────────────────────────────────────── */}
