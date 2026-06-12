@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import {
-  ComposedChart, Area, Line, ResponsiveContainer,
+  AreaChart, Area, ResponsiveContainer,
   XAxis, YAxis, Tooltip,
 } from 'recharts';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { marketApi, niftyBeesApi, stocksApi, systemApi } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
-import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition, NiftyTechCandle } from '../../types/api';
+import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } from '../../types/api';
 import { OrderFlowVectors } from '../ui/OrderFlowVectors';
 import { ExecutionLogFeed, type LogEntry } from '../ui/ExecutionLogFeed';
 import { useTilt } from '../../hooks/useTilt';
@@ -21,6 +21,52 @@ const staggerItem: Variants = {
   hidden: { opacity: 0, y: 20 },
   show:   { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
+
+// ── HUD Stat panel ────────────────────────────────────────────────────────────
+function HudStat({
+  label, value, color = '#00e5ff', sublabel, pulse,
+}: {
+  label: string; value: string; color?: string; sublabel?: string; pulse?: boolean;
+}) {
+  return (
+    <motion.div
+      style={{
+        padding: '10px 14px',
+        background: 'rgba(0,229,255,0.025)',
+        border: '1px solid rgba(0,229,255,0.07)',
+        borderLeft: `2px solid ${color}`,
+        borderRadius: '0 8px 8px 0',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+      animate={pulse ? { opacity: [1, 0.6, 1] } : {}}
+      transition={pulse ? { duration: 2, repeat: Infinity } : {}}
+    >
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: `linear-gradient(90deg, ${color}08, transparent 60%)`,
+      }} />
+      <div style={{
+        fontSize: 7, color: 'rgba(160,196,224,0.4)',
+        letterSpacing: '0.2em', textTransform: 'uppercase',
+        marginBottom: 5, fontFamily: 'monospace',
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: 16, fontFamily: "'Courier New', monospace",
+        fontWeight: 900, color, lineHeight: 1,
+      }}>
+        {value}
+      </div>
+      {sublabel && (
+        <div style={{ fontSize: 8, color: 'rgba(160,196,224,0.35)', marginTop: 3, fontFamily: 'monospace' }}>
+          {sublabel}
+        </div>
+      )}
+    </motion.div>
+  );
+}
 
 function CueCard({ cue }: { cue: GlobalCue }) {
   const up   = (cue.change_pct ?? 0) >= 0;
@@ -56,38 +102,32 @@ function CueCard({ cue }: { cue: GlobalCue }) {
   );
 }
 
-function calcEMA(prices: number[], period: number): (number | null)[] {
-  const k = 2 / (period + 1);
-  const out: (number | null)[] = new Array(prices.length).fill(null);
-  if (prices.length < period) return out;
-  let prev = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  out[period - 1] = prev;
-  for (let i = period; i < prices.length; i++) {
-    prev = prices[i] * k + prev * (1 - k);
-    out[i] = parseFloat(prev.toFixed(2));
-  }
-  return out;
-}
-
 interface Balance { available_cash: number; net: number; used_margin: number; error?: string; source?: string; }
+
+interface IntradayCandle {
+  timestamp: string;
+  time: string;
+  open: number; high: number; low: number; close: number;
+  volume?: number;
+}
 
 export function DashboardView() {
   const { connected, marketData: wsMarketData } = useWebSocket();
-  const [marketData, setMarketData]     = useState<MarketData | null>(null);
-  const [emaCandles, setEmaCandles]     = useState<NiftyTechCandle[]>([]);
-  const [globalCues, setGlobalCues]     = useState<GlobalCue[]>([]);
-  const [news, setNews]                 = useState<NewsItem[]>([]);
-  const [nbStatus, setNbStatus]         = useState<NiftyBeesStatus | null>(null);
+  const [marketData, setMarketData]         = useState<MarketData | null>(null);
+  const [intradayCandles, setIntradayCandles] = useState<IntradayCandle[]>([]);
+  const [globalCues, setGlobalCues]         = useState<GlobalCue[]>([]);
+  const [news, setNews]                     = useState<NewsItem[]>([]);
+  const [nbStatus, setNbStatus]             = useState<NiftyBeesStatus | null>(null);
   const [swingPositions, setSwingPositions] = useState<SwingPosition[]>([]);
-  const [balance, setBalance]           = useState<Balance | null>(null);
-  const [cuesLoading, setCuesLoading]   = useState(true);
-  const [newsLoading, setNewsLoading]   = useState(true);
-  const [syncing, setSyncing]           = useState(false);
-  const [syncMsg, setSyncMsg]           = useState('');
-  const [lastUpdated, setLastUpdated]   = useState<Date | null>(null);
-  const [logEntries, setLogEntries]     = useState<LogEntry[]>([]);
-  const [ltpFlashDir, setLtpFlashDir]   = useState<'up' | 'down' | null>(null);
-  const prevLtp = useRef<number>(0);
+  const [balance, setBalance]               = useState<Balance | null>(null);
+  const [cuesLoading, setCuesLoading]       = useState(true);
+  const [newsLoading, setNewsLoading]       = useState(true);
+  const [syncing, setSyncing]               = useState(false);
+  const [syncMsg, setSyncMsg]               = useState('');
+  const [lastUpdated, setLastUpdated]       = useState<Date | null>(null);
+  const [logEntries, setLogEntries]         = useState<LogEntry[]>([]);
+  const [ltpFlashDir, setLtpFlashDir]       = useState<'up' | 'down' | null>(null);
+  const prevLtp  = useRef<number>(0);
   const logCounter = useRef<number>(0);
 
   // ── Market data (30s) ────────────────────────────────────────────
@@ -104,6 +144,25 @@ export function DashboardView() {
     const iv = setInterval(fetchMarket, 30000);
     return () => clearInterval(iv);
   }, [fetchMarket]);
+
+  // ── 15-min intraday chart ────────────────────────────────────────
+  useEffect(() => {
+    const f = async () => {
+      try {
+        const res = await marketApi.getOHLCV('FIFTEEN_MINUTE', 1);
+        const candles: Array<{timestamp: string; open: number; high: number; low: number; close: number; volume?: number}> = res.data ?? [];
+        if (!candles.length) return;
+        setIntradayCandles(candles.map(c => {
+          const d = new Date(c.timestamp);
+          const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+          return { ...c, time };
+        }));
+      } catch {}
+    };
+    f();
+    const iv = setInterval(f, 300000);
+    return () => clearInterval(iv);
+  }, []);
 
   // ── NiftyBees (15s) ──────────────────────────────────────────────
   useEffect(() => {
@@ -138,30 +197,6 @@ export function DashboardView() {
     return () => clearInterval(iv);
   }, []);
 
-  // ── EMA chart: daily OHLCV 30d (5 min) ──────────────────────────
-  useEffect(() => {
-    const f = async () => {
-      try {
-        const res = await marketApi.getOHLCV('ONE_DAY', 30);
-        const candles = res.data ?? [];
-        if (candles.length < 9) return;
-        const closes = candles.map(c => c.close);
-        const ema9   = calcEMA(closes, 9);
-        const ema21  = calcEMA(closes, 21);
-        setEmaCandles(candles.map((c, i) => ({
-          date: c.timestamp.slice(0, 10),
-          close: c.close,
-          ema9:  ema9[i],
-          ema21: ema21[i],
-          bb_up: null, bb_lo: null,
-        })));
-      } catch {}
-    };
-    f();
-    const iv = setInterval(f, 300000);
-    return () => clearInterval(iv);
-  }, []);
-
   // ── Global cues (5 min) ──────────────────────────────────────────
   useEffect(() => {
     const f = async () => {
@@ -174,7 +209,7 @@ export function DashboardView() {
     return () => clearInterval(iv);
   }, []);
 
-  // ── News (once on mount) ─────────────────────────────────────────
+  // ── News (once) ──────────────────────────────────────────────────
   useEffect(() => {
     setNewsLoading(true);
     marketApi.getNews()
@@ -183,7 +218,7 @@ export function DashboardView() {
       .finally(() => setNewsLoading(false));
   }, []);
 
-  // ── WS tick → market data + log entry ───────────────────────────
+  // ── WS tick → market data + log ─────────────────────────────────
   useEffect(() => {
     if (wsMarketData) {
       const prev = prevLtp.current;
@@ -191,15 +226,11 @@ export function DashboardView() {
         const dir = wsMarketData.ltp > prev ? 'up' : 'down';
         setLtpFlashDir(dir);
         setTimeout(() => setLtpFlashDir(null), 650);
-        // Add to execution log
-        const now = new Date();
-        const t   = now.toTimeString().slice(0, 8);
-        setLogEntries(prev => [
-          ...prev.slice(-19),
+        const t = new Date().toTimeString().slice(0, 8);
+        setLogEntries(p => [
+          ...p.slice(-19),
           {
-            id: ++logCounter.current,
-            time: t,
-            type: 'info',
+            id: ++logCounter.current, time: t, type: 'info',
             message: `NIFTY50 ${dir === 'up' ? '▲' : '▼'} ${wsMarketData.ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${wsMarketData.change_percentage >= 0 ? '+' : ''}${wsMarketData.change_percentage.toFixed(2)}%)`,
           },
         ]);
@@ -216,46 +247,41 @@ export function DashboardView() {
     try {
       const r = await systemApi.syncAll();
       setSyncMsg(r.data.success ? '✓ Sync complete' : `⚠ ${r.data.errors?.[0] ?? 'Partial sync'}`);
-      // Refresh data after sync
       const [nbRes, swRes, balRes] = await Promise.allSettled([
-        niftyBeesApi.getStatus(),
-        stocksApi.getPositions(),
-        systemApi.getBalance(),
+        niftyBeesApi.getStatus(), stocksApi.getPositions(), systemApi.getBalance(),
       ]);
-      if (nbRes.status === 'fulfilled')   setNbStatus(nbRes.value.data);
-      if (swRes.status === 'fulfilled')   setSwingPositions(Array.isArray(swRes.value.data) ? swRes.value.data : []);
-      if (balRes.status === 'fulfilled')  setBalance(balRes.value.data);
-    } catch {
-      setSyncMsg('✗ Sync failed');
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMsg(''), 4000);
-    }
+      if (nbRes.status === 'fulfilled')  setNbStatus(nbRes.value.data);
+      if (swRes.status === 'fulfilled')  setSwingPositions(Array.isArray(swRes.value.data) ? swRes.value.data : []);
+      if (balRes.status === 'fulfilled') setBalance(balRes.value.data);
+    } catch { setSyncMsg('✗ Sync failed'); }
+    finally { setSyncing(false); setTimeout(() => setSyncMsg(''), 4000); }
   };
 
   const ltp       = marketData?.ltp ?? 0;
   const change    = marketData?.change ?? 0;
   const changePct = marketData?.change_percentage ?? 0;
   const isUp      = change >= 0;
-  // Update prevLtp tracking (flash direction is tracked separately in WS effect)
   if (ltp > 0 && ltp !== prevLtp.current) prevLtp.current = ltp;
 
-  const nb       = nbStatus?.position ?? null;
-  const nbConf   = nbStatus?.config;
-  const nbTarget = nbConf?.target_gain_pct ?? 5;
-  const nbPnlPct = nb?.pnl_pct ?? 0;
-  const nbProgress = Math.min((nbPnlPct / nbTarget) * 100, 100);
+  const nb          = nbStatus?.position ?? null;
+  const nbConf      = nbStatus?.config;
+  const nbTarget    = nbConf?.target_gain_pct ?? 5;
+  const nbPnlPct    = nb?.pnl_pct ?? 0;
+  const nbProgress  = Math.min((nbPnlPct / nbTarget) * 100, 100);
 
-  const openSwings      = swingPositions.filter(p => p.status === 'open');
-  const swingDeployed   = openSwings.reduce((s, p) => s + (p.entry_price * p.qty), 0);
-  const swingPnl        = openSwings.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0);
-  const swingPnlPct     = openSwings.length > 0
+  const openSwings    = swingPositions.filter(p => p.status === 'open');
+  const swingDeployed = openSwings.reduce((s, p) => s + (p.entry_price * p.qty), 0);
+  const swingPnl      = openSwings.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0);
+  const swingPnlPct   = openSwings.length > 0
     ? openSwings.reduce((s, p) => s + (p.pnl_pct ?? 0), 0) / openSwings.length : 0;
 
-  // Only treat balance as real data when source=live AND at least one value is non-zero.
-  // Angel One rmsLimit() returns empty data after market hours → source="unavailable".
   const balDataAvail = balance !== null && balance.source === 'live' && (balance.available_cash > 0 || balance.net > 0);
   const balLow = balDataAvail && nbConf && balance!.available_cash < nbConf.capital_amount * 1.1;
+
+  // Intraday chart Y-domain
+  const closes = intradayCandles.map(c => c.close).filter(Boolean);
+  const chartMin = closes.length ? Math.min(...closes) * 0.9995 : 'auto';
+  const chartMax = closes.length ? Math.max(...closes) * 1.0005 : 'auto';
 
   return (
     <motion.div className="space-y-5" variants={staggerContainer} initial="hidden" animate="show">
@@ -297,103 +323,180 @@ export function DashboardView() {
         </div>
       </motion.div>
 
-      {/* ── HERO: Globe + Nifty ────────────────────────────────────── */}
+      {/* ── GLOBE COMMAND CENTER ───────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div
           className={`relative overflow-hidden rounded-2xl ${ltpFlashDir === 'up' ? 'flash-up' : ltpFlashDir === 'down' ? 'flash-down' : ''}`}
           style={{
-            background: 'linear-gradient(135deg, rgba(0,5,18,0.85) 0%, rgba(0,15,40,0.85) 100%)',
-            border: '1px solid rgba(0,229,255,0.12)',
-            backdropFilter: 'blur(8px)',
+            background: 'linear-gradient(160deg, rgba(0,5,18,0.92) 0%, rgba(0,12,35,0.92) 100%)',
+            border: '1px solid rgba(0,229,255,0.1)',
+            backdropFilter: 'blur(10px)',
           }}
         >
           <div className="scan-line" />
-          <OrderFlowVectors count={6} buyBias={isUp ? 0.65 : 0.35} />
+          <OrderFlowVectors count={8} buyBias={isUp ? 0.65 : 0.35} />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 0, position: 'relative', zIndex: 2 }}>
-            {/* Globe */}
-            <div style={{ flexShrink: 0, padding: '8px 0 8px 8px' }}>
+          {/* 3-column layout: left HUD | globe | right HUD */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '180px 1fr 180px',
+              gap: 0,
+              position: 'relative',
+              zIndex: 2,
+              minHeight: 480,
+            }}
+          >
+            {/* Left HUD panel */}
+            <div style={{
+              display: 'flex', flexDirection: 'column',
+              justifyContent: 'center', gap: 10,
+              padding: '28px 16px 28px 20px',
+              borderRight: '1px solid rgba(0,229,255,0.06)',
+            }}>
+              <HudStat
+                label="PCR"
+                value={marketData?.pcr ? marketData.pcr.toFixed(2) : '—'}
+                color="#a78bfa"
+                sublabel={marketData?.pcr ? (marketData.pcr >= 1.2 ? 'BEARISH' : marketData.pcr <= 0.8 ? 'BULLISH' : 'NEUTRAL') : ''}
+              />
+              <HudStat
+                label="IV Percentile"
+                value={marketData?.iv_percentile ? `${marketData.iv_percentile.toFixed(0)}%` : '—'}
+                color="#fbbf24"
+                sublabel={marketData?.iv_percentile ? (marketData.iv_percentile >= 70 ? 'HIGH VOL' : marketData.iv_percentile <= 30 ? 'LOW VOL' : 'NORMAL') : ''}
+              />
+              <HudStat
+                label="Change"
+                value={change !== 0 ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}` : '—'}
+                color={isUp ? '#4ade80' : '#f87171'}
+                sublabel={changePct !== 0 ? `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%` : ''}
+                pulse={Math.abs(changePct) > 1.5}
+              />
+              <HudStat
+                label="Volume"
+                value={marketData?.volume ? `${(marketData.volume / 1_000_000).toFixed(1)}M` : '—'}
+                color="#22d3ee"
+              />
+            </div>
+
+            {/* Center: Globe */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px 0',
+            }}>
               <VaayuGlobe
                 ltp={ltp}
                 change={change}
                 changePct={changePct}
                 isUp={isUp}
-                size={260}
+                size={460}
               />
             </div>
 
-            {/* Right: EMA chart + data strips */}
-            <div style={{ flex: 1, padding: '16px 20px 16px 0' }}>
-              {/* EMA Chart */}
-              {emaCandles.length > 8 ? (
-                <>
-                  <div className="flex items-center gap-3 mb-1.5">
-                    <span className="text-[9px] font-bold tracking-[0.25em] text-jarvis-primary/40 uppercase">Nifty 50 · 30D</span>
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-green-400/70"><span className="inline-block w-3 h-0.5 bg-green-400" />EMA 9</span>
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-400/70"><span className="inline-block w-3 h-0.5 bg-yellow-400" />EMA 21</span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={140}>
-                    <ComposedChart data={emaCandles} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="heroCloseGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%"   stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.18} />
-                          <stop offset="100%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="date" hide />
-                      <YAxis domain={['auto', 'auto']} hide />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (!active || !payload?.length) return null;
-                          const d = payload[0]?.payload as NiftyTechCandle;
-                          return (
-                            <div style={{ background: 'rgba(0,5,20,0.95)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 6, padding: '5px 10px', fontSize: 10, fontFamily: 'monospace' }}>
-                              <div style={{ color: '#a0c4e0', marginBottom: 2 }}>{d?.date}</div>
-                              <div style={{ color: '#00e5ff' }}>Close: {d?.close?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                              {d?.ema9  && <div style={{ color: '#4ade80' }}>EMA9:  {d.ema9?.toLocaleString('en-IN',  { maximumFractionDigits: 0 })}</div>}
-                              {d?.ema21 && <div style={{ color: '#facc15' }}>EMA21: {d.ema21?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>}
-                            </div>
-                          );
-                        }}
-                      />
-                      <Area type="monotone" dataKey="close"
-                        stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={1.5}
-                        fill="url(#heroCloseGrad)" dot={false} isAnimationActive={false}
-                      />
-                      <Line type="monotone" dataKey="ema9"  stroke="#4ade80" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-                      <Line type="monotone" dataKey="ema21" stroke="#facc15" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </>
-              ) : (
-                <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-xs text-jarvis-text-secondary/40 tracking-widest uppercase">Loading chart…</span>
-                </div>
-              )}
-
-              {/* Quick stats row */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                {[
-                  { label: 'OPEN',  value: marketData?.open  ? marketData.open.toLocaleString('en-IN', { maximumFractionDigits: 0 })  : '—' },
-                  { label: 'HIGH',  value: marketData?.high   ? marketData.high.toLocaleString('en-IN', { maximumFractionDigits: 0 })   : '—', color: '#4ade80' },
-                  { label: 'LOW',   value: marketData?.low    ? marketData.low.toLocaleString('en-IN', { maximumFractionDigits: 0 })    : '—', color: '#f87171' },
-                  { label: 'PCR',   value: marketData?.pcr          ? marketData.pcr.toFixed(2)    : '—', color: '#a78bfa' },
-                  { label: 'IV %',  value: marketData?.iv_percentile ? `${marketData.iv_percentile.toFixed(0)}%` : '—', color: '#fbbf24' },
-                ].map(item => (
-                  <div key={item.label} style={{
-                    flex: 1,
-                    padding: '6px 8px',
-                    background: 'rgba(0,229,255,0.03)',
-                    border: '1px solid rgba(0,229,255,0.07)',
-                    borderRadius: 6,
-                    textAlign: 'center',
-                  }}>
-                    <div style={{ fontSize: 8, color: 'rgba(160,196,224,0.4)', letterSpacing: '0.1em', marginBottom: 2 }}>{item.label}</div>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: item.color || '#00e5ff' }}>{item.value}</div>
-                  </div>
-                ))}
-              </div>
+            {/* Right HUD panel */}
+            <div style={{
+              display: 'flex', flexDirection: 'column',
+              justifyContent: 'center', gap: 10,
+              padding: '28px 20px 28px 16px',
+              borderLeft: '1px solid rgba(0,229,255,0.06)',
+            }}>
+              <HudStat
+                label="Open"
+                value={marketData?.open ? marketData.open.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                color="#00e5ff"
+              />
+              <HudStat
+                label="Day High"
+                value={marketData?.high ? marketData.high.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                color="#4ade80"
+              />
+              <HudStat
+                label="Day Low"
+                value={marketData?.low ? marketData.low.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                color="#f87171"
+              />
+              <HudStat
+                label="Spread"
+                value={
+                  marketData?.high && marketData?.low
+                    ? (marketData.high - marketData.low).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+                    : '—'
+                }
+                color="#a0c4e0"
+                sublabel="Day Range"
+              />
             </div>
+          </div>
+
+          {/* Intraday chart */}
+          <div style={{
+            borderTop: '1px solid rgba(0,229,255,0.07)',
+            padding: '12px 20px 16px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.4)', fontFamily: 'monospace', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
+                Nifty 50 · Today · 15 min
+              </span>
+              <div style={{ flex: 1, height: 1, background: 'rgba(0,229,255,0.06)' }} />
+              <span style={{ fontSize: 9, color: 'rgba(160,196,224,0.3)', fontFamily: 'monospace' }}>
+                {intradayCandles.length > 0 ? `${intradayCandles[0].time} – ${intradayCandles[intradayCandles.length - 1].time}` : 'Loading...'}
+              </span>
+            </div>
+            {intradayCandles.length > 2 ? (
+              <ResponsiveContainer width="100%" height={130}>
+                <AreaChart data={intradayCandles} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="intradayGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0.25} />
+                      <stop offset="100%" stopColor={isUp ? '#4ade80' : '#f87171'} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="time"
+                    tick={{ fontSize: 9, fill: 'rgba(160,196,224,0.35)', fontFamily: 'monospace' }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis domain={[chartMin, chartMax]} hide />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0]?.payload as IntradayCandle;
+                      return (
+                        <div style={{
+                          background: 'rgba(0,5,20,0.95)',
+                          border: '1px solid rgba(0,229,255,0.2)',
+                          borderRadius: 6, padding: '6px 10px',
+                          fontSize: 10, fontFamily: 'monospace',
+                        }}>
+                          <div style={{ color: '#a0c4e0', marginBottom: 3 }}>{d?.time}</div>
+                          <div style={{ color: '#00e5ff' }}>C: {d?.close?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                          <div style={{ color: '#4ade80' }}>H: {d?.high?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                          <div style={{ color: '#f87171' }}>L: {d?.low?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Area
+                    type="monotone" dataKey="close"
+                    stroke={isUp ? '#4ade80' : '#f87171'} strokeWidth={1.5}
+                    fill="url(#intradayGrad)"
+                    dot={false} isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: 10, color: 'rgba(160,196,224,0.3)', fontFamily: 'monospace', letterSpacing: '0.2em' }}>
+                  {intradayCandles.length === 0 ? 'AWAITING MARKET DATA...' : 'NOT ENOUGH DATA'}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </motion.div>
@@ -505,7 +608,6 @@ export function DashboardView() {
 
           {nb?.active ? (
             <div className="space-y-3">
-              {/* Main P&L row */}
               <div className="flex justify-between items-start">
                 <div>
                   <div className="text-[10px] text-jarvis-text-secondary uppercase tracking-wider">Holdings</div>
@@ -526,8 +628,6 @@ export function DashboardView() {
                   </div>
                 </div>
               </div>
-
-              {/* Capital stats */}
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { label: 'Deployed', value: formatCurrency(nb.total_invested ?? 0), color: 'text-yellow-400' },
@@ -540,8 +640,6 @@ export function DashboardView() {
                   </div>
                 ))}
               </div>
-
-              {/* Progress toward target */}
               <div>
                 <div className="flex justify-between text-[10px] text-jarvis-text-secondary mb-1.5">
                   <span>Progress toward {nbTarget}% sell target</span>
@@ -593,16 +691,14 @@ export function DashboardView() {
 
           {openSwings.length > 0 ? (
             <div className="space-y-1.5">
-              {/* Summary row */}
               <div className="flex justify-between text-[10px] text-jarvis-text-secondary px-2 pb-1 border-b border-white/5">
                 <span>Total Deployed: <span className="text-yellow-400 font-mono font-bold">{formatCurrency(swingDeployed)}</span></span>
                 <span className={`font-mono font-bold ${swingPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   Avg P&L: {swingPnlPct >= 0 ? '+' : ''}{swingPnlPct.toFixed(2)}%
                 </span>
               </div>
-              {/* Position rows */}
               {openSwings.slice(0, 5).map(pos => {
-                const up      = (pos.pnl_pct ?? 0) >= 0;
+                const up       = (pos.pnl_pct ?? 0) >= 0;
                 const deployed = pos.entry_price * pos.qty;
                 return (
                   <div key={pos.symbol} className="grid grid-cols-4 items-center py-1.5 px-2 rounded-lg gap-2" style={{ background: 'rgba(0,229,255,0.025)', border: '1px solid rgba(0,229,255,0.05)' }}>
@@ -690,17 +786,14 @@ export function DashboardView() {
           )}
         </div>
       </motion.div>
+
       {/* ── EXECUTION LOG ─────────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div className="flex items-center gap-2 mb-3">
           <span className="text-[10px] font-bold tracking-[0.25em] text-jarvis-primary/50 uppercase">Live Stream</span>
           <div className="flex-1 h-px bg-jarvis-primary/10" />
         </div>
-        <ExecutionLogFeed
-          entries={logEntries}
-          maxLines={6}
-          title="Market Tick Feed"
-        />
+        <ExecutionLogFeed entries={logEntries} maxLines={6} title="Market Tick Feed" />
       </motion.div>
 
     </motion.div>
