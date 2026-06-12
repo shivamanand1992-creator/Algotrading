@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useJarvisVoice } from '../../hooks/useJarvisVoice';
+import { useWakeWord } from '../../hooks/useWakeWord';
 import { AudioVisualizer } from './AudioVisualizer';
 import { api } from '../../api/client';
 
@@ -135,9 +136,22 @@ export function JarvisVoicePanel() {
     voice.speak(id);
   };
 
+  // Always-on wake detection: clap or say "Vaayu" to start briefing
+  const { permission: wakePermission } = useWakeWord({
+    onWake: (source) => {
+      // Only trigger when idle — don't interrupt an ongoing briefing
+      if (voice.state === 'idle' || voice.state === 'error') {
+        setOpen(false);
+        voice.speak('market_summary');
+        console.debug(`[VAAYU] Wake triggered by ${source}`);
+      }
+    },
+  });
+
   const isSpeaking = voice.state === 'speaking';
   const isLoading  = voice.state === 'loading';
   const isActive   = isSpeaking || isLoading;
+  const micReady   = wakePermission === 'granted';
 
   return (
     <div style={{ position: 'fixed', bottom: 28, right: 28, zIndex: 1000 }}>
@@ -317,6 +331,60 @@ export function JarvisVoicePanel() {
       </AnimatePresence>
 
       {/* ── FAB button ── */}
+      <div style={{ position: 'relative', width: 60, height: 60 }}>
+
+        {/* Listening pulse ring — visible when mic is active and VAAYU is idle */}
+        {micReady && !isActive && (
+          <motion.div
+            style={{
+              position:     'absolute',
+              inset:        -5,
+              borderRadius: '50%',
+              border:       '1px solid rgba(0,229,255,0.3)',
+              pointerEvents: 'none',
+            }}
+            animate={{ scale: [1, 1.22, 1], opacity: [0.5, 0.05, 0.5] }}
+            transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        )}
+
+        {/* Tiny mic-status dot (top-right of FAB) */}
+        {wakePermission !== 'pending' && (
+          <div style={{
+            position:     'absolute',
+            top:          2,
+            right:        2,
+            width:        8,
+            height:       8,
+            borderRadius: '50%',
+            background:   micReady ? '#4ade80' : '#6b7280',
+            border:       '1.5px solid rgba(2,4,18,0.9)',
+            zIndex:       2,
+            boxShadow:    micReady ? '0 0 5px rgba(74,222,128,0.6)' : 'none',
+          }} />
+        )}
+
+        {/* Mic denied hint */}
+        {wakePermission === 'denied' && !open && !isActive && (
+          <div style={{
+            position:     'absolute',
+            bottom:       68,
+            right:        0,
+            background:   'rgba(2,4,18,0.95)',
+            border:       '1px solid rgba(248,113,113,0.25)',
+            borderRadius: 8,
+            padding:      '6px 10px',
+            whiteSpace:   'nowrap',
+            fontSize:     9,
+            fontFamily:   'monospace',
+            color:        'rgba(248,113,113,0.8)',
+            letterSpacing: '0.08em',
+            pointerEvents: 'none',
+          }}>
+            Allow mic for wake word
+          </div>
+        )}
+
       <motion.button
         onClick={() => {
           if (isActive) { voice.stop(); } else { setOpen(o => !o); }
@@ -335,7 +403,15 @@ export function JarvisVoicePanel() {
               ? { duration: 2, repeat: Infinity, ease: 'linear' }
               : {}
         }
-        title={isActive ? 'Stop VAAYU' : open ? 'Close' : 'Ask VAAYU'}
+        title={
+          isActive
+            ? 'Stop VAAYU'
+            : micReady
+              ? 'Ask VAAYU (or clap / say "Vaayu")'
+              : open
+                ? 'Close'
+                : 'Ask VAAYU'
+        }
         style={{
           width:        60,
           height:       60,
@@ -352,6 +428,7 @@ export function JarvisVoicePanel() {
           alignItems:   'center',
           justifyContent: 'center',
           outline:      'none',
+          position:     'relative',
         }}
       >
         {isActive ? (
@@ -373,6 +450,7 @@ export function JarvisVoicePanel() {
           </svg>
         )}
       </motion.button>
+      </div>  {/* end FAB wrapper */}
     </div>
   );
 }
