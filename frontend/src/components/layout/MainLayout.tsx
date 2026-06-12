@@ -2,6 +2,7 @@ import React, { ReactNode } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ParticleCanvas } from '../ui/ParticleCanvas';
+import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -23,6 +24,8 @@ export function MainLayout({ children, activeView, onNavigate, onLogout }: MainL
           </main>
         </div>
       </div>
+      {/* JARVIS voice panel — fixed bottom-right, available on all pages */}
+      <JarvisVoicePanel />
     </div>
   );
 }

@@ -156,6 +156,13 @@ export const stocksApi = {
   }>('/api/stocks/sync-from-broker', {}),
 };
 
+// JARVIS Voice / Briefing endpoints
+export const jarvisApi = {
+  getTopics: () => api.get<{ id: string; label: string; icon: string; desc: string }[]>('/api/jarvis/topics'),
+  getConfig: () => api.get<{ claude_configured: boolean; elevenlabs_configured: boolean; voice_id: string }>('/api/jarvis/config'),
+  speak:     (topic: string) => api.post<{ script: string; audio: string | null }>('/api/jarvis/speak', { topic }, { timeout: 45000 }),
+};
+
 // NiftyBees ETF autopilot endpoints
 export const niftyBeesApi = {
   getStatus:    () => api.get<NiftyBeesStatus>('/api/niftybees/status'),

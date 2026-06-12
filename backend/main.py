@@ -29,6 +29,7 @@ from backend.api.routes import (
 from backend.api.routes import auth as auth_routes
 from backend.api.routes import sector_analysis
 from backend.api.routes import etf_holdings
+from backend.api.routes import jarvis_voice
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
@@ -745,6 +746,7 @@ app.include_router(stocks.router)
 app.include_router(niftybees.router)
 app.include_router(sector_analysis.router)
 app.include_router(etf_holdings.router)
+app.include_router(jarvis_voice.router)
 
 
 @app.get("/health")
