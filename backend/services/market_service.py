@@ -47,6 +47,7 @@ class MarketService:
         self._cached_ltp: float = 0.0
         self._cached_prev_close: float = 0.0
         self._cache_ts: Optional[datetime] = None
+        self._prev_close_date: Optional[object] = None  # date object — refresh once per day
 
     # ------------------------------------------------------------------
     # Helpers
@@ -107,75 +108,12 @@ class MarketService:
                 return self._default_market()
             self._cached_ltp = ltp
 
-            # Fetch previous day's close if cache is stale (>30 s)
-            if (
-                not self._cache_ts
-                or (datetime.now(_IST) - self._cache_ts).total_seconds() > 30
-            ):
-                now    = _now_ist()
-                f_date = (now - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
-                t_date = now.strftime("%Y-%m-%d %H:%M")
-                prev_close_found = False
+            # prev_close only changes once per day — re-fetch only on a new trading date.
+            today_ist = datetime.now(_IST).date()
+            if self._cached_prev_close <= 0 or self._prev_close_date != today_ist:
+                await self._refresh_prev_close(today_ist)
 
-                # Try Angel One first
-                try:
-                    hist = await self._run_sync(
-                        self.angel_client.get_historical_data,
-                        NIFTY_EXCHANGE, NIFTY_TOKEN, "ONE_DAY", f_date, t_date,
-                    )
-                    if hist is not None and not hist.empty and len(hist) >= 2:
-                        self._cached_prev_close = float(hist.iloc[-2]["close"])
-                        prev_close_found = True
-                    elif hist is not None and not hist.empty:
-                        self._cached_prev_close = float(hist.iloc[0]["open"])
-                        prev_close_found = True
-                except Exception as e:
-                    logger.warning(f"Angel One prev-close fetch failed: {e}")
-
-                # Fallback: Yahoo Finance ^NSEI daily (Angel One returns nothing for spot index)
-                if not prev_close_found:
-                    try:
-                        import yfinance as yf
-                        today_ist = datetime.now(_IST).date()
-
-                        def _yf_prev():
-                            df = yf.download(
-                                "^NSEI", period="5d", interval="1d",
-                                progress=False, auto_adjust=True,
-                            )
-                            if df.empty:
-                                return None
-                            closes = df["Close"].dropna()
-                            # Build a date → close map for all rows STRICTLY before today
-                            past: dict = {}
-                            for ts, val in closes.items():
-                                try:
-                                    d = ts.date() if hasattr(ts, "date") else ts
-                                    if d < today_ist:
-                                        past[d] = float(val)
-                                except Exception:
-                                    pass
-                            if past:
-                                # Most recent trading day before today
-                                return past[max(past.keys())]
-                            # Fallback: if no row is before today (e.g., weekend edge case)
-                            # just use the last row as an approximation
-                            return float(closes.iloc[-1])
-
-                        prev_close_val = await self._run_sync(_yf_prev)
-                        if prev_close_val and prev_close_val > 0:
-                            self._cached_prev_close = float(prev_close_val)
-                            logger.debug(
-                                f"YFinance prev close: {self._cached_prev_close:.2f} "
-                                f"(today_ist={today_ist})"
-                            )
-                    except Exception as yf_err:
-                        logger.warning(f"YFinance prev-close fallback failed: {yf_err}")
-
-
-                self._cache_ts = datetime.now(_IST)
-
-            prev = self._cached_prev_close if self._cached_prev_close > 0 else ltp
+            prev       = self._cached_prev_close if self._cached_prev_close > 0 else ltp
             change     = ltp - prev
             change_pct = (change / prev * 100) if prev > 0 else 0.0
 
@@ -191,6 +129,96 @@ class MarketService:
         except Exception as e:
             logger.error(f"get_current_market_data error: {e}")
             return self._default_market()
+
+    async def _refresh_prev_close(self, today_ist) -> None:
+        """Fetch the most recent completed daily close strictly before today_ist.
+
+        Bug history:
+          • Angel One ONE_DAY returns today's live candle as last row — iloc[-2]
+            was chosen as "previous close" but could still be wrong if only 1 row
+            is returned (then iloc[0]["open"] = today's open was used instead).
+          • yfinance daily fallback used iloc[-1] when no prior-day row was found,
+            which could be today's in-progress candle.
+        Both bugs are fixed by explicit date-based filtering.
+        """
+        now    = _now_ist()
+        # Request up to yesterday so Angel One doesn't include today's live candle
+        t_date = (now - timedelta(days=1)).strftime("%Y-%m-%d 23:59")
+        f_date = (now - timedelta(days=7)).strftime("%Y-%m-%d 09:15")
+        found  = False
+
+        # ── 1. Angel One ONE_DAY ──────────────────────────────────────────
+        try:
+            hist = await self._run_sync(
+                self.angel_client.get_historical_data,
+                NIFTY_EXCHANGE, NIFTY_TOKEN, "ONE_DAY", f_date, t_date,
+            )
+            if hist is not None and not hist.empty:
+                # Extra safety: filter out any row whose date >= today (in case
+                # Angel One still returns today's partial candle despite t_date)
+                if "timestamp" in hist.columns:
+                    hist = hist.copy()
+                    hist["_d"] = pd.to_datetime(hist["timestamp"]).dt.date
+                    hist = hist[hist["_d"] < today_ist]
+                if not hist.empty:
+                    prev_val = float(hist.iloc[-1]["close"])
+                    if prev_val > 0:
+                        self._cached_prev_close = prev_val
+                        self._prev_close_date   = today_ist
+                        logger.info(
+                            f"[PrevClose] Angel One: {prev_val:.2f} "
+                            f"(date={hist.iloc[-1].get('_d', '?')})"
+                        )
+                        found = True
+        except Exception as exc:
+            logger.warning(f"[PrevClose] Angel One fetch failed: {exc}")
+
+        if found:
+            return
+
+        # ── 2. Yahoo Finance ^NSEI daily fallback ─────────────────────────
+        try:
+            import yfinance as yf
+
+            def _yf_prev():
+                df = yf.download(
+                    "^NSEI", period="7d", interval="1d",
+                    progress=False, auto_adjust=True,
+                )
+                if df.empty:
+                    return None
+                closes = df["Close"].dropna()
+                past: dict = {}
+                for ts, val in closes.items():
+                    try:
+                        # Normalise timezone-aware timestamps to IST date
+                        if hasattr(ts, "tzinfo") and ts.tzinfo is not None:
+                            import pytz as _pytz
+                            d = ts.astimezone(_pytz.timezone("Asia/Kolkata")).date()
+                        elif hasattr(ts, "date"):
+                            d = ts.date()
+                        else:
+                            d = ts
+                        if d < today_ist:
+                            past[d] = float(val)
+                    except Exception:
+                        pass
+                if past:
+                    return past[max(past.keys())]
+                # Do NOT fall back to iloc[-1] — it might be today's live candle.
+                return None
+
+            prev_val = await self._run_sync(_yf_prev)
+            if prev_val and prev_val > 0:
+                self._cached_prev_close = float(prev_val)
+                self._prev_close_date   = today_ist
+                logger.info(f"[PrevClose] Yahoo Finance: {prev_val:.2f}")
+                found = True
+        except Exception as exc:
+            logger.warning(f"[PrevClose] Yahoo Finance fallback failed: {exc}")
+
+        if not found:
+            logger.warning("[PrevClose] Could not determine previous close — change will show 0")
 
     # ------------------------------------------------------------------
     # Options chain
