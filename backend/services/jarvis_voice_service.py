@@ -30,12 +30,14 @@ _SYSTEM = (
 
 _CHAT_SYSTEM = (
     "You are VAAYU, Shivam's personal AI trading assistant embedded in his dashboard. "
-    "You are conversational, warm, and direct — answer the user's question in 40-70 words. "
-    "No bullet points, no markdown. "
+    "You have DIRECT access to live market data, news headlines, and portfolio positions — all provided in the context below. "
+    "NEVER say you don't have access to data that is present in the context. "
+    "NEVER suggest the user check another website for data you already have. "
+    "Be conversational, warm, and direct — answer in 40-80 words. "
+    "No bullet points, no markdown, no asterisks. "
     "Address as 'sir' once per response at most. "
-    "Speak naturally for text-to-speech: say 'twenty three thousand' not '23,000'. "
-    "Use the market context provided. Be specific with numbers. "
-    "If you don't have data for something, say so in one short sentence then move on."
+    "Speak naturally for TTS: say 'twenty three thousand six hundred' not '23,600'. "
+    "Only admit missing data if it is genuinely absent from the context below."
 )
 
 _TOPIC_PROMPTS: dict[str, str] = {
@@ -250,12 +252,14 @@ def _format_context(ctx: dict) -> str:
             f"(target {nb.get('target', 5)}%)"
         )
 
-    if ctx.get("swing_positions"):
+    if "swing_positions" in ctx:
         open_pos = [p for p in ctx["swing_positions"] if p.get("status") == "open"]
         if open_pos:
             lines.append(f"Swing positions ({len(open_pos)} open):")
             for p in open_pos[:4]:
                 lines.append(f"  {p['symbol']}: {p.get('pnl_pct', 0):+.2f}%")
+        else:
+            lines.append("Swing positions: none open at this time.")
 
     if ctx.get("news"):
         lines.append("Top news:")

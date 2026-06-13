@@ -165,15 +165,21 @@ async def _build_context(topic: str) -> dict:
         except Exception:
             pass
 
-    # News
+    # News — use in-memory cache (populated by _morning_news_loop on startup)
+    # so chat requests are instant instead of re-fetching 6 RSS feeds each time
     if topic in ("news_brief", "full_briefing"):
         try:
-            from backend.dependencies import get_market_service
-            mkt = get_market_service()
-            if mkt:
-                news = await _safe(mkt.get_news_summary(max_items=7))
-                if news:
-                    ctx["news"] = news
+            from backend.api.routes.market_data import _cached_news
+            if _cached_news:
+                ctx["news"] = _cached_news[:8]
+            else:
+                # Cache empty (e.g. first request before loop ran) — fetch once
+                from backend.dependencies import get_market_service
+                mkt = get_market_service()
+                if mkt:
+                    news = await _safe(mkt.get_news_summary(max_items=8))
+                    if news:
+                        ctx["news"] = news
         except Exception:
             pass
 
@@ -195,7 +201,7 @@ async def _build_context(topic: str) -> dict:
         except Exception:
             pass
 
-    # Swing positions
+    # Swing positions — always set key so formatter can say "none open" explicitly
     if topic in ("my_positions", "full_briefing"):
         try:
             from backend.api.routes.stocks import _get_svc
@@ -206,7 +212,9 @@ async def _build_context(topic: str) -> dict:
                     {"symbol": p.symbol, "pnl_pct": getattr(p, "pnl_pct", 0), "status": p.status}
                     for p in all_pos
                 ]
+            else:
+                ctx["swing_positions"] = []
         except Exception:
-            pass
+            ctx["swing_positions"] = []
 
     return ctx
