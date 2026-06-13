@@ -326,7 +326,7 @@ export function DashboardView() {
       .then(r => {
         const sectors: GlobeSector[] = (r.data?.sectors ?? [])
           .slice(0, 5)
-          .map(s => ({ name: s.name, score: s.total_score / 100 }));
+          .map(s => ({ name: s.name, score: s.total_score }));  // total_score is already 0–1
         if (sectors.length > 0) setGlobeSectors(sectors);
       })
       .catch(() => {});

@@ -220,7 +220,7 @@ export function VaayuGlobe({
           const [px, py] = project(lat, lon);
           const col      = SECTOR_COLORS[i];
           const barW     = 28;
-          const label    = sector.name.length > 9 ? sector.name.slice(0, 9).toUpperCase() : sector.name.toUpperCase();
+          const label    = sector.name.split(' & ')[0].toUpperCase().slice(0, 8);
           return (
             <g key={`s${i}`} filter="url(#dot-glow)">
               <circle cx={px} cy={py} r={4.5} fill={col} opacity={0.9} />
