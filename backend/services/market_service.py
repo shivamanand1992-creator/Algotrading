@@ -80,18 +80,20 @@ class MarketService:
             except Exception as e:
                 logger.warning(f"Angel One get_ltp failed ({e}), trying Yahoo Finance…")
 
-        # Yahoo Finance fallback
+        # Yahoo Finance fallback — use daily close so LTP matches the same
+        # source as _refresh_prev_close (avoids minute-vs-daily mismatch on
+        # weekends where the last minute bar ≠ official daily close).
         try:
             import yfinance as yf
             def _yf_ltp():
                 t = yf.Ticker("^NSEI")
-                hist = t.history(period="2d", interval="1m")
+                hist = t.history(period="5d", interval="1d")
                 if hist is not None and not hist.empty:
                     return float(hist["Close"].dropna().iloc[-1])
                 return 0.0
             ltp = await self._run_sync(_yf_ltp)
             if ltp > 0:
-                logger.debug(f"Yahoo Finance LTP fallback: {ltp:.2f}")
+                logger.debug(f"Yahoo Finance LTP fallback (daily close): {ltp:.2f}")
                 return ltp
         except Exception as yf_err:
             logger.warning(f"Yahoo Finance LTP fallback failed: {yf_err}")

@@ -78,6 +78,15 @@ const SECTOR_COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#fb923c'];
 const HOLDING_LAT =  48;
 const HOLDING_LON = -10;
 
+// Shown when no live scan data is available yet
+const FALLBACK_SECTORS: GlobeSector[] = [
+  { name: 'IT',      score: 0.72 },
+  { name: 'BANKING', score: 0.65 },
+  { name: 'ENERGY',  score: 0.58 },
+  { name: 'FMCG',    score: 0.52 },
+  { name: 'PHARMA',  score: 0.47 },
+];
+
 export function VaayuGlobe({
   ltp = 0, change = 0, changePct = 0, isUp = true, size = 400,
   sectors = [], topHolding = null,
@@ -92,8 +101,9 @@ export function VaayuGlobe({
   const globeR      = R * (size / 400);
   const stateColor  = isSpeaking ? '#00e5ff' : '#a855f7';
 
-  const niftyPt   = project(18.9, 72.8);
-  const holdingPt = isFront(HOLDING_LAT, HOLDING_LON) ? project(HOLDING_LAT, HOLDING_LON) : null;
+  const niftyPt      = project(18.9, 72.8);
+  const holdingPt    = isFront(HOLDING_LAT, HOLDING_LON) ? project(HOLDING_LAT, HOLDING_LON) : null;
+  const displaySectors = sectors.length > 0 ? sectors : FALLBACK_SECTORS;
 
   return (
     <motion.div
@@ -205,7 +215,7 @@ export function VaayuGlobe({
         </g>
 
         {/* ── Sector markers ─────────────────────────────────────── */}
-        {sectors.slice(0, 5).map((sector, i) => {
+        {displaySectors.slice(0, 5).map((sector, i) => {
           const [lat, lon] = SECTOR_ORBITALS[i];
           if (!isFront(lat, lon)) return null;
           const [px, py] = project(lat, lon);
