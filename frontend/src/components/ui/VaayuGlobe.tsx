@@ -101,7 +101,6 @@ export function VaayuGlobe({
   const globeR      = R * (size / 400);
   const stateColor  = isSpeaking ? '#00e5ff' : '#a855f7';
 
-  const niftyPt      = project(18.9, 72.8);
   const holdingPt    = isFront(HOLDING_LAT, HOLDING_LON) ? project(HOLDING_LAT, HOLDING_LON) : null;
   const displaySectors = sectors.length > 0 ? sectors : FALLBACK_SECTORS;
 
@@ -268,22 +267,6 @@ export function VaayuGlobe({
             </text>
           </g>
         )}
-
-        {/* ── NIFTY dot (always shown) ───────────────────────────── */}
-        <g filter="url(#dot-glow)">
-          <circle cx={niftyPt[0]} cy={niftyPt[1]} r={5.5} fill="#00e5ff" opacity={0.9} />
-          <circle cx={niftyPt[0]} cy={niftyPt[1]} r={11}  fill="none" stroke="#00e5ff" strokeWidth={1.1} opacity={0.4} className="radar-ring" />
-          <text x={niftyPt[0] + 12} y={niftyPt[1] + 1}
-            style={{ fontSize: 8.5, fontFamily: 'monospace', fill: '#00e5ff', opacity: 0.95, letterSpacing: 0.5 }}>
-            NIFTY 50
-          </text>
-          {ltp > 0 && (
-            <text x={niftyPt[0] + 12} y={niftyPt[1] + 12}
-              style={{ fontSize: 7.5, fontFamily: 'monospace', fill: isUp ? '#4ade80' : '#f87171', fontWeight: 700 }}>
-              {isUp ? '+' : ''}{changePct.toFixed(2)}%
-            </text>
-          )}
-        </g>
 
         {/* HUD tick ring */}
         <g opacity={0.6}>

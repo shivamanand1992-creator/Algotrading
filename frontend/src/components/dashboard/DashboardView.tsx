@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { marketApi, niftyBeesApi, stocksApi, systemApi } from '../../api/client';
+import { marketApi, niftyBeesApi, stocksApi, systemApi, api } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
 import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } from '../../types/api';
 import { OrderFlowVectors } from '../ui/OrderFlowVectors';
@@ -320,26 +320,14 @@ export function DashboardView() {
     return () => clearInterval(iv);
   }, []);
 
-  // ── Sector confidence from cached signals (once on mount) ────────
+  // ── Globe sectors from Sector Rotation analysis (same source as Sectors page) ──
   useEffect(() => {
-    stocksApi.getSignals()
+    api.get<{ sectors: Array<{ name: string; total_score: number }> }>('/api/sectors/analysis')
       .then(r => {
-        const signals = (Array.isArray(r.data) ? r.data : []) as Array<{
-          sector: string; confidence: number; action: string;
-        }>;
-        const map = new Map<string, number[]>();
-        signals.forEach(s => {
-          if (s.action === 'BUY') {
-            const arr = map.get(s.sector) ?? [];
-            arr.push(s.confidence);
-            map.set(s.sector, arr);
-          }
-        });
-        const sectors: GlobeSector[] = Array.from(map.entries())
-          .map(([name, scores]) => ({ name, score: scores.reduce((a, b) => a + b, 0) / scores.length }))
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 5);
-        setGlobeSectors(sectors);
+        const sectors: GlobeSector[] = (r.data?.sectors ?? [])
+          .slice(0, 5)
+          .map(s => ({ name: s.name, score: s.total_score / 100 }));
+        if (sectors.length > 0) setGlobeSectors(sectors);
       })
       .catch(() => {});
   }, []);
