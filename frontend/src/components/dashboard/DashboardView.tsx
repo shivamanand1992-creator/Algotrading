@@ -7,7 +7,7 @@ import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } 
 import { OrderFlowVectors } from '../ui/OrderFlowVectors';
 import { ExecutionLogFeed, type LogEntry } from '../ui/ExecutionLogFeed';
 import { useTilt } from '../../hooks/useTilt';
-import { VaayuGlobe } from '../ui/VaayuGlobe';
+import { VaayuGlobe, type GlobeSector, type GlobeHolding } from '../ui/VaayuGlobe';
 
 const staggerContainer: Variants = {
   hidden: {},
@@ -259,6 +259,7 @@ export function DashboardView() {
   const [lastUpdated, setLastUpdated]       = useState<Date | null>(null);
   const [logEntries, setLogEntries]         = useState<LogEntry[]>([]);
   const [ltpFlashDir, setLtpFlashDir]       = useState<'up' | 'down' | null>(null);
+  const [globeSectors, setGlobeSectors]     = useState<GlobeSector[]>([]);
   const prevLtp  = useRef<number>(0);
   const logCounter = useRef<number>(0);
 
@@ -317,6 +318,30 @@ export function DashboardView() {
     f();
     const iv = setInterval(f, 30000);
     return () => clearInterval(iv);
+  }, []);
+
+  // ── Sector confidence from cached signals (once on mount) ────────
+  useEffect(() => {
+    stocksApi.getSignals()
+      .then(r => {
+        const signals = (Array.isArray(r.data) ? r.data : []) as Array<{
+          sector: string; confidence: number; action: string;
+        }>;
+        const map = new Map<string, number[]>();
+        signals.forEach(s => {
+          if (s.action === 'BUY') {
+            const arr = map.get(s.sector) ?? [];
+            arr.push(s.confidence);
+            map.set(s.sector, arr);
+          }
+        });
+        const sectors: GlobeSector[] = Array.from(map.entries())
+          .map(([name, scores]) => ({ name, score: scores.reduce((a, b) => a + b, 0) / scores.length }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+        setGlobeSectors(sectors);
+      })
+      .catch(() => {});
   }, []);
 
   // ── Balance (2 min) ──────────────────────────────────────────────
@@ -402,6 +427,12 @@ export function DashboardView() {
   const nbProgress  = Math.min((nbPnlPct / nbTarget) * 100, 100);
 
   const openSwings    = swingPositions.filter(p => p.status === 'open');
+  const topSwing      = openSwings.length > 0
+    ? openSwings.reduce((best, p) => (p.pnl_pct ?? 0) > (best.pnl_pct ?? 0) ? p : best)
+    : null;
+  const globeHolding: GlobeHolding | null = topSwing
+    ? { symbol: topSwing.symbol, pnlPct: topSwing.pnl_pct ?? 0 }
+    : null;
   const swingDeployed = openSwings.reduce((s, p) => s + (p.entry_price * p.qty), 0);
   const swingPnl      = openSwings.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0);
   const swingPnlPct   = openSwings.length > 0
@@ -521,6 +552,8 @@ export function DashboardView() {
                 changePct={changePct}
                 isUp={isUp}
                 size={460}
+                sectors={globeSectors}
+                topHolding={globeHolding}
               />
             </div>
 

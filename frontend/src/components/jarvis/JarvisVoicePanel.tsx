@@ -50,46 +50,76 @@ function VaayuDot({ speaking }: { speaking: boolean }) {
 
 // ── Chat bubble ───────────────────────────────────────────────────────────
 
-function Bubble({ msg, speaking }: { msg: Message; speaking: boolean }) {
-  const isVaayu = msg.role === 'vaayu';
+function Bubble({ msg, isLatest, isSpeaking }: {
+  msg: Message; isLatest: boolean; isSpeaking: boolean;
+}) {
+  const isVaayu    = msg.role === 'vaayu';
+  const shouldType = isVaayu && isLatest && msg.text !== '…' && msg.text.length > 0;
+
+  const [displayed, setDisplayed] = useState<string>(shouldType ? '' : msg.text);
+  const [typing,    setTyping]    = useState(shouldType);
+
+  useEffect(() => {
+    if (!isVaayu || !shouldType) { setDisplayed(msg.text); setTyping(false); return; }
+    setDisplayed('');
+    setTyping(true);
+    let i = 0;
+    const total = msg.text.length;
+    const speed = Math.max(8, Math.min(22, 2500 / total));
+    const iv = setInterval(() => {
+      i++;
+      setDisplayed(msg.text.slice(0, i));
+      if (i >= total) { clearInterval(iv); setTyping(false); }
+    }, speed);
+    return () => clearInterval(iv);
+  }, [msg.text, shouldType, isVaayu]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
+      transition={{ duration: 0.22 }}
       style={{
         display: 'flex',
         flexDirection: isVaayu ? 'row' : 'row-reverse',
         alignItems: 'flex-start',
-        gap: 8,
-        marginBottom: 10,
+        gap: 8, marginBottom: 12,
       }}
     >
-      {isVaayu && <VaayuDot speaking={speaking && msg === undefined} />}
+      {isVaayu && <VaayuDot speaking={isSpeaking} />}
       <div style={{
-        maxWidth: '84%',
-        padding: '9px 13px',
-        borderRadius: isVaayu ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
-        background: isVaayu
-          ? 'rgba(0,229,255,0.05)'
-          : 'rgba(124,58,237,0.12)',
-        border: `1px solid ${isVaayu ? 'rgba(0,229,255,0.12)' : 'rgba(124,58,237,0.25)'}`,
+        maxWidth: '86%',
+        padding: '10px 14px',
+        borderRadius: isVaayu ? '4px 14px 14px 14px' : '14px 4px 14px 14px',
+        background: isVaayu ? 'rgba(0,229,255,0.05)' : 'rgba(124,58,237,0.12)',
+        border: `1px solid ${isVaayu ? 'rgba(0,229,255,0.13)' : 'rgba(124,58,237,0.26)'}`,
+        boxShadow: isVaayu ? '0 2px 12px rgba(0,229,255,0.04)' : 'none',
       }}>
         <div style={{
-          fontSize: 6.5, color: isVaayu ? 'rgba(0,229,255,0.45)' : 'rgba(160,120,255,0.55)',
-          fontFamily: 'monospace', letterSpacing: '0.15em', marginBottom: 4,
+          fontSize: 7, letterSpacing: '0.14em', marginBottom: 5,
           display: 'flex', justifyContent: 'space-between', gap: 16,
+          color: isVaayu ? 'rgba(0,229,255,0.45)' : 'rgba(160,120,255,0.55)',
+          fontFamily: 'monospace',
         }}>
           <span>{isVaayu ? 'VAAYU' : 'YOU'}</span>
           <span>{msg.time}</span>
         </div>
         <p style={{
-          fontSize: 11.5, lineHeight: 1.55,
-          color: isVaayu ? 'rgba(200,225,240,0.9)' : 'rgba(200,185,255,0.9)',
-          fontFamily: "'Courier New', monospace",
+          fontSize: 12.5, lineHeight: 1.65,
+          color: isVaayu ? 'rgba(210,232,248,0.92)' : 'rgba(210,195,255,0.92)',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
           margin: 0, whiteSpace: 'pre-wrap',
         }}>
-          {msg.text}
+          {displayed}
+          {typing && (
+            <motion.span
+              animate={{ opacity: [1, 0, 1] }}
+              transition={{ duration: 0.85, repeat: Infinity, ease: 'linear' }}
+              style={{ color: '#00e5ff', marginLeft: 1 }}
+            >
+              ▋
+            </motion.span>
+          )}
         </p>
       </div>
     </motion.div>
@@ -252,6 +282,7 @@ export function JarvisVoicePanel() {
   const [listenTimer,  setListenTimer]  = useState(1.0);  // 0→1 countdown for arc
   const [topics,       setTopics]       = useState<Topic[]>(FALLBACK_TOPICS);
   const [showTopics,   setShowTopics]   = useState(false);
+  const [textInput,    setTextInput]    = useState('');
 
   const voice          = useJarvisVoice();
   const scrollRef      = useRef<HTMLDivElement>(null);
@@ -272,7 +303,7 @@ export function JarvisVoicePanel() {
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [messages, transcript]);
 
@@ -533,7 +564,7 @@ export function JarvisVoicePanel() {
             exit={{    opacity: 0, y: 24, scale: 0.93 }}
             transition={{ type: 'spring', stiffness: 320, damping: 28 }}
             style={{
-              position: 'absolute', bottom: 72, right: 0, width: 360,
+              position: 'absolute', bottom: 72, right: 0, width: 400,
               background: 'rgba(2,4,18,0.97)',
               border: '1px solid rgba(0,229,255,0.2)',
               borderRadius: 18,
@@ -638,11 +669,15 @@ export function JarvisVoicePanel() {
               ref={scrollRef}
               style={{
                 flex: 1, overflowY: 'auto', padding: '14px 14px 6px',
-                maxHeight: 320, minHeight: 120,
+                maxHeight: 360, minHeight: 120,
               }}
             >
-              {messages.map(msg => (
-                <Bubble key={msg.id} msg={msg} speaking={isSpeaking && msg.id === messages[messages.length - 1]?.id} />
+              {messages.map((msg, i) => (
+                <Bubble
+                  key={msg.id} msg={msg}
+                  isLatest={i === messages.length - 1}
+                  isSpeaking={isSpeaking && i === messages.length - 1}
+                />
               ))}
             </div>
 
@@ -690,6 +725,57 @@ export function JarvisVoicePanel() {
                   Conversation ended — clap or click ◈ to restart
                 </p>
               )}
+
+              {/* ── Text input (always shown while conv is open) ── */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <input
+                  value={textInput}
+                  onChange={e => setTextInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey && textInput.trim()) {
+                      e.preventDefault();
+                      handleUserQuestion(textInput.trim());
+                      setTextInput('');
+                    }
+                  }}
+                  placeholder={isListening ? 'Listening… (or type here)' : 'Type a message…'}
+                  disabled={convState === 'loading' || convState === 'processing'}
+                  style={{
+                    flex: 1,
+                    background: 'rgba(0,229,255,0.03)',
+                    border: '1px solid rgba(0,229,255,0.13)',
+                    borderRadius: 10,
+                    padding: '8px 13px',
+                    fontSize: 12,
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                    color: 'rgba(200,225,240,0.92)',
+                    outline: 'none',
+                    transition: 'border-color 0.15s',
+                    opacity: (convState === 'loading' || convState === 'processing') ? 0.45 : 1,
+                  }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,229,255,0.35)'; }}
+                  onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(0,229,255,0.13)'; }}
+                />
+                <button
+                  onClick={() => {
+                    if (textInput.trim()) { handleUserQuestion(textInput.trim()); setTextInput(''); }
+                  }}
+                  disabled={!textInput.trim() || convState === 'loading' || convState === 'processing'}
+                  style={{
+                    background: textInput.trim() ? 'rgba(0,229,255,0.12)' : 'rgba(0,229,255,0.03)',
+                    border: '1px solid rgba(0,229,255,0.2)',
+                    borderRadius: 10,
+                    width: 38, flexShrink: 0,
+                    color: textInput.trim() ? '#00e5ff' : 'rgba(0,229,255,0.25)',
+                    cursor: textInput.trim() ? 'pointer' : 'default',
+                    fontSize: 16, fontWeight: 700,
+                    transition: 'all 0.15s',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  ↑
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
