@@ -288,10 +288,26 @@ def _format_context(ctx: dict) -> str:
 
     if ctx.get("balance"):
         bal = ctx["balance"]
-        net = bal.get("net", 0)
-        avail = bal.get("available", bal.get("availablecash", 0))
-        if net or avail:
-            lines.append(f"Account: Net ₹{net:,.0f}  Available ₹{avail:,.0f}")
+        try:
+            net   = float(bal.get("net") or 0)
+            avail = float(bal.get("available") or bal.get("availablecash") or 0)
+            if net or avail:
+                lines.append(f"Account: Net ₹{net:,.0f}  Available ₹{avail:,.0f}")
+        except (TypeError, ValueError):
+            pass
+
+    if ctx.get("holdings"):
+        hlist = ctx["holdings"]
+        lines.append(f"Broker holdings ({len(hlist)} positions):")
+        for h in hlist[:15]:
+            sym     = h.get("symbol", "?")
+            qty     = h.get("qty", 0)
+            avg     = h.get("avg_price", 0)
+            pnl_pct = h.get("pnl_pct", 0)
+            try:
+                lines.append(f"  {sym}: {qty} units avg ₹{float(avg):.0f}  ({float(pnl_pct):+.1f}%)")
+            except (TypeError, ValueError):
+                lines.append(f"  {sym}: {qty} units")
 
     if ctx.get("sector_top_picks"):
         picks = ctx["sector_top_picks"]

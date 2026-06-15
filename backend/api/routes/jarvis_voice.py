@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 from typing import List, Optional
+
+# Module-level cache for broker holdings — refreshed every 5 minutes
+_holdings_cache: list = []
+_holdings_cache_time: float = 0.0
+_HOLDINGS_TTL = 300.0
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -242,6 +248,48 @@ async def _build_context(topic: str) -> dict:
         if _cached_analysis:
             top = _cached_analysis.get("top_picks", [])
             ctx["sector_top_picks"] = top[:3] if top else []
+    except Exception:
+        pass
+
+    # All broker holdings — cached 5 min to avoid hammering Angel One
+    global _holdings_cache, _holdings_cache_time
+    try:
+        now = time.time()
+        if _holdings_cache and (now - _holdings_cache_time) < _HOLDINGS_TTL:
+            ctx["holdings"] = _holdings_cache
+        else:
+            # Try ETF service cached list first (always fast, no broker call)
+            from backend.services.etf_holdings_service import get_etf_holdings_service
+            etf_svc = get_etf_holdings_service()
+            etf_cached = etf_svc.get_cached()
+
+            # Fetch all raw holdings from broker (equities + ETFs)
+            from backend.dependencies import get_angel_client
+            ac = get_angel_client()
+            all_holdings: list = []
+            if ac:
+                raw = await _safe(asyncio.get_event_loop().run_in_executor(None, ac.get_holdings))
+                if raw and isinstance(raw, list):
+                    for r in raw:
+                        qty = int(r.get("quantity") or 0)
+                        if qty <= 0:
+                            continue
+                        sym = (r.get("tradingsymbol") or "").replace("-EQ", "").upper()
+                        avg = float(r.get("averageprice") or 0)
+                        ltp = float(r.get("ltp") or r.get("close") or avg)
+                        pnl_pct = ((ltp - avg) / avg * 100) if avg > 0 else 0.0
+                        all_holdings.append({
+                            "symbol":    sym,
+                            "qty":       qty,
+                            "avg_price": avg,
+                            "pnl_pct":   round(pnl_pct, 2),
+                        })
+
+            final = all_holdings if all_holdings else etf_cached
+            if final:
+                _holdings_cache      = final
+                _holdings_cache_time = now
+                ctx["holdings"]      = final
     except Exception:
         pass
 
