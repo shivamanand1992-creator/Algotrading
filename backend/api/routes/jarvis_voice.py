@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -35,9 +35,14 @@ class SpeakRequest(BaseModel):
     topic: str = "market_summary"
 
 
+class ConversationTurn(BaseModel):
+    role: str     # "user" or "assistant"
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
     context_topic: str = "full_briefing"
+    history: List[ConversationTurn] = []
 
 
 @router.get("/topics")
@@ -79,12 +84,11 @@ async def jarvis_chat(
     body: ChatRequest,
     _: str = Depends(get_current_user),
 ):
-    """Conversational follow-up — user asks a question, VAAYU responds."""
     try:
         context = await _build_context(body.context_topic)
         svc     = get_jarvis_voice_service()
-        audio_bytes, script = await svc.generate_chat_response(body.message, context)
-
+        history = [{"role": t.role, "content": t.content} for t in body.history]
+        audio_bytes, script = await svc.generate_chat_response(body.message, context, history)
         return {
             "script": script,
             "audio":  base64.b64encode(audio_bytes).decode() if audio_bytes else None,
@@ -216,5 +220,29 @@ async def _build_context(topic: str) -> dict:
                 ctx["swing_positions"] = []
         except Exception:
             ctx["swing_positions"] = []
+
+    # Account balance
+    try:
+        from backend.dependencies import get_angel_client
+        ac = get_angel_client()
+        if ac:
+            funds = await _safe(asyncio.get_event_loop().run_in_executor(None, ac.get_funds))
+            if funds and isinstance(funds, dict):
+                ctx["balance"] = {
+                    "net": funds.get("net", 0),
+                    "available": funds.get("availablecash", funds.get("available", 0)),
+                }
+    except Exception:
+        pass
+
+    # Sector rotation top picks (cached — instant)
+    try:
+        from backend.services.sector_analysis_service import get_cached_analysis
+        _cached_analysis = get_cached_analysis()
+        if _cached_analysis:
+            top = _cached_analysis.get("top_picks", [])
+            ctx["sector_top_picks"] = top[:3] if top else []
+    except Exception:
+        pass
 
     return ctx

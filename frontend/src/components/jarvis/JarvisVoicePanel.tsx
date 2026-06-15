@@ -431,7 +431,7 @@ export function JarvisVoicePanel() {
     ) {
       addMessage('user', question);
       setConvState('loading');
-      voice.chat("The user wants to end the conversation. Say a brief warm goodbye.", () => {
+      voice.chat("The user wants to end the conversation. Say a brief warm goodbye.", [], () => {
         setConvState('closed');
         setConvOpen(false);
         setMessages([]);
@@ -446,13 +446,22 @@ export function JarvisVoicePanel() {
     setMessages(prev => [...prev, { id: placeholderId, role: 'vaayu', text: '…', time: now() }]);
     setConvState('processing');
 
-    voice.chat(question, () => {
+    // Build conversation history from existing messages (skip placeholder dots)
+    const history = messages
+      .filter(m => m.text !== '…')
+      .slice(-8)
+      .map(m => ({
+        role: m.role === 'vaayu' ? 'assistant' : 'user',
+        content: m.text,
+      }));
+
+    voice.chat(question, history, () => {
       // After VAAYU responds, listen for next question
       setTimeout(startListening, 600);
     });
 
     // Replace placeholder with actual script once available (watched via effect below)
-  }, [stopListening, addMessage, voice, startListening]);
+  }, [stopListening, addMessage, voice, startListening, messages]);
 
   // Replace placeholder "…" with actual script when it arrives
   useEffect(() => {

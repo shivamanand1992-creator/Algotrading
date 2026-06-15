@@ -29,15 +29,20 @@ _SYSTEM = (
 )
 
 _CHAT_SYSTEM = (
-    "You are VAAYU, Shivam's personal AI trading assistant embedded in his dashboard. "
-    "You have DIRECT access to live market data, news headlines, and portfolio positions — all provided in the context below. "
-    "NEVER say you don't have access to data that is present in the context. "
-    "NEVER suggest the user check another website for data you already have. "
-    "Be conversational, warm, and direct — answer in 40-80 words. "
-    "No bullet points, no markdown, no asterisks. "
-    "Address as 'sir' once per response at most. "
-    "Speak naturally for TTS: say 'twenty three thousand six hundred' not '23,600'. "
-    "Only admit missing data if it is genuinely absent from the context below."
+    "You are VAAYU, Shivam's personal Indian stock market intelligence assistant "
+    "embedded in his algotrading dashboard on NSE/BSE.\n\n"
+    "Your domain: Indian equity markets, Nifty 50, Bank Nifty, F&O, sector ETFs "
+    "(NiftyBees, BankBees, PharmaBeES, etc.), CNC delivery trades, swing trading.\n"
+    "Market hours: 9:15 AM – 3:30 PM IST. Always think in Indian market context.\n\n"
+    "You have LIVE access to the data block labelled [DASHBOARD DATA] below — "
+    "that IS your real-time feed. NEVER say you lack access to data that appears there.\n"
+    "NEVER suggest the user visit another website for data already in [DASHBOARD DATA].\n\n"
+    "Style rules:\n"
+    "• 40–80 words unless the user asks for detail\n"
+    "• No bullet points, no markdown, no asterisks\n"
+    "• Speak numbers in words for TTS: 'twenty-three thousand six hundred' not '23,600'\n"
+    "• Address as 'sir' at most once per response\n"
+    "• If data is genuinely absent from [DASHBOARD DATA], say so briefly and pivot to what you DO know"
 )
 
 _TOPIC_PROMPTS: dict[str, str] = {
@@ -97,11 +102,11 @@ class JarvisVoiceService:
     # ── Public: conversational response ──────────────────────────────────
 
     async def generate_chat_response(
-        self, message: str, context: dict
+        self, message: str, context: dict, history: list = []
     ) -> Tuple[Optional[bytes], str]:
         """Return (audio_bytes | None, script_text) for a conversational reply."""
         loop   = asyncio.get_event_loop()
-        script = await loop.run_in_executor(None, self._make_chat_script, message, context)
+        script = await loop.run_in_executor(None, self._make_chat_script, message, context, history)
 
         audio: Optional[bytes] = None
         if self._el_key:
@@ -112,7 +117,7 @@ class JarvisVoiceService:
 
         return audio, script
 
-    def _make_chat_script(self, message: str, context: dict) -> str:
+    def _make_chat_script(self, message: str, context: dict, history: list = []) -> str:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return "Ready to help, sir. Please configure the Anthropic API key for conversational responses."
@@ -120,15 +125,30 @@ class JarvisVoiceService:
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            prompt = (
-                f"Current market context:\n{_format_context(context)}\n\n"
-                f"User says: {message}"
+
+            # Context goes into system prompt so it's always fresh regardless of turn
+            system_with_ctx = (
+                _CHAT_SYSTEM
+                + "\n\n[DASHBOARD DATA]\n"
+                + _format_context(context)
             )
+
+            # Build multi-turn history (last 8 turns, skip placeholder dots)
+            turns = []
+            for turn in history[-8:]:
+                role = turn.get("role", "")
+                content = turn.get("content", "").strip()
+                if role in ("user", "assistant") and content and content != "…":
+                    turns.append({"role": role, "content": content})
+
+            # Current user message
+            turns.append({"role": "user", "content": message})
+
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=180,
-                system=_CHAT_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                system=system_with_ctx,
+                messages=turns,
             )
             return msg.content[0].text.strip()
         except Exception as exc:
@@ -265,6 +285,17 @@ def _format_context(ctx: dict) -> str:
         lines.append("Top news:")
         for item in ctx["news"][:5]:
             lines.append(f"  - {item.get('title', '')[:90]}")
+
+    if ctx.get("balance"):
+        bal = ctx["balance"]
+        net = bal.get("net", 0)
+        avail = bal.get("available", bal.get("availablecash", 0))
+        if net or avail:
+            lines.append(f"Account: Net ₹{net:,.0f}  Available ₹{avail:,.0f}")
+
+    if ctx.get("sector_top_picks"):
+        picks = ctx["sector_top_picks"]
+        lines.append(f"Sector rotation top picks: {', '.join(str(p) for p in picks)}")
 
     return "\n".join(lines) if lines else "No market data available."
 

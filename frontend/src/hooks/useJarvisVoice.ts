@@ -10,7 +10,7 @@ export interface JarvisVoiceState {
   error:    string;
   analyser: AnalyserNode | null;
   speak:    (topic: string, onEnd?: () => void) => Promise<void>;
-  chat:     (message: string, onEnd?: () => void) => Promise<void>;
+  chat:     (message: string, history?: {role: string; content: string}[], onEnd?: () => void) => Promise<void>;
   stop:     () => void;
 }
 
@@ -116,7 +116,11 @@ export function useJarvisVoice(): JarvisVoiceState {
     }
   }, [stop, _playResponse]);
 
-  const chat = useCallback(async (message: string, onEnd?: () => void) => {
+  const chat = useCallback(async (
+    message: string,
+    history: {role: string; content: string}[] = [],
+    onEnd?: () => void,
+  ) => {
     stop();
     setState('loading');
     setScript('');
@@ -124,7 +128,7 @@ export function useJarvisVoice(): JarvisVoiceState {
 
     try {
       const res = await api.post<{ script: string; audio: string | null }>(
-        '/api/jarvis/chat', { message }, { timeout: 30000 },
+        '/api/jarvis/chat', { message, history }, { timeout: 30000 },
       );
       await _playResponse(res.data.script, res.data.audio, onEnd);
     } catch (exc: any) {
