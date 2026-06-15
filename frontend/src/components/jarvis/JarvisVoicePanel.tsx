@@ -246,7 +246,7 @@ function FabButton({ convOpen, convState, micReady, onClick }: {
               ? { duration: 2, repeat: Infinity, ease: 'linear' }
               : {}
         }
-        title={convOpen ? 'Close VAAYU' : micReady ? 'Ask VAAYU (or clap)' : 'Ask VAAYU'}
+        title={convState === 'speaking' ? 'Tap to interrupt' : convOpen ? 'Close VAAYU' : micReady ? 'Ask VAAYU (or clap)' : 'Ask VAAYU'}
         style={{
           width: 60, height: 60, borderRadius: '50%',
           background: active
@@ -530,8 +530,8 @@ export function JarvisVoicePanel() {
       stopBargeIn();
       return;
     }
-    // 1.5s grace so VAAYU's own audio doesn't self-trigger
-    const timer = setTimeout(startBargeIn, 1500);
+    // 800ms grace so VAAYU's own audio doesn't self-trigger
+    const timer = setTimeout(startBargeIn, 800);
     return () => { clearTimeout(timer); stopBargeIn(); };
   }, [convState, startBargeIn, stopBargeIn]);
 
@@ -550,8 +550,12 @@ export function JarvisVoicePanel() {
 
   const handleFabClick = () => {
     if (convOpen) {
-      if (isListening) {
-        // Close while listening
+      if (isSpeaking) {
+        // Interrupt VAAYU — stop audio and start listening
+        stopBargeIn();
+        voice.stop();
+        setTimeout(() => startListenRef.current(), 150);
+      } else if (isListening) {
         closeConv();
       } else {
         setShowTopics(s => !s);
@@ -690,7 +694,7 @@ export function JarvisVoicePanel() {
               ))}
             </div>
 
-            {/* Waveform when speaking */}
+            {/* Waveform + interrupt hint when speaking */}
             <AnimatePresence>
               {isSpeaking && (
                 <motion.div
@@ -698,6 +702,26 @@ export function JarvisVoicePanel() {
                   style={{ padding: '0 14px', flexShrink: 0 }}
                 >
                   <AudioVisualizer analyser={voice.analyser} isSpeaking={isSpeaking} width={332} height={48} />
+                  <motion.button
+                    onClick={() => {
+                      stopBargeIn();
+                      voice.stop();
+                      setTimeout(() => startListenRef.current(), 150);
+                    }}
+                    animate={{ opacity: [0.45, 0.75, 0.45] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                    style={{
+                      display: 'block', width: '100%', marginTop: 6,
+                      background: 'transparent',
+                      border: '1px solid rgba(124,58,237,0.18)',
+                      borderRadius: 7, padding: '5px 0',
+                      color: 'rgba(168,85,247,0.65)',
+                      fontSize: 9, letterSpacing: '0.18em',
+                      fontFamily: 'monospace', cursor: 'pointer',
+                    }}
+                  >
+                    ⏸ TAP TO INTERRUPT
+                  </motion.button>
                 </motion.div>
               )}
             </AnimatePresence>
