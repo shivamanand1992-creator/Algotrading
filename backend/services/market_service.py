@@ -502,6 +502,8 @@ class MarketService:
             {"symbol": "^HSI",     "name": "Hang Seng",  "type": "index"},
             {"symbol": "CL=F",     "name": "Crude Oil",  "type": "commodity"},
             {"symbol": "GC=F",     "name": "Gold",       "type": "commodity"},
+            {"symbol": "SI=F",     "name": "Silver",     "type": "commodity"},
+            {"symbol": "BTC-INR",  "name": "Bitcoin",    "type": "crypto"},
             {"symbol": "USDINR=X", "name": "USD/INR",    "type": "forex"},
         ]
         try:

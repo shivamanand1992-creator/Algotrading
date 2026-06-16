@@ -260,10 +260,40 @@ def _format_context(ctx: dict) -> str:
         lines.append(f"Market regime: {ctx['regime']} ({ctx.get('regime_conf', 0.5)*100:.0f}% confidence)")
 
     if ctx.get("global_cues"):
-        lines.append("Global cues:")
-        for c in ctx["global_cues"][:6]:
-            if c.get("ltp") and c.get("change_pct") is not None:
-                lines.append(f"  {c['name']}: {c['ltp']:,.2f} ({c['change_pct']:+.2f}%)")
+        # Extract USD/INR for converting commodity prices
+        cues = ctx["global_cues"]
+        usd_inr = next(
+            (float(c["ltp"]) for c in cues if "USD/INR" in c.get("name", "") and c.get("ltp")),
+            None,
+        )
+        lines.append("Global cues (₹ where applicable):")
+        for c in cues[:10]:
+            name    = c.get("name", "")
+            ltp     = c.get("ltp")
+            chg_pct = c.get("change_pct") or 0.0
+            if not ltp:
+                continue
+            try:
+                ltp = float(ltp)
+                if name == "Gold" and usd_inr:
+                    # USD/oz → ₹/10g  (1 troy oz = 31.1035 g)
+                    inr_10g = ltp * usd_inr / 31.1035 * 10
+                    lines.append(f"  Gold: ₹{inr_10g:,.0f}/10g ({chg_pct:+.2f}%)")
+                elif name == "Silver" and usd_inr:
+                    # USD/oz → ₹/kg
+                    inr_kg = ltp * usd_inr / 31.1035 * 1000
+                    lines.append(f"  Silver: ₹{inr_kg:,.0f}/kg ({chg_pct:+.2f}%)")
+                elif name == "Crude Oil" and usd_inr:
+                    inr_bbl = ltp * usd_inr
+                    lines.append(f"  Crude Oil: ₹{inr_bbl:,.0f}/barrel ({chg_pct:+.2f}%)")
+                elif name == "Bitcoin":
+                    lines.append(f"  Bitcoin: ₹{ltp:,.0f} ({chg_pct:+.2f}%)")
+                elif name == "USD/INR":
+                    lines.append(f"  USD/INR: ₹{ltp:.2f} ({chg_pct:+.2f}%)")
+                else:
+                    lines.append(f"  {name}: {ltp:,.2f} ({chg_pct:+.2f}%)")
+            except (TypeError, ValueError):
+                pass
 
     nb = ctx.get("niftybees")
     if nb and nb.get("total_qty"):
