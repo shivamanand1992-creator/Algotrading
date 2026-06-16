@@ -69,55 +69,96 @@ class MarketService:
     # Current market data
     # ------------------------------------------------------------------
 
-    async def _get_ltp_with_fallback(self) -> float:
-        """Get Nifty LTP from Angel One, falling back to Yahoo Finance if session is broken."""
+    async def _get_quote_with_fallback(self) -> dict:
+        """Get Nifty LTP + prev_close from Angel One; fall back to Yahoo Finance."""
         if self.angel_client:
             try:
-                ltp = await self._run_sync(
-                    self.angel_client.get_ltp, NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN
+                q = await self._run_sync(
+                    self.angel_client.get_quote,
+                    NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN,
                 )
-                return float(ltp)
+                if q.get("ltp", 0) > 0:
+                    logger.debug(
+                        f"[Quote] LTP={q['ltp']:.2f}  prev_close={q['prev_close']:.2f}"
+                    )
+                    return q
             except Exception as e:
-                logger.warning(f"Angel One get_ltp failed ({e}), trying Yahoo Finance…")
+                logger.warning(f"Angel One get_quote failed ({e}), trying Yahoo Finance…")
 
-        # Yahoo Finance fallback — use daily close so LTP matches the same
-        # source as _refresh_prev_close (avoids minute-vs-daily mismatch on
-        # weekends where the last minute bar ≠ official daily close).
+        # Yahoo Finance fallback
         try:
             import yfinance as yf
-            def _yf_ltp():
-                t = yf.Ticker("^NSEI")
-                hist = t.history(period="5d", interval="1d")
-                if hist is not None and not hist.empty:
-                    return float(hist["Close"].dropna().iloc[-1])
-                return 0.0
-            ltp = await self._run_sync(_yf_ltp)
-            if ltp > 0:
-                logger.debug(f"Yahoo Finance LTP fallback (daily close): {ltp:.2f}")
-                return ltp
-        except Exception as yf_err:
-            logger.warning(f"Yahoo Finance LTP fallback failed: {yf_err}")
 
-        # Last resort: return cached value if we have one
-        return self._cached_ltp or 0.0
+            def _yf_quote():
+                ticker = yf.Ticker("^NSEI")
+                hist = ticker.history(period="7d", interval="1d")
+                if hist is None or hist.empty:
+                    return {}
+                # Ensure tz-aware index is converted to IST dates
+                try:
+                    import pytz as _pytz
+                    _ist = _pytz.timezone("Asia/Kolkata")
+                    if hist.index.tzinfo is not None:
+                        hist.index = hist.index.tz_convert(_ist)
+                    elif hasattr(hist.index, "tz_localize"):
+                        hist.index = hist.index.tz_localize("UTC").tz_convert(_ist)
+                except Exception:
+                    pass
+                today_ist = datetime.now(_IST).date()
+                # Rows strictly before today → previous close candidates
+                past = hist[hist.index.date < today_ist]
+                # Today's row (if present) → current LTP proxy
+                today_rows = hist[hist.index.date == today_ist]
+                ltp = float(today_rows["Close"].iloc[-1]) if not today_rows.empty else (
+                    float(past["Close"].iloc[-1]) if not past.empty else 0.0
+                )
+                prev_close = float(past["Close"].iloc[-1]) if not past.empty else 0.0
+                logger.info(
+                    f"[Quote/YF] LTP={ltp:.2f}  prev_close={prev_close:.2f}"
+                )
+                return {"ltp": ltp, "prev_close": prev_close}
+
+            q = await self._run_sync(_yf_quote)
+            if q.get("ltp", 0) > 0:
+                return q
+        except Exception as yf_err:
+            logger.warning(f"Yahoo Finance quote fallback failed: {yf_err}")
+
+        # Last resort: return cached values
+        return {
+            "ltp": self._cached_ltp or 0.0,
+            "prev_close": self._cached_prev_close or 0.0,
+        }
 
     async def get_current_market_data(self) -> MarketDataResponse:
         if not self.angel_client:
             return self._default_market()
         try:
-            ltp: float = await self._get_ltp_with_fallback()
+            q = await self._get_quote_with_fallback()
+            ltp = q.get("ltp", 0.0)
             if ltp == 0.0:
                 return self._default_market()
             self._cached_ltp = ltp
 
-            # prev_close only changes once per day — re-fetch only on a new trading date.
+            prev_close = q.get("prev_close", 0.0)
+            # Cache today's prev_close so VAAYU context can use it
             today_ist = datetime.now(_IST).date()
-            if self._cached_prev_close <= 0 or self._prev_close_date != today_ist:
+            if prev_close > 0:
+                self._cached_prev_close = prev_close
+                self._prev_close_date   = today_ist
+            elif self._cached_prev_close <= 0:
+                # Still unknown — run the historical fallback once
                 await self._refresh_prev_close(today_ist)
+                prev_close = self._cached_prev_close
 
-            prev       = self._cached_prev_close if self._cached_prev_close > 0 else ltp
+            prev       = prev_close if prev_close > 0 else ltp
             change     = ltp - prev
             change_pct = (change / prev * 100) if prev > 0 else 0.0
+
+            logger.debug(
+                f"[MarketData] LTP={ltp:.2f}  prev={prev:.2f}  "
+                f"chg={change:+.2f}  chg%={change_pct:+.2f}%"
+            )
 
             return MarketDataResponse(
                 symbol=NIFTY_SYMBOL,

@@ -298,6 +298,37 @@ class AngelOneClient:
         logger.debug(f"LTP [{symbol}] = {ltp}")
         return ltp
 
+    @_retry(max_attempts=3)
+    def get_quote(self, exchange: str, symbol: str, token: str) -> dict:
+        """
+        Fetch LTP + previous day close in one API call.
+
+        Returns
+        -------
+        dict  {"ltp": float, "prev_close": float, "open": float,
+               "high": float, "low": float}
+        """
+        self._ensure_connected()
+        params = {"exchange": exchange, "tradingsymbol": symbol, "symboltoken": token}
+        resp = self._smart._postRequest("api.ltp.data", params)
+        if not isinstance(resp, dict):
+            raise RuntimeError(
+                f"get_quote: response is {type(resp).__name__}: {str(resp)[:80]}"
+            )
+        _assert_ok(resp, "get_quote")
+        data = resp.get("data", {})
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"get_quote: data is {type(data).__name__}: {str(data)[:80]}"
+            )
+        return {
+            "ltp":        float(data.get("ltp",   0.0)),
+            "prev_close": float(data.get("close", 0.0)),
+            "open":       float(data.get("open",  0.0)),
+            "high":       float(data.get("high",  0.0)),
+            "low":        float(data.get("low",   0.0)),
+        }
+
     def search_scrip(self, exchange: str, symbol: str) -> Optional[str]:
         """
         Resolve the Angel One instrument token for a cash equity symbol.
