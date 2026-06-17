@@ -1,4 +1,5 @@
 import sys
+import time
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date as _date
@@ -440,9 +441,18 @@ async def _balance_check_loop() -> None:
                     loop = asyncio.get_event_loop()
                     raw  = await loop.run_in_executor(None, angel.get_funds)
 
-                    # Angel One sometimes returns a string instead of dict when API is degraded
+                    # Angel One returns a string (or None) when the session is degraded
                     if not isinstance(raw, dict):
-                        logger.warning(f"[BalanceCheck] get_funds returned non-dict ({type(raw).__name__}) — skipping.")
+                        logger.warning(
+                            f"[BalanceCheck] get_funds returned non-dict "
+                            f"({type(raw).__name__}) — triggering session reconnect."
+                        )
+                        try:
+                            loop2 = asyncio.get_event_loop()
+                            await loop2.run_in_executor(None, angel.connect)
+                            logger.info("[BalanceCheck] Angel One session restored.")
+                        except Exception as _rc_exc:
+                            logger.error(f"[BalanceCheck] Reconnect failed: {_rc_exc}")
                         await asyncio.sleep(60)
                         continue
 
@@ -554,12 +564,19 @@ async def _etf_holdings_monitor_loop() -> None:
 
 async def _session_refresh_loop() -> None:
     """
-    Force a full Angel One re-login at 08:55 IST and again at 12:30 IST on trading days.
-    The threading.Timer in angel_client accumulates duplicate timers on reconnect, so
-    we do explicit scheduled reconnects to guarantee a live session all day.
+    Scheduled reconnects: midnight (clears overnight token expiry), then
+    08:55/09:05 IST (before market open) and 12:30 IST (midday safety).
+    Reconnects run every calendar day so the nightly token expiry is always
+    cleaned up before the next morning.
     """
-    _reconnect_slots = [(8, 55), (9, 5), (12, 30)]
-    _last_dates: dict = {}   # slot-tuple → last reconnect date
+    # (hour, minute, weekday_only)
+    _reconnect_slots = [
+        (0,  1, False),   # just after midnight — reset overnight expiry
+        (8, 55, True),    # pre-market
+        (9,  5, True),    # 10 min after open
+        (12, 30, True),   # midday safety
+    ]
+    _last_dates: dict = {}
 
     while True:
         try:
@@ -568,24 +585,92 @@ async def _session_refresh_loop() -> None:
             hm      = (now_ist.hour, now_ist.minute)
 
             for slot in _reconnect_slots:
-                if hm >= slot and _last_dates.get(slot) != today and today.weekday() < 5:
-                    _last_dates[slot] = today
+                sh, sm, weekday_only = slot
+                key = (sh, sm)
+                already_done = _last_dates.get(key) == today
+                if hm >= (sh, sm) and not already_done:
+                    if weekday_only and now_ist.weekday() >= 5:
+                        _last_dates[key] = today
+                        continue
+                    _last_dates[key] = today
                     try:
                         from backend.dependencies import get_angel_client
                         angel_client = get_angel_client()
                         if angel_client is None:
-                            logger.warning(f"Session refresh {slot[0]:02d}:{slot[1]:02d} skipped — no broker client.")
+                            logger.warning(
+                                f"[SessionRefresh] {sh:02d}:{sm:02d} skipped — no broker client."
+                            )
                         else:
                             loop = asyncio.get_event_loop()
                             await loop.run_in_executor(None, angel_client.connect)
-                            logger.info(f"Session refresh at {slot[0]:02d}:{slot[1]:02d} IST — Angel One reconnected.")
+                            logger.info(
+                                f"[SessionRefresh] {sh:02d}:{sm:02d} IST — Angel One reconnected."
+                            )
                     except Exception as exc:
-                        logger.error(f"Session refresh {slot} error: {exc}")
+                        logger.error(f"[SessionRefresh] {sh:02d}:{sm:02d} error: {exc}")
 
         except Exception as exc:
             logger.error(f"_session_refresh_loop unexpected error: {exc}")
 
         await asyncio.sleep(60)
+
+
+async def _session_health_watchdog_loop() -> None:
+    """
+    Continuously monitor Angel One session health.  Every 5 minutes, call
+    get_funds() — if it returns a non-dict (the telltale sign of a degraded
+    or expired session), immediately trigger a full re-login so every API
+    call in the next cycle uses a live token.
+
+    This is the permanent fix for the 'every morning broken session' problem:
+    rather than waiting for the scheduled reconnect at 08:55 IST, this loop
+    detects the broken session within 5 minutes and self-heals.
+    """
+    _last_reconnect: float = 0.0   # epoch seconds, throttle reconnects to 5 min
+
+    while True:
+        await asyncio.sleep(300)   # check every 5 minutes
+        try:
+            from backend.dependencies import get_angel_client
+            angel_client = get_angel_client()
+            if angel_client is None:
+                continue
+
+            loop = asyncio.get_event_loop()
+            try:
+                raw = await loop.run_in_executor(None, angel_client.get_funds)
+            except Exception:
+                raw = None
+
+            session_ok = isinstance(raw, dict) and (
+                raw.get("net") not in (None, "", "0", 0)
+                or raw.get("availablecash") not in (None, "", "0", 0)
+            )
+
+            if not session_ok:
+                now = time.time()
+                if now - _last_reconnect < 300:
+                    # Already reconnected in the last 5 min — don't spam
+                    continue
+                _last_reconnect = now
+                logger.warning(
+                    "[SessionWatchdog] Degraded session detected "
+                    f"(get_funds returned {type(raw).__name__}: {str(raw)[:60]}). "
+                    "Reconnecting…"
+                )
+                try:
+                    await loop.run_in_executor(None, angel_client.connect)
+                    logger.info("[SessionWatchdog] Angel One session restored.")
+                except Exception as exc:
+                    logger.error(f"[SessionWatchdog] Reconnect failed: {exc}")
+            else:
+                logger.debug(
+                    f"[SessionWatchdog] Session healthy — "
+                    f"net=₹{raw.get('net', 0)}, "
+                    f"avail=₹{raw.get('availablecash', 0)}"
+                )
+        except Exception as exc:
+            logger.error(f"_session_health_watchdog_loop unexpected error: {exc}")
 _PUBLIC_API_PATHS = {
     "/api/auth/login",
     "/api/system/status",  # Railway health check
@@ -699,6 +784,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_session_refresh_loop())
+    asyncio.create_task(_session_health_watchdog_loop())
     asyncio.create_task(_swing_autopilot_loop())
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())

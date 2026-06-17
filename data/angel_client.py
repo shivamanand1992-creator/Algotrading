@@ -107,7 +107,9 @@ class AngelOneClient:
         self.access_token: str  = ""
         self.feed_token: str    = ""
         self.refresh_token: str = ""
-        self._session_lock      = threading.Lock()
+        # RLock (reentrant) so that connect() can be called from inside
+        # _refresh_session() without deadlocking on itself.
+        self._session_lock      = threading.RLock()
         self._refresh_timer: threading.Timer | None = None
 
         logger.info("AngelOneClient initialised (not yet connected).")
@@ -116,33 +118,57 @@ class AngelOneClient:
     # Authentication
     # ------------------------------------------------------------------
 
+    def _do_connect(self) -> None:
+        """
+        Low-level login — caller MUST already hold self._session_lock.
+        Retries up to 3 times (15s apart) so a new TOTP code is generated
+        on each attempt, handling transient Angel One auth failures.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                self._smart    = SmartConnect(api_key=self.api_key)
+                totp_value     = pyotp.TOTP(self.totp_secret).now()
+                data           = self._smart.generateSession(
+                    self.client_code, self.password, totp_value
+                )
+                if not isinstance(data, dict):
+                    raise ConnectionError(
+                        f"generateSession returned {type(data).__name__}: {str(data)[:80]}"
+                    )
+                if data.get("status") is False:
+                    raise ConnectionError(
+                        f"SmartAPI login failed: {data.get('message', 'unknown error')}"
+                    )
+                tokens = data.get("data", {})
+                self.access_token  = tokens.get("jwtToken", "")
+                self.feed_token    = tokens.get("feedToken", "")
+                self.refresh_token = tokens.get("refreshToken", "")
+                logger.success(
+                    f"Connected (attempt {attempt}). "
+                    f"access_token=…{self.access_token[-6:]}"
+                )
+                return  # success
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 3:
+                    logger.warning(
+                        f"[connect] Attempt {attempt}/3 failed: {exc}. "
+                        f"Retrying in 15s (fresh TOTP)…"
+                    )
+                    time.sleep(15)
+        raise ConnectionError(
+            f"Angel One login failed after 3 attempts: {last_exc}"
+        )
+
     def connect(self) -> None:
         """
-        Authenticate with Angel One SmartAPI using client_code, password,
-        and a time-based OTP generated from the TOTP secret.
-
-        Populates self.access_token, self.feed_token, self.refresh_token
-        and schedules automatic token refresh every 6 hours.
+        Public entry-point: authenticate (or re-authenticate) with Angel One.
+        Safe to call from any thread, including from within _refresh_session.
         """
         logger.info("Connecting to Angel One SmartAPI…")
         with self._session_lock:
-            self._smart = SmartConnect(api_key=self.api_key)
-            totp_value = pyotp.TOTP(self.totp_secret).now()
-            data = self._smart.generateSession(
-                self.client_code, self.password, totp_value
-            )
-            if data.get("status") is False:
-                raise ConnectionError(
-                    f"SmartAPI login failed: {data.get('message', 'unknown error')}"
-                )
-            tokens = data.get("data", {})
-            self.access_token  = tokens.get("jwtToken", "")
-            self.feed_token    = tokens.get("feedToken", "")
-            self.refresh_token = tokens.get("refreshToken", "")
-            logger.success(
-                f"Connected. access_token=…{self.access_token[-6:]}, "
-                f"feed_token=…{self.feed_token[-6:]}"
-            )
+            self._do_connect()
         self._schedule_token_refresh()
 
     def _refresh_session(self) -> None:
@@ -159,7 +185,9 @@ class AngelOneClient:
                     logger.warning(
                         "Token refresh returned failure; attempting full re-login."
                     )
-                    self.connect()
+                    # _do_connect is safe here: RLock allows same-thread re-entry
+                    self._do_connect()
+                    self._schedule_token_refresh()
                     return
                 tokens = data.get("data", {})
                 self.access_token  = tokens.get("jwtToken", self.access_token)
@@ -169,7 +197,7 @@ class AngelOneClient:
             except Exception as exc:
                 logger.error(f"Token refresh failed: {exc}. Attempting full re-login.")
                 try:
-                    self.connect()
+                    self._do_connect()
                 except Exception as reconnect_exc:
                     logger.critical(f"Full re-login also failed: {reconnect_exc}")
         self._schedule_token_refresh()
