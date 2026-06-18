@@ -29,6 +29,13 @@ export function ETFHoldingsView() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Target % state
+  const [targetPct, setTargetPct] = useState<number>(5.0);
+  const [targetInput, setTargetInput] = useState<string>('5.0');
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [targetError, setTargetError] = useState<string | null>(null);
+
   const fetchCached = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -43,6 +50,17 @@ export function ETFHoldingsView() {
     }
   }, []);
 
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await api.get<{ target_gain_pct: number }>('/api/etf/config');
+      const pct = res.data.target_gain_pct ?? 5.0;
+      setTargetPct(pct);
+      setTargetInput(String(pct));
+    } catch {
+      // keep default
+    }
+  }, []);
+
   const syncNow = async () => {
     setSyncing(true);
     setError(null);
@@ -54,8 +72,7 @@ export function ETFHoldingsView() {
         new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
       );
       if (res.data.sells && res.data.sells.length > 0) {
-        // Brief flash so user sees which ETFs were auto-sold
-        alert(`Auto-sold at 5% target: ${res.data.sells.join(', ')}`);
+        alert(`Auto-sold at ${targetPct}% target: ${res.data.sells.join(', ')}`);
       }
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Sync failed');
@@ -64,9 +81,35 @@ export function ETFHoldingsView() {
     }
   };
 
+  const saveTarget = async () => {
+    const val = parseFloat(targetInput);
+    if (isNaN(val) || val <= 0 || val > 100) {
+      setTargetError('Enter a value between 0.1 and 100');
+      return;
+    }
+    setSavingTarget(true);
+    setTargetError(null);
+    try {
+      await api.post('/api/etf/config', { target_gain_pct: val });
+      setTargetPct(val);
+      setEditingTarget(false);
+    } catch (e: any) {
+      setTargetError(e?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSavingTarget(false);
+    }
+  };
+
+  const cancelEdit = () => {
+    setTargetInput(String(targetPct));
+    setTargetError(null);
+    setEditingTarget(false);
+  };
+
   useEffect(() => {
     fetchCached();
-  }, [fetchCached]);
+    fetchConfig();
+  }, [fetchCached, fetchConfig]);
 
   const totalInvested = holdings.reduce((s, h) => s + h.avg_price * h.qty, 0);
   const totalCurrent  = holdings.reduce((s, h) => s + h.current_price * h.qty, 0);
@@ -77,16 +120,66 @@ export function ETFHoldingsView() {
     <div className="p-6 space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-jarvis-primary tracking-wider">
             ETF Holdings
           </h1>
           <p className="text-xs text-jarvis-text-secondary mt-1">
-            Synced from Angel One broker · 5% target auto-sell enabled
+            Synced from Angel One broker · {targetPct}% target auto-sell enabled
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Target % editor */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-jarvis-text-secondary">Auto-sell target:</span>
+            {editingTarget ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.5"
+                  value={targetInput}
+                  onChange={e => setTargetInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveTarget(); if (e.key === 'Escape') cancelEdit(); }}
+                  className="w-20 px-2 py-1 text-sm rounded border border-jarvis-primary/60
+                             bg-black/40 text-white focus:outline-none focus:border-jarvis-primary"
+                  autoFocus
+                />
+                <span className="text-xs text-jarvis-text-secondary">%</span>
+                <button
+                  onClick={saveTarget}
+                  disabled={savingTarget}
+                  className="px-2 py-1 text-xs rounded border border-emerald-500/60
+                             text-emerald-400 hover:bg-emerald-500/10 transition-all
+                             disabled:opacity-40"
+                >
+                  {savingTarget ? '…' : '✓'}
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  className="px-2 py-1 text-xs rounded border border-white/20
+                             text-jarvis-text-secondary hover:bg-white/5 transition-all"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditingTarget(true)}
+                className="px-3 py-1 text-sm font-semibold rounded border border-jarvis-primary/40
+                           text-jarvis-primary hover:bg-jarvis-primary/10 transition-all"
+                title="Click to change auto-sell target"
+              >
+                {targetPct}%
+              </button>
+            )}
+            {targetError && (
+              <span className="text-xs text-red-400">{targetError}</span>
+            )}
+          </div>
+
           {lastSync && (
             <span className="text-xs text-jarvis-text-secondary">
               Last sync: {lastSync}
@@ -152,7 +245,7 @@ export function ETFHoldingsView() {
       ) : (
         <div className="space-y-3">
           {holdings.map((h) => (
-            <HoldingCard key={h.symbol} holding={h} />
+            <HoldingCard key={h.symbol} holding={h} targetPct={targetPct} />
           ))}
         </div>
       )}
@@ -161,7 +254,8 @@ export function ETFHoldingsView() {
       <div className="glass-panel rounded-lg p-4 text-xs text-jarvis-text-secondary space-y-1">
         <div className="font-semibold text-jarvis-primary/70 mb-2">HOW IT WORKS</div>
         <div>• Holdings are synced from your Angel One demat account every 5 minutes during market hours.</div>
-        <div>• When any ETF reaches a <span className="text-jarvis-primary">+5% gain</span> from your average buy price, VAAYU automatically places a SELL order for the full quantity.</div>
+        <div>• When any ETF reaches a <span className="text-jarvis-primary">+{targetPct}% gain</span> from your average buy price, VAAYU automatically places a SELL order for the full quantity.</div>
+        <div>• You can change the auto-sell target by clicking the <span className="text-jarvis-primary">{targetPct}%</span> button in the header above.</div>
         <div>• If the auto-sell order fails, you will receive a Telegram alert to sell manually.</div>
         <div>• Only ETFs are tracked here (NIFTYBEES, BANKBEES, GOLDBEES, etc.). Regular stocks are shown in the Stocks section.</div>
       </div>
@@ -192,10 +286,10 @@ function SummaryCard({
 }
 
 
-function HoldingCard({ holding: h }: { holding: ETFHolding }) {
+function HoldingCard({ holding: h, targetPct }: { holding: ETFHolding; targetPct: number }) {
   const pnlColor  = h.pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
-  const barColor  = h.pnl_pct >= _TARGET ? 'bg-emerald-400' : 'bg-jarvis-primary';
-  const barWidth  = Math.min(100, Math.max(0, (h.pnl_pct / _TARGET) * 100));
+  const barColor  = h.pnl_pct >= targetPct ? 'bg-emerald-400' : 'bg-jarvis-primary';
+  const barWidth  = Math.min(100, Math.max(0, (h.pnl_pct / targetPct) * 100));
 
   return (
     <div
@@ -235,10 +329,10 @@ function HoldingCard({ holding: h }: { holding: ETFHolding }) {
         </div>
       </div>
 
-      {/* Progress bar toward 5% target */}
+      {/* Progress bar toward target */}
       <div className="mt-4">
         <div className="flex justify-between text-xs text-jarvis-text-secondary mb-1">
-          <span>Progress to 5% target</span>
+          <span>Progress to {targetPct}% target</span>
           <span>Target: ₹{h.target_price.toFixed(2)}</span>
         </div>
         <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -249,11 +343,9 @@ function HoldingCard({ holding: h }: { holding: ETFHolding }) {
         </div>
         <div className="flex justify-between text-xs mt-1">
           <span className="text-jarvis-text-secondary">0%</span>
-          <span className={h.target_hit ? 'text-emerald-400' : 'text-jarvis-text-secondary'}>5%</span>
+          <span className={h.target_hit ? 'text-emerald-400' : 'text-jarvis-text-secondary'}>{targetPct}%</span>
         </div>
       </div>
     </div>
   );
 }
-
-const _TARGET = 5.0;

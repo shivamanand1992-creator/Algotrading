@@ -1,8 +1,8 @@
 """
 ETF Holdings Service
 ====================
-Syncs ETF holdings from Angel One broker, tracks a 5% profit target per ETF,
-auto-sells ALL units when target is hit, and sends Telegram alerts.
+Syncs ETF holdings from Angel One broker, tracks a configurable profit target
+per ETF, auto-sells ALL units when target is hit, and sends Telegram alerts.
 
 ETF detection rules (applied to tradingsymbol):
   • ends with "BEES"   — NIFTYBEES, BANKBEES, JUNIORBEES, ITBEES, PHARMABEES …
@@ -16,6 +16,7 @@ Demo mode: returns hardcoded mock holdings.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -30,7 +31,33 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 _IST = pytz.timezone("Asia/Kolkata")
 
-_PROFIT_TARGET_PCT = 5.0   # default; overrideable per-holding
+_DEFAULT_PROFIT_TARGET_PCT = 5.0
+_CONFIG_FILE = Path(__file__).parent.parent.parent / "data" / "etf_config.json"
+
+
+def _load_target_pct() -> float:
+    try:
+        if _CONFIG_FILE.exists():
+            data = json.loads(_CONFIG_FILE.read_text())
+            return float(data.get("target_gain_pct", _DEFAULT_PROFIT_TARGET_PCT))
+    except Exception:
+        pass
+    return _DEFAULT_PROFIT_TARGET_PCT
+
+
+def _save_target_pct(pct: float) -> None:
+    _CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CONFIG_FILE.write_text(json.dumps({"target_gain_pct": pct}))
+
+
+def get_profit_target_pct() -> float:
+    return _load_target_pct()
+
+
+def set_profit_target_pct(pct: float) -> None:
+    if pct <= 0 or pct > 100:
+        raise ValueError(f"target_gain_pct must be between 0 and 100, got {pct}")
+    _save_target_pct(pct)
 
 # Symbols explicitly known to be ETFs (fallback list when instrumenttype is missing)
 _ETF_SUFFIXES  = ("BEES", "ETF", "IETF", "FUND")
@@ -190,7 +217,8 @@ class ETFHoldingsService:
             pnl     = (cur_price - avg_price) * qty
             pnl_pct = ((cur_price - avg_price) / avg_price) * 100.0
 
-            target_price = round(avg_price * (1 + _PROFIT_TARGET_PCT / 100), 2)
+            target_pct   = get_profit_target_pct()
+            target_price = round(avg_price * (1 + target_pct / 100), 2)
             target_hit   = cur_price >= target_price
 
             entry = {
@@ -301,11 +329,12 @@ class ETFHoldingsService:
             mode_str = "FAILED"
 
         # Telegram notification regardless of success
+        target_pct = get_profit_target_pct()
         if mode_str == "live":
             msg = (
                 f"✅ <b>JARVIS — ETF Target Hit!</b>\n\n"
                 f"Sold <b>{qty} × {symbol}</b>\n"
-                f"Gain: <b>+{pnl_pct:.2f}%</b> (target 5%)\n"
+                f"Gain: <b>+{pnl_pct:.2f}%</b> (target {target_pct:.1f}%)\n"
                 f"Price: ₹{cur_price:.2f}\n"
                 f"P&amp;L: ₹{(cur_price - (cur_price / (1 + pnl_pct / 100))) * qty:,.0f}\n"
                 f"Order ID: {order_id}"
@@ -313,7 +342,7 @@ class ETFHoldingsService:
         else:
             msg = (
                 f"⚠️ <b>JARVIS — ETF Target Hit (Manual Action Required)</b>\n\n"
-                f"<b>{symbol}</b> is up <b>+{pnl_pct:.2f}%</b> — target reached!\n"
+                f"<b>{symbol}</b> is up <b>+{pnl_pct:.2f}%</b> — target {target_pct:.1f}% reached!\n"
                 f"Qty: {qty} units at ₹{cur_price:.2f}\n\n"
                 f"Auto-sell FAILED — please sell manually in Angel One."
             )
