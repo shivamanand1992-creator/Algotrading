@@ -342,22 +342,38 @@ export function JarvisVoicePanel() {
     stopBargeIn();
     const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecog) return;
-    const recog = new SpeechRecog();
-    recog.continuous     = true;
-    recog.interimResults = true;
-    recog.lang           = 'en-IN';
-    bargeInRef.current   = recog;
-    recog.onresult = (e: any) => {
-      const t = e.results[e.results.length - 1][0].transcript.trim();
-      if (t.length >= 2) {
-        console.debug('[VAAYU barge-in]', t);
-        stopBargeIn();
-        voice.stop();
-        setTimeout(() => startListenRef.current(), 150);
-      }
+
+    const _launch = () => {
+      if (stateRef.current !== 'speaking') return;
+      const recog = new SpeechRecog();
+      recog.continuous     = true;
+      recog.interimResults = true;
+      recog.lang           = 'en-IN';
+      bargeInRef.current   = recog;
+
+      recog.onresult = (e: any) => {
+        const t = e.results[e.results.length - 1][0].transcript.trim();
+        // Need ≥4 chars to avoid false triggers from ambient noise
+        if (t.length >= 4) {
+          stopBargeIn();
+          voice.stop();
+          setTimeout(() => startListenRef.current(), 120);
+        }
+      };
+
+      // Auto-restart barge-in when Chrome times out due to silence,
+      // so the user can interrupt VAAYU at any point during playback.
+      recog.onend = () => {
+        bargeInRef.current = null;
+        if (stateRef.current === 'speaking') {
+          setTimeout(_launch, 150);
+        }
+      };
+
+      try { recog.start(); } catch {}
     };
-    recog.onend = () => { bargeInRef.current = null; };
-    try { recog.start(); } catch {}
+
+    _launch();
   }, [stopBargeIn, voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Start listening for user question ────────────────────────────
@@ -366,12 +382,14 @@ export function JarvisVoicePanel() {
     setConvState('listening');
     setTranscript('');
 
-    const TIMEOUT_S = 12;
+    const TIMEOUT_S = 14;
     let elapsed = 0;
+    let handled = false;
+
     listenTimerRef.current = setInterval(() => {
       elapsed += 0.1;
       setListenTimer(1 - elapsed / TIMEOUT_S);
-      if (elapsed >= TIMEOUT_S) {
+      if (elapsed >= TIMEOUT_S && !handled) {
         stopListening();
         setConvState('closed');
         setConvOpen(false);
@@ -379,40 +397,47 @@ export function JarvisVoicePanel() {
     }, 100);
 
     const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecog) {
-      // No speech recognition — just show a text-based idle
-      return;
-    }
+    if (!SpeechRecog) return;
 
-    const recog = new SpeechRecog();
-    recog.continuous      = false;
-    recog.interimResults  = true;
-    recog.lang            = 'en-IN';
-    recog.maxAlternatives = 1;
-    recogRef.current = recog;
+    // Continuous mode: keeps running until we explicitly stop it.
+    // If Chrome times out due to silence, auto-restart within the timeout window.
+    const _launch = () => {
+      if (handled || stateRef.current !== 'listening') return;
 
-    recog.onresult = (e: any) => {
-      const result = e.results[0];
-      const text   = result[0].transcript;
-      setTranscript(text);
-      if (result.isFinal && text.trim()) {
-        handleUserQuestion(text.trim());
-      }
+      const recog = new SpeechRecog();
+      recog.continuous      = true;   // don't stop after first utterance
+      recog.interimResults  = true;
+      recog.lang            = 'en-IN';
+      recog.maxAlternatives = 1;
+      recogRef.current = recog;
+
+      recog.onresult = (e: any) => {
+        const result = e.results[e.results.length - 1];
+        const text   = result[0].transcript;
+        setTranscript(text);
+        if (result.isFinal && text.trim() && !handled) {
+          handled = true;
+          try { recog.stop(); } catch {}
+          handleUserQuestion(text.trim());
+        }
+      };
+
+      recog.onerror = (e: any) => {
+        if (e.error !== 'no-speech') console.debug('[VAAYU listen] error:', e.error);
+      };
+
+      // Auto-restart when Chrome's silence timeout fires, so VAAYU keeps listening
+      recog.onend = () => {
+        recogRef.current = null;
+        if (!handled && stateRef.current === 'listening') {
+          setTimeout(_launch, 120);
+        }
+      };
+
+      try { recog.start(); } catch {}
     };
 
-    recog.onspeechend = () => {
-      try { recog.stop(); } catch {}
-    };
-
-    recog.onerror = (e: any) => {
-      console.debug('[VAAYU listen] error:', e.error);
-    };
-
-    recog.onend = () => {
-      // If we got a transcript, it's been handled; otherwise no-op
-    };
-
-    try { recog.start(); } catch {}
+    _launch();
   }, [stopListening]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep startListenRef in sync so barge-in can call latest closure
@@ -530,8 +555,9 @@ export function JarvisVoicePanel() {
       stopBargeIn();
       return;
     }
-    // 800ms grace so VAAYU's own audio doesn't self-trigger
-    const timer = setTimeout(startBargeIn, 800);
+    // 300ms grace so VAAYU's first word doesn't self-trigger, but user can
+    // interrupt quickly — barge-in auto-restarts itself on silence timeouts.
+    const timer = setTimeout(startBargeIn, 300);
     return () => { clearTimeout(timer); stopBargeIn(); };
   }, [convState, startBargeIn, stopBargeIn]);
 
@@ -720,7 +746,7 @@ export function JarvisVoicePanel() {
                       fontFamily: 'monospace', cursor: 'pointer',
                     }}
                   >
-                    ⏸ TAP TO INTERRUPT
+                    ⏸ SPEAK OR TAP TO INTERRUPT
                   </motion.button>
                 </motion.div>
               )}

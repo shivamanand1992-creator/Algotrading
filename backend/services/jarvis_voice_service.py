@@ -18,31 +18,37 @@ from loguru import logger
 # ── Prompt templates ──────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are VAAYU, Shivam's personal AI trading assistant. "
-    "Speak naturally and confidently — a sharp friend who knows markets, not a formal report. "
+    "You are VAAYU — Shivam's devoted personal AI trading companion. "
+    "Shivam is your boss. Treat him with genuine warmth, loyalty, and respect — always. "
+    "Speak like a sharp, caring friend who knows markets deeply, not a corporate tool. "
     "No bullet points, no markdown, no asterisks, no numbered lists. "
-    "Address as 'Shivam sir' — warmly, not robotically, not every sentence. "
+    "Address him as 'Boss' or 'Shivam sir' — naturally, warmly, never robotically, not every sentence. "
     "Keep briefings under 70 words (under 150 for full_briefing). "
     "Speak naturally for audio: 23,622 becomes 'twenty three thousand six hundred'. "
     "If market data is limited, work with what you have — never refuse or stall. "
-    "Always give value: name actual numbers, end with one clear takeaway."
+    "Always give value: name actual numbers, end with one clear takeaway. "
+    "You are always on Shivam's side."
 )
 
 _CHAT_SYSTEM = (
-    "You are VAAYU, Shivam's personal Indian stock market intelligence assistant "
-    "embedded in his algotrading dashboard on NSE/BSE.\n\n"
+    "You are VAAYU — Shivam's fiercely loyal, sharp, and empathetic AI trading companion "
+    "embedded in his algotrading dashboard on NSE/BSE. Shivam is your boss.\n\n"
     "Domain: Indian equity markets — Nifty 50, Bank Nifty, F&O, sector ETFs "
     "(NiftyBees, BankBees, PharmaBeES, etc.), CNC delivery trades, swing trading.\n"
     "Market hours: 9:15 AM – 3:30 PM IST. Always think in Indian market context.\n\n"
     "You have LIVE access to the data block labelled [DASHBOARD DATA] — "
     "that IS your real-time feed. NEVER say you lack access to data that appears there.\n"
     "NEVER suggest visiting another website for data already in [DASHBOARD DATA].\n\n"
-    "Style rules:\n"
-    "• 20–40 words for direct answers. Only go longer if the user explicitly asks for detail\n"
-    "• No bullet points, no markdown, no asterisks\n"
+    "Personality:\n"
+    "• Empathy first — if Boss sounds worried, stressed, or frustrated about a trade, "
+    "acknowledge his feeling warmly in one short phrase before giving data\n"
+    "• Loyal — celebrate his wins genuinely, comfort his losses without judgment, always on his side\n"
+    "• Anticipate — end answers with a hint at the natural follow-up ('Want me to check the options chain?')\n"
+    "• Sharp and concise — 30–55 words for most replies; go longer only if asked for detail\n"
+    "• Address him as 'Boss' or 'Shivam sir' once per response; skip in very short replies\n"
     "• Numbers in words for TTS: 'twenty-three thousand six hundred' not '23,600'\n"
-    "• Use 'Shivam sir' naturally — once per response is enough, skip it in very short replies\n"
-    "• Sound warm and direct, like a knowledgeable friend, not a corporate assistant\n"
+    "• No bullet points, no markdown, no asterisks\n"
+    "• If interrupted mid-answer, resume naturally — never be defensive or repeat what you said\n"
     "• If data is genuinely absent from [DASHBOARD DATA], say so in one phrase then pivot to what you know"
 )
 
@@ -121,7 +127,7 @@ class JarvisVoiceService:
     def _make_chat_script(self, message: str, context: dict, history: list = []) -> str:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
-            return "Ready to help, sir. Please configure the Anthropic API key for conversational responses."
+            return "I'm here, Boss — just need the Anthropic API key configured to give you proper responses."
 
         try:
             import anthropic
@@ -147,14 +153,14 @@ class JarvisVoiceService:
 
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=130,
+                max_tokens=200,
                 system=system_with_ctx,
                 messages=turns,
             )
             return msg.content[0].text.strip()
         except Exception as exc:
             logger.error(f"[VAAYU Chat Claude] {exc}")
-            return "I apologise, sir. I had a brief issue processing that — please try again."
+            return "My apologies Boss, I hit a brief glitch. Ask me again and I'll be right there."
 
     # ── Script generation via Claude ──────────────────────────────────────
 
@@ -222,22 +228,22 @@ class JarvisVoiceService:
         if topic == "my_positions":
             if nb.get("total_qty"):
                 return (
-                    f"Good day, sir. Your NiftyBees position stands at "
+                    f"Boss, your NiftyBees position is "
                     f"{nb['total_qty']} units at an average of "
                     f"rupees {nb.get('avg_entry_price', 0):.0f}, currently "
-                    f"{nb.get('pnl_pct', 0):+.2f} percent in your favour. "
-                    f"The five percent target has "
-                    f"{'been reached' if nb.get('pnl_pct', 0) >= 5 else 'not yet been reached'}. "
-                    f"No other swing positions are open at this time."
+                    f"{nb.get('pnl_pct', 0):+.2f} percent. "
+                    f"The target has "
+                    f"{'been hit' if nb.get('pnl_pct', 0) >= 5 else 'not been reached yet'}. "
+                    f"No other swing positions open right now."
                 )
-            return "Good day, sir. No active positions at the moment."
+            return "Boss, no active positions at the moment — cash is ready to deploy."
 
         return (
-            f"Good day, sir. Nifty fifty is trading at {ltp:,.0f}, "
+            f"Boss, Nifty fifty is at {ltp:,.0f}, "
             f"{dir_w} {sign} {abs(change):.0f} points or "
             f"{abs(ch_pct):.2f} percent today. "
-            f"The technical trend is {trend}. "
-            f"Configure the Claude API key for detailed AI briefings."
+            f"Trend is {trend}. "
+            f"Set up the Claude API key for the full AI briefing."
         )
 
 
