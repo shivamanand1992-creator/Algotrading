@@ -303,8 +303,9 @@ export function JarvisVoicePanel() {
   stateRef.current      = convState;
   const bargeInRef      = useRef<any>(null);
   const startListenRef  = useRef<() => void>(() => {});
-  const pauseTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pauseTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef         = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handleUserQuestionRef = useRef<(q: string) => void>(() => {});
 
   // Load topics from API
   useEffect(() => {
@@ -412,9 +413,16 @@ export function JarvisVoicePanel() {
       elapsed += 0.1;
       setListenTimer(1 - elapsed / TIMEOUT_S);
       if (elapsed >= TIMEOUT_S && !handled) {
-        stopListening();
-        setConvState('closed');
-        setConvOpen(false);
+        if (accumulatedText.trim()) {
+          // Process whatever the user managed to say before the timer ran out
+          handled = true;
+          clearPauseTimer();
+          handleUserQuestionRef.current(accumulatedText.trim());
+        } else {
+          stopListening();
+          setConvState('closed');
+          setConvOpen(false);
+        }
       }
     }, 100);
 
@@ -465,15 +473,18 @@ export function JarvisVoicePanel() {
               handled = true;
               clearPauseTimer();
               try { recog.stop(); } catch {}
-              handleUserQuestion(accumulatedText.trim());
+              handleUserQuestionRef.current(accumulatedText.trim());
             }
           }, 3000);
 
         } else if (!result.isFinal) {
-          // Interim result: show accumulated + current interim; reset pause timer
-          setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
-          // User is still speaking — cancel the pause timer
-          clearPauseTimer();
+          // Interim result: only reset the pause timer if the user actually said something.
+          // Chrome sends empty interim events when a new recognition session starts after
+          // silence — if we reset on those, the 3s countdown never fires.
+          if (text) {
+            setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
+            clearPauseTimer();
+          }
         }
       };
 
@@ -541,6 +552,9 @@ export function JarvisVoicePanel() {
     });
   }, [stopListening, addMessage, voice, startListening, messages]);
 
+  // Keep ref in sync so startListening closures always call the latest version
+  useEffect(() => { handleUserQuestionRef.current = handleUserQuestion; }, [handleUserQuestion]);
+
   // Replace placeholder "…" with actual script when it arrives
   useEffect(() => {
     if (voice.state === 'speaking' && voice.script) {
@@ -565,20 +579,24 @@ export function JarvisVoicePanel() {
     setTranscript('');
   }, [stopListening, voice]);
 
-  // ── Open conversation — direct LISTENING mode (no topic briefing) ─
+  // ── Open conversation — greet first, then listen ─────────────────
   const openConversationListening = useCallback(() => {
+    const hour   = new Date().getHours();
+    const period = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+
     setConvOpen(true);
     setMessages([]);
-    setConvState('listening');
-    // Immediate "I'm listening" greeting from VAAYU
-    setMessages([{
-      id: ++msgCounter,
-      role: 'vaayu',
-      text: "I'm listening, Boss. Go ahead.",
-      time: now(),
-    }]);
-    setTimeout(startListening, 400);
-  }, [startListening]);
+    setConvState('loading');
+    setMessages([{ id: ++msgCounter, role: 'vaayu', text: '…', time: now() }]);
+
+    // VAAYU greets with time-appropriate phrase, then starts listening
+    voice.chat(
+      `Greet your boss Shivam with a warm good-${period} greeting in one short sentence, ` +
+      `then tell him you're listening. Keep it natural and brief — no questions yet.`,
+      [],
+      () => setTimeout(startListening, 500),
+    );
+  }, [voice, startListening]);
 
   // ── Open conversation — topic briefing flow ───────────────────────
   const openConversation = useCallback((topicId = 'market_summary') => {
