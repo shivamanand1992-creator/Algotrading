@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
   { id: 'news',       label: 'Market News',     icon: '≡' },
   { id: 'holdings',   label: 'ETF Holdings',    icon: '⊞', section: 'PORTFOLIO' },
+  { id: 'portfolio',  label: 'Portfolio',        icon: '◫' },
 ];
 
 const bottomNavItems: NavItem[] = [

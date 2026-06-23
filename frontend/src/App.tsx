@@ -8,6 +8,7 @@ import { StocksView } from './components/stocks/StocksView';
 import { NiftyBeesView } from './components/niftybees/NiftyBeesView';
 import { SectorAnalysisView } from './components/sectors/SectorAnalysisView';
 import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
+import { PortfolioView } from './components/portfolio/PortfolioView';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -58,6 +59,7 @@ function App() {
       case 'niftybees':  return <NiftyBeesView />;
       case 'sectors':    return <SectorAnalysisView />;
       case 'holdings':   return <ETFHoldingsView />;
+      case 'portfolio':  return <PortfolioView />;
       case 'help':       return <HelpView />;
       default:           return <DashboardView />;
     }
