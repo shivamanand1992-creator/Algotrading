@@ -156,7 +156,7 @@ function ListeningBar({ transcript, timeout, pauseCountdown }: {
       <div style={{ flex: 1, minWidth: 0 }}>
         {pauseCountdown !== null ? (
           <p style={{ margin: 0, fontSize: 10, color: 'rgba(0,229,255,0.8)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
-            Got it — thinking in {pauseCountdown}s…
+            Got it — thinking…
           </p>
         ) : transcript ? (
           <p style={{
@@ -401,10 +401,13 @@ export function JarvisVoicePanel() {
   // ── Start listening for user question ────────────────────────────
   const startListening = useCallback(() => {
     stopListening();
+    // Set stateRef immediately — React state update is async so stateRef.current
+    // would still hold the previous value (e.g. 'speaking') when _launch() runs.
+    stateRef.current = 'listening';
     setConvState('listening');
     setTranscript('');
 
-    const TIMEOUT_S = 20; // extended to accommodate 3s pause
+    const TIMEOUT_S = 20;
     let elapsed = 0;
     let handled = false;
     let accumulatedText = '';
@@ -414,7 +417,6 @@ export function JarvisVoicePanel() {
       setListenTimer(1 - elapsed / TIMEOUT_S);
       if (elapsed >= TIMEOUT_S && !handled) {
         if (accumulatedText.trim()) {
-          // Process whatever the user managed to say before the timer ran out
           handled = true;
           clearPauseTimer();
           handleUserQuestionRef.current(accumulatedText.trim());
@@ -429,10 +431,10 @@ export function JarvisVoicePanel() {
     const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecog) return;
 
-    // Continuous mode: keeps running until we explicitly stop it.
-    // If Chrome times out due to silence, auto-restart within the timeout window.
     const _launch = () => {
-      if (handled || stateRef.current !== 'listening') return;
+      // Only guard on `handled` here — stateRef is set synchronously above.
+      // The onend re-launch uses stateRef to guard against late restarts.
+      if (handled) return;
 
       const recog = new SpeechRecog();
       recog.continuous      = true;
@@ -446,28 +448,13 @@ export function JarvisVoicePanel() {
         const text   = result[0].transcript.trim();
 
         if (result.isFinal && text) {
-          // Accumulate finalized text segments (user may speak in multiple sentences)
           accumulatedText += (accumulatedText ? ' ' : '') + text;
           setTranscript(accumulatedText);
-
-          // Clear any existing pause timer — user just finished another sentence
           clearPauseTimer();
 
-          // Start 3-second countdown before processing the query.
-          // If user speaks again (more onresult events), the timer resets.
-          let countdown = 3;
-          setPauseCountdown(countdown);
-          countdownRef.current = setInterval(() => {
-            countdown -= 1;
-            if (countdown <= 0) {
-              clearInterval(countdownRef.current!);
-              countdownRef.current = null;
-              setPauseCountdown(null);
-            } else {
-              setPauseCountdown(countdown);
-            }
-          }, 1000);
-
+          // Show "Got it…" indicator while waiting to process.
+          // 1.5s feels snappy — similar to Google/ChatGPT voice assistants.
+          setPauseCountdown(1);
           pauseTimerRef.current = setTimeout(() => {
             if (!handled && accumulatedText.trim()) {
               handled = true;
@@ -475,26 +462,23 @@ export function JarvisVoicePanel() {
               try { recog.stop(); } catch {}
               handleUserQuestionRef.current(accumulatedText.trim());
             }
-          }, 3000);
+          }, 1500);
 
-        } else if (!result.isFinal) {
-          // Interim result: only reset the pause timer if the user actually said something.
-          // Chrome sends empty interim events when a new recognition session starts after
-          // silence — if we reset on those, the 3s countdown never fires.
-          if (text) {
-            setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
-            clearPauseTimer();
-          }
+        } else if (!result.isFinal && text) {
+          // Non-empty interim = user actively speaking, reset the pause timer
+          setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
+          clearPauseTimer();
         }
+        // Empty interim (Chrome restart artefact) → ignored, pause timer preserved
       };
 
       recog.onerror = (e: any) => {
         if (e.error !== 'no-speech') console.debug('[VAAYU listen] error:', e.error);
       };
 
-      // Auto-restart when Chrome's silence timeout fires
       recog.onend = () => {
         recogRef.current = null;
+        // Use stateRef here (async event — React has already re-rendered by now)
         if (!handled && stateRef.current === 'listening') {
           setTimeout(_launch, 120);
         }
