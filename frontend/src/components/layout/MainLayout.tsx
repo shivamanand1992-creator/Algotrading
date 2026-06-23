@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { id: 'market',    label: 'MARKET',    icon: '⊕' },
   { id: 'sectors',   label: 'SECTORS',   icon: '↻' },
   { id: 'news',      label: 'NEWS',      icon: '≡' },
-  { id: 'holdings',  label: 'HOLDINGS',  icon: '⊞' },
+  { id: 'holdings',  label: 'ETF HOLDINGS', icon: '⊞' },
   { id: 'portfolio', label: 'PORTFOLIO', icon: '◫' },
   { id: 'help',      label: 'HELP',      icon: '?' },
 ];

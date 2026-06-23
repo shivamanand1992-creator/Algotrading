@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -42,6 +43,15 @@ def _cache_set(symbol: str, data: Dict[str, Any]) -> None:
     _CACHE[symbol] = {"data": data, "ts": datetime.now(_IST)}
 
 
+def _f(val, decimals: int = 2) -> Optional[float]:
+    """Round a float; return None if NaN/Inf (not JSON-serialisable)."""
+    try:
+        v = float(val)
+        return None if (math.isnan(v) or math.isinf(v)) else round(v, decimals)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Technical Analysis
 # ---------------------------------------------------------------------------
@@ -62,59 +72,64 @@ def _compute_ta(symbol: str) -> Dict[str, Any]:
         volume = df["Volume"].squeeze()
 
         # RSI
-        rsi     = float(ta_lib.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
+        rsi_raw = _f(ta_lib.momentum.RSIIndicator(close, window=14).rsi().iloc[-1], 1)
+        rsi     = rsi_raw if rsi_raw is not None else 50.0
         rsi_sig = "Oversold" if rsi < 30 else "Overbought" if rsi > 70 else "Neutral"
 
         # MACD
         macd_obj  = ta_lib.trend.MACD(close)
-        macd_val  = float(macd_obj.macd().iloc[-1])
-        macd_sig  = float(macd_obj.macd_signal().iloc[-1])
-        macd_hist = float(macd_obj.macd_diff().iloc[-1])
+        macd_val  = _f(macd_obj.macd().iloc[-1])
+        macd_sig  = _f(macd_obj.macd_signal().iloc[-1])
+        macd_hist = _f(macd_obj.macd_diff().iloc[-1])
 
         # Bollinger Bands
         bb      = ta_lib.volatility.BollingerBands(close, window=20, window_dev=2)
-        bb_up   = float(bb.bollinger_hband().iloc[-1])
-        bb_lo   = float(bb.bollinger_lband().iloc[-1])
-        bb_mid  = float(bb.bollinger_mavg().iloc[-1])
+        bb_up   = _f(bb.bollinger_hband().iloc[-1])
+        bb_lo   = _f(bb.bollinger_lband().iloc[-1])
+        bb_mid  = _f(bb.bollinger_mavg().iloc[-1])
 
-        cur = float(close.iloc[-1])
-        bb_pos = ("Above upper" if cur > bb_up
-                  else "Below lower" if cur < bb_lo
+        cur = _f(close.iloc[-1]) or 0.0
+        bb_pos = ("Above upper" if (bb_up and cur > bb_up)
+                  else "Below lower" if (bb_lo and cur < bb_lo)
                   else "Inside bands")
 
         # Moving averages
-        sma20 = float(close.rolling(20).mean().iloc[-1])
-        sma50 = float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
-        ema20 = float(close.ewm(span=20).mean().iloc[-1])
+        sma20 = _f(close.rolling(20).mean().iloc[-1])
+        sma50 = _f(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
+        ema20 = _f(close.ewm(span=20).mean().iloc[-1])
 
         # 52-week extremes
         w52   = min(len(high), 252)
-        h52   = float(high.iloc[-w52:].max())
-        l52   = float(low.iloc[-w52:].min())
+        h52   = _f(high.iloc[-w52:].max())
+        l52   = _f(low.iloc[-w52:].min())
         pct_h = round(((cur - h52) / h52) * 100, 1) if h52 else 0.0
 
+        # Volume — safely cast (may be NaN for some ETFs)
+        avg_vol = _f(volume.rolling(20).mean().iloc[-1], 0)
+        last_vol = _f(volume.iloc[-1], 0)
+
         return {
-            "current_price":      round(cur, 2),
-            "rsi":                round(rsi, 1),
+            "current_price":      cur,
+            "rsi":                rsi,
             "rsi_signal":         rsi_sig,
-            "macd":               round(macd_val, 2),
-            "macd_signal":        round(macd_sig, 2),
-            "macd_histogram":     round(macd_hist, 2),
-            "macd_bullish":       macd_hist > 0,
-            "bb_upper":           round(bb_up, 2),
-            "bb_lower":           round(bb_lo, 2),
-            "bb_mid":             round(bb_mid, 2),
+            "macd":               macd_val,
+            "macd_signal":        macd_sig,
+            "macd_histogram":     macd_hist,
+            "macd_bullish":       (macd_hist or 0) > 0,
+            "bb_upper":           bb_up,
+            "bb_lower":           bb_lo,
+            "bb_mid":             bb_mid,
             "price_vs_bb":        bb_pos,
-            "sma_20":             round(sma20, 2),
-            "sma_50":             round(sma50, 2) if sma50 else None,
-            "ema_20":             round(ema20, 2),
-            "above_sma20":        cur > sma20,
+            "sma_20":             sma20,
+            "sma_50":             sma50,
+            "ema_20":             ema20,
+            "above_sma20":        cur > (sma20 or 0),
             "above_sma50":        (cur > sma50) if sma50 else None,
-            "high_52w":           round(h52, 2),
-            "low_52w":            round(l52, 2),
+            "high_52w":           h52,
+            "low_52w":            l52,
             "pct_from_52w_high":  pct_h,
-            "avg_volume_20d":     int(volume.rolling(20).mean().iloc[-1]),
-            "last_volume":        int(volume.iloc[-1]),
+            "avg_volume_20d":     int(avg_vol) if avg_vol else None,
+            "last_volume":        int(last_vol) if last_vol else None,
         }
     except Exception as exc:
         logger.warning(f"[Analysis] TA failed for {symbol}: {exc}")
@@ -129,42 +144,66 @@ def _compute_fa(symbol: str) -> Dict[str, Any]:
     try:
         import yfinance as yf
 
-        info = yf.Ticker(f"{symbol}.NS").info
+        try:
+            info = yf.Ticker(f"{symbol}.NS").info
+        except Exception as fetch_exc:
+            logger.warning(f"[Analysis] yfinance info fetch failed for {symbol}: {fetch_exc}")
+            info = {}
+
+        # Empty dict means yfinance returned nothing useful
+        if not info or info.get("trailingPegRatio") is None and info.get("marketCap") is None:
+            logger.info(f"[Analysis] FA: no useful data from yfinance for {symbol} — may be ETF or delisted")
 
         def _s(key, default=None):
             v = info.get(key)
-            return v if v not in (None, "N/A", "", 0) else default
+            if v in (None, "N/A", "", 0, "None"):
+                return default
+            try:
+                fv = float(v)
+                return default if (math.isnan(fv) or math.isinf(fv)) else v
+            except (TypeError, ValueError):
+                return v
 
         mc = _s("marketCap")
 
         def _fmt_cap(v):
             if not v:
                 return None
-            if v >= 1e12:
-                return f"₹{v/1e12:.1f}T"
-            if v >= 1e9:
-                return f"₹{v/1e9:.1f}B"
-            return f"₹{v/1e7:.0f}Cr"
+            try:
+                v = float(v)
+                if v >= 1e12: return f"₹{v/1e12:.1f}T"
+                if v >= 1e9:  return f"₹{v/1e9:.1f}B"
+                return f"₹{v/1e7:.0f}Cr"
+            except Exception:
+                return None
 
         def _pct(key):
             v = _s(key)
-            return round(float(v) * 100, 1) if v is not None else None
+            try:
+                fv = float(v)
+                return round(fv * 100, 1) if not math.isnan(fv) else None
+            except Exception:
+                return None
 
-        def _f(key, dec=2):
+        def _fa_f(key, dec=2):
             v = _s(key)
-            return round(float(v), dec) if v is not None else None
+            try:
+                fv = float(v)
+                return round(fv, dec) if not math.isnan(fv) else None
+            except Exception:
+                return None
 
         return {
             "market_cap_fmt":      _fmt_cap(mc),
-            "trailing_pe":         _f("trailingPE", 1),
-            "forward_pe":          _f("forwardPE", 1),
-            "price_to_book":       _f("priceToBook"),
+            "trailing_pe":         _fa_f("trailingPE", 1),
+            "forward_pe":          _fa_f("forwardPE", 1),
+            "price_to_book":       _fa_f("priceToBook"),
             "dividend_yield_pct":  _pct("dividendYield"),
             "roe_pct":             _pct("returnOnEquity"),
             "revenue_growth_pct":  _pct("revenueGrowth"),
             "earnings_growth_pct": _pct("earningsGrowth"),
-            "debt_to_equity":      _f("debtToEquity"),
-            "current_ratio":       _f("currentRatio"),
+            "debt_to_equity":      _fa_f("debtToEquity"),
+            "current_ratio":       _fa_f("currentRatio"),
             "profit_margin_pct":   _pct("profitMargins"),
             "sector":              _s("sector"),
             "industry":            _s("industry"),
