@@ -128,47 +128,69 @@ function Bubble({ msg, isLatest, isSpeaking }: {
 
 // ── Listening indicator ───────────────────────────────────────────────────
 
-function ListeningBar({ transcript, timeout, pauseCountdown }: {
-  transcript: string; timeout: number; pauseCountdown: number | null;
+const BAR_SHAPE = [0.45, 0.75, 1.0, 0.9, 1.0, 0.7, 0.4];
+
+function ListeningBar({ transcript, timeout, pauseCountdown, micLevel }: {
+  transcript: string; timeout: number; pauseCountdown: number | null; micLevel: number;
 }) {
+  const isHearing   = micLevel > 0.04;
+  const isThinking  = pauseCountdown !== null;
+
   return (
     <div style={{
-      padding: '10px 14px',
-      background: 'rgba(124,58,237,0.08)',
-      border: '1px solid rgba(124,58,237,0.25)',
+      padding: '12px 14px',
+      background: isThinking ? 'rgba(0,229,255,0.05)' : isHearing ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
+      border: `1px solid ${isThinking ? 'rgba(0,229,255,0.35)' : isHearing ? 'rgba(168,85,247,0.55)' : 'rgba(124,58,237,0.22)'}`,
       borderRadius: 10,
       display: 'flex', alignItems: 'center', gap: 10,
+      transition: 'background 0.2s, border-color 0.2s',
     }}>
-      {/* Animated mic */}
-      <motion.div
-        style={{ flexShrink: 0, display: 'flex', gap: 2, alignItems: 'flex-end' }}
-      >
-        {[3, 5, 4, 6, 3].map((h, i) => (
-          <motion.div
-            key={i}
-            style={{ width: 2, background: pauseCountdown !== null ? '#00e5ff' : '#7c3aed', borderRadius: 2 }}
-            animate={{ height: [h, h + 4, h] }}
-            transition={{ duration: pauseCountdown !== null ? 0.3 : 0.5, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
-          />
-        ))}
-      </motion.div>
 
+      {/* Real-time mic bars — height driven by actual AudioContext level */}
+      <div style={{ flexShrink: 0, display: 'flex', gap: 3, alignItems: 'center', height: 32 }}>
+        {BAR_SHAPE.map((shape, i) => {
+          const h = isThinking
+            ? 3
+            : Math.max(3, Math.min(28, micLevel * 140 * shape));
+          return (
+            <div
+              key={i}
+              style={{
+                width: 3,
+                height: h,
+                borderRadius: 3,
+                background: isThinking
+                  ? '#00e5ff'
+                  : isHearing
+                    ? `rgba(168,85,247,${0.6 + shape * 0.4})`
+                    : 'rgba(124,58,237,0.3)',
+                transition: 'height 0.07s ease-out, background 0.15s',
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Status text */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        {pauseCountdown !== null ? (
-          <p style={{ margin: 0, fontSize: 10, color: 'rgba(0,229,255,0.8)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+        {isThinking ? (
+          <p style={{ margin: 0, fontSize: 10, color: 'rgba(0,229,255,0.85)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
             Got it — thinking…
           </p>
         ) : transcript ? (
           <p style={{
-            margin: 0, fontSize: 11, color: 'rgba(200,185,255,0.9)',
-            fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            margin: 0, fontSize: 11, color: 'rgba(210,185,255,0.95)',
+            fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             "{transcript}"
           </p>
+        ) : isHearing ? (
+          <p style={{ margin: 0, fontSize: 10, color: 'rgba(168,85,247,0.95)', fontFamily: 'monospace', letterSpacing: '0.1em', fontWeight: 700 }}>
+            HEARING YOU…
+          </p>
         ) : (
-          <p style={{ margin: 0, fontSize: 10, color: 'rgba(124,58,237,0.7)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
-            LISTENING…
+          <p style={{ margin: 0, fontSize: 10, color: 'rgba(124,58,237,0.6)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+            LISTENING… SPEAK NOW
           </p>
         )}
       </div>
@@ -176,7 +198,9 @@ function ListeningBar({ transcript, timeout, pauseCountdown }: {
       {/* Timeout arc */}
       <svg width={20} height={20} style={{ flexShrink: 0 }}>
         <circle cx={10} cy={10} r={8} fill="none" stroke="rgba(124,58,237,0.15)" strokeWidth={2} />
-        <circle cx={10} cy={10} r={8} fill="none" stroke={pauseCountdown !== null ? 'rgba(0,229,255,0.6)' : 'rgba(124,58,237,0.6)'} strokeWidth={2}
+        <circle cx={10} cy={10} r={8} fill="none"
+          stroke={isThinking ? 'rgba(0,229,255,0.6)' : 'rgba(124,58,237,0.55)'}
+          strokeWidth={2}
           strokeDasharray={`${50.3 * timeout} 50.3`}
           strokeLinecap="round"
           transform="rotate(-90 10 10)"
@@ -294,6 +318,7 @@ export function JarvisVoicePanel() {
   const [topics,         setTopics]         = useState<Topic[]>(FALLBACK_TOPICS);
   const [showTopics,     setShowTopics]     = useState(false);
   const [textInput,      setTextInput]      = useState('');
+  const [micLevel,      setMicLevel]       = useState(0);
 
   const voice          = useJarvisVoice();
   const scrollRef      = useRef<HTMLDivElement>(null);
@@ -306,6 +331,9 @@ export function JarvisVoicePanel() {
   const pauseTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef         = useRef<ReturnType<typeof setInterval> | null>(null);
   const handleUserQuestionRef = useRef<(q: string) => void>(() => {});
+  const micCtxRef    = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAnimRef   = useRef<number | null>(null);
 
   // Load topics from API
   useEffect(() => {
@@ -333,6 +361,36 @@ export function JarvisVoicePanel() {
     setPauseCountdown(null);
   }, []);
 
+  // ── Mic level monitor (parallel to SpeechRecognition) ───────────
+  const stopMicMonitor = useCallback(() => {
+    if (micAnimRef.current)   { cancelAnimationFrame(micAnimRef.current); micAnimRef.current = null; }
+    if (micCtxRef.current)    { micCtxRef.current.close().catch(() => {}); micCtxRef.current = null; }
+    if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+    setMicLevel(0);
+  }, []);
+
+  const startMicMonitor = useCallback(() => {
+    stopMicMonitor();
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
+      micStreamRef.current = stream;
+      const ctx = new AudioContext();
+      micCtxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.8;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(buf);
+        // Speech frequencies sit roughly in bins 2-12 of a 64-point FFT at 48 kHz
+        const avg = Array.from(buf.slice(2, 12)).reduce((a, b) => a + b, 0) / 10;
+        setMicLevel(avg / 255);
+        micAnimRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    }).catch(() => { setMicLevel(0); });
+  }, [stopMicMonitor]);
+
   // ── Stop listening ───────────────────────────────────────────────
   const stopListening = useCallback(() => {
     if (recogRef.current) {
@@ -346,9 +404,10 @@ export function JarvisVoicePanel() {
       listenTimerRef.current = null;
     }
     clearPauseTimer();
+    stopMicMonitor();
     setTranscript('');
     setListenTimer(1.0);
-  }, [clearPauseTimer]);
+  }, [clearPauseTimer, stopMicMonitor]);
 
   // ── Barge-in control ─────────────────────────────────────────────
   const stopBargeIn = useCallback(() => {
@@ -488,7 +547,8 @@ export function JarvisVoicePanel() {
     };
 
     _launch();
-  }, [stopListening, clearPauseTimer]); // eslint-disable-line react-hooks/exhaustive-deps
+    startMicMonitor(); // parallel audio-level monitor so user sees bars moving
+  }, [stopListening, clearPauseTimer, startMicMonitor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep startListenRef in sync so barge-in can call latest closure
   useEffect(() => { startListenRef.current = startListening; }, [startListening]);
@@ -832,6 +892,7 @@ export function JarvisVoicePanel() {
                       transcript={transcript}
                       timeout={listenTimer}
                       pauseCountdown={pauseCountdown}
+                      micLevel={micLevel}
                     />
                   </motion.div>
                 )}
