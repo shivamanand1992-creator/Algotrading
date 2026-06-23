@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "pip install -r requirements.txt && cd frontend && npm install && npm run build && cd .."
+buildCommand = "pip install 'setuptools<68' && pip install -r requirements.txt && cd frontend && npm install && npm run build && cd .."
 
 [deploy]
 startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
