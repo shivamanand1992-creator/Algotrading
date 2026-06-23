@@ -128,7 +128,9 @@ function Bubble({ msg, isLatest, isSpeaking }: {
 
 // ── Listening indicator ───────────────────────────────────────────────────
 
-function ListeningBar({ transcript, timeout }: { transcript: string; timeout: number }) {
+function ListeningBar({ transcript, timeout, pauseCountdown }: {
+  transcript: string; timeout: number; pauseCountdown: number | null;
+}) {
   return (
     <div style={{
       padding: '10px 14px',
@@ -144,15 +146,19 @@ function ListeningBar({ transcript, timeout }: { transcript: string; timeout: nu
         {[3, 5, 4, 6, 3].map((h, i) => (
           <motion.div
             key={i}
-            style={{ width: 2, background: '#7c3aed', borderRadius: 2 }}
+            style={{ width: 2, background: pauseCountdown !== null ? '#00e5ff' : '#7c3aed', borderRadius: 2 }}
             animate={{ height: [h, h + 4, h] }}
-            transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
+            transition={{ duration: pauseCountdown !== null ? 0.3 : 0.5, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
           />
         ))}
       </motion.div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        {transcript ? (
+        {pauseCountdown !== null ? (
+          <p style={{ margin: 0, fontSize: 10, color: 'rgba(0,229,255,0.8)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+            Got it — thinking in {pauseCountdown}s…
+          </p>
+        ) : transcript ? (
           <p style={{
             margin: 0, fontSize: 11, color: 'rgba(200,185,255,0.9)',
             fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden',
@@ -170,7 +176,7 @@ function ListeningBar({ transcript, timeout }: { transcript: string; timeout: nu
       {/* Timeout arc */}
       <svg width={20} height={20} style={{ flexShrink: 0 }}>
         <circle cx={10} cy={10} r={8} fill="none" stroke="rgba(124,58,237,0.15)" strokeWidth={2} />
-        <circle cx={10} cy={10} r={8} fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth={2}
+        <circle cx={10} cy={10} r={8} fill="none" stroke={pauseCountdown !== null ? 'rgba(0,229,255,0.6)' : 'rgba(124,58,237,0.6)'} strokeWidth={2}
           strokeDasharray={`${50.3 * timeout} 50.3`}
           strokeLinecap="round"
           transform="rotate(-90 10 10)"
@@ -185,7 +191,7 @@ function ListeningBar({ transcript, timeout }: { transcript: string; timeout: nu
 function FabButton({ convOpen, convState, micReady, onClick }: {
   convOpen: boolean; convState: ConvState; micReady: boolean; onClick: () => void;
 }) {
-  const active   = convOpen && convState !== 'closed';
+  const active    = convOpen && convState !== 'closed';
   const isLoading = convState === 'loading';
 
   return (
@@ -202,7 +208,7 @@ function FabButton({ convOpen, convState, micReady, onClick }: {
         />
       )}
 
-      {/* Listening ring when conversation is listening */}
+      {/* Listening ring */}
       {convState === 'listening' && (
         <motion.div
           style={{
@@ -246,7 +252,11 @@ function FabButton({ convOpen, convState, micReady, onClick }: {
               ? { duration: 2, repeat: Infinity, ease: 'linear' }
               : {}
         }
-        title={convState === 'speaking' ? 'Tap to interrupt' : convOpen ? 'Close VAAYU' : micReady ? 'Ask VAAYU (or clap)' : 'Ask VAAYU'}
+        title={
+          convState === 'speaking' ? 'Speak or tap to interrupt'
+          : convOpen ? 'Close VAAYU'
+          : 'Talk to VAAYU'
+        }
         style={{
           width: 60, height: 60, borderRadius: '50%',
           background: active
@@ -275,14 +285,15 @@ function FabButton({ convOpen, convState, micReady, onClick }: {
 // ── Main Panel ────────────────────────────────────────────────────────────
 
 export function JarvisVoicePanel() {
-  const [convOpen,     setConvOpen]     = useState(false);
-  const [convState,    setConvState]    = useState<ConvState>('closed');
-  const [messages,     setMessages]     = useState<Message[]>([]);
-  const [transcript,   setTranscript]   = useState('');
-  const [listenTimer,  setListenTimer]  = useState(1.0);  // 0→1 countdown for arc
-  const [topics,       setTopics]       = useState<Topic[]>(FALLBACK_TOPICS);
-  const [showTopics,   setShowTopics]   = useState(false);
-  const [textInput,    setTextInput]    = useState('');
+  const [convOpen,       setConvOpen]       = useState(false);
+  const [convState,      setConvState]      = useState<ConvState>('closed');
+  const [messages,       setMessages]       = useState<Message[]>([]);
+  const [transcript,     setTranscript]     = useState('');
+  const [listenTimer,    setListenTimer]    = useState(1.0);
+  const [pauseCountdown, setPauseCountdown] = useState<number | null>(null);
+  const [topics,         setTopics]         = useState<Topic[]>(FALLBACK_TOPICS);
+  const [showTopics,     setShowTopics]     = useState(false);
+  const [textInput,      setTextInput]      = useState('');
 
   const voice          = useJarvisVoice();
   const scrollRef      = useRef<HTMLDivElement>(null);
@@ -292,6 +303,8 @@ export function JarvisVoicePanel() {
   stateRef.current      = convState;
   const bargeInRef      = useRef<any>(null);
   const startListenRef  = useRef<() => void>(() => {});
+  const pauseTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load topics from API
   useEffect(() => {
@@ -312,10 +325,17 @@ export function JarvisVoicePanel() {
     setMessages(prev => [...prev, { id: ++msgCounter, role, text, time: now() }]);
   }, []);
 
+  // ── Clear pause countdown ────────────────────────────────────────
+  const clearPauseTimer = useCallback(() => {
+    if (pauseTimerRef.current) { clearTimeout(pauseTimerRef.current); pauseTimerRef.current = null; }
+    if (countdownRef.current)  { clearInterval(countdownRef.current); countdownRef.current = null; }
+    setPauseCountdown(null);
+  }, []);
+
   // ── Stop listening ───────────────────────────────────────────────
   const stopListening = useCallback(() => {
     if (recogRef.current) {
-      recogRef.current.onend  = null;
+      recogRef.current.onend    = null;
       recogRef.current.onresult = null;
       try { recogRef.current.stop(); } catch {}
       recogRef.current = null;
@@ -324,9 +344,10 @@ export function JarvisVoicePanel() {
       clearInterval(listenTimerRef.current);
       listenTimerRef.current = null;
     }
+    clearPauseTimer();
     setTranscript('');
     setListenTimer(1.0);
-  }, []);
+  }, [clearPauseTimer]);
 
   // ── Barge-in control ─────────────────────────────────────────────
   const stopBargeIn = useCallback(() => {
@@ -382,9 +403,10 @@ export function JarvisVoicePanel() {
     setConvState('listening');
     setTranscript('');
 
-    const TIMEOUT_S = 14;
+    const TIMEOUT_S = 20; // extended to accommodate 3s pause
     let elapsed = 0;
     let handled = false;
+    let accumulatedText = '';
 
     listenTimerRef.current = setInterval(() => {
       elapsed += 0.1;
@@ -405,7 +427,7 @@ export function JarvisVoicePanel() {
       if (handled || stateRef.current !== 'listening') return;
 
       const recog = new SpeechRecog();
-      recog.continuous      = true;   // don't stop after first utterance
+      recog.continuous      = true;
       recog.interimResults  = true;
       recog.lang            = 'en-IN';
       recog.maxAlternatives = 1;
@@ -413,12 +435,45 @@ export function JarvisVoicePanel() {
 
       recog.onresult = (e: any) => {
         const result = e.results[e.results.length - 1];
-        const text   = result[0].transcript;
-        setTranscript(text);
-        if (result.isFinal && text.trim() && !handled) {
-          handled = true;
-          try { recog.stop(); } catch {}
-          handleUserQuestion(text.trim());
+        const text   = result[0].transcript.trim();
+
+        if (result.isFinal && text) {
+          // Accumulate finalized text segments (user may speak in multiple sentences)
+          accumulatedText += (accumulatedText ? ' ' : '') + text;
+          setTranscript(accumulatedText);
+
+          // Clear any existing pause timer — user just finished another sentence
+          clearPauseTimer();
+
+          // Start 3-second countdown before processing the query.
+          // If user speaks again (more onresult events), the timer resets.
+          let countdown = 3;
+          setPauseCountdown(countdown);
+          countdownRef.current = setInterval(() => {
+            countdown -= 1;
+            if (countdown <= 0) {
+              clearInterval(countdownRef.current!);
+              countdownRef.current = null;
+              setPauseCountdown(null);
+            } else {
+              setPauseCountdown(countdown);
+            }
+          }, 1000);
+
+          pauseTimerRef.current = setTimeout(() => {
+            if (!handled && accumulatedText.trim()) {
+              handled = true;
+              clearPauseTimer();
+              try { recog.stop(); } catch {}
+              handleUserQuestion(accumulatedText.trim());
+            }
+          }, 3000);
+
+        } else if (!result.isFinal) {
+          // Interim result: show accumulated + current interim; reset pause timer
+          setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
+          // User is still speaking — cancel the pause timer
+          clearPauseTimer();
         }
       };
 
@@ -426,7 +481,7 @@ export function JarvisVoicePanel() {
         if (e.error !== 'no-speech') console.debug('[VAAYU listen] error:', e.error);
       };
 
-      // Auto-restart when Chrome's silence timeout fires, so VAAYU keeps listening
+      // Auto-restart when Chrome's silence timeout fires
       recog.onend = () => {
         recogRef.current = null;
         if (!handled && stateRef.current === 'listening') {
@@ -438,12 +493,12 @@ export function JarvisVoicePanel() {
     };
 
     _launch();
-  }, [stopListening]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stopListening, clearPauseTimer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep startListenRef in sync so barge-in can call latest closure
   useEffect(() => { startListenRef.current = startListening; }, [startListening]);
 
-  // ── Handle user's spoken question ────────────────────────────────
+  // ── Handle user's spoken / typed question ────────────────────────
   const handleUserQuestion = useCallback(async (question: string) => {
     stopListening();
 
@@ -456,7 +511,7 @@ export function JarvisVoicePanel() {
     ) {
       addMessage('user', question);
       setConvState('loading');
-      voice.chat("The user wants to end the conversation. Say a brief warm goodbye.", [], () => {
+      voice.chat("The user wants to end the conversation. Say a brief warm goodbye, Boss.", [], () => {
         setConvState('closed');
         setConvOpen(false);
         setMessages([]);
@@ -484,8 +539,6 @@ export function JarvisVoicePanel() {
       // After VAAYU responds, listen for next question
       setTimeout(startListening, 600);
     });
-
-    // Replace placeholder with actual script once available (watched via effect below)
   }, [stopListening, addMessage, voice, startListening, messages]);
 
   // Replace placeholder "…" with actual script when it arrives
@@ -512,16 +565,29 @@ export function JarvisVoicePanel() {
     setTranscript('');
   }, [stopListening, voice]);
 
-  // ── Open conversation (greet + brief) ────────────────────────────
+  // ── Open conversation — direct LISTENING mode (no topic briefing) ─
+  const openConversationListening = useCallback(() => {
+    setConvOpen(true);
+    setMessages([]);
+    setConvState('listening');
+    // Immediate "I'm listening" greeting from VAAYU
+    setMessages([{
+      id: ++msgCounter,
+      role: 'vaayu',
+      text: "I'm listening, Boss. Go ahead.",
+      time: now(),
+    }]);
+    setTimeout(startListening, 400);
+  }, [startListening]);
+
+  // ── Open conversation — topic briefing flow ───────────────────────
   const openConversation = useCallback((topicId = 'market_summary') => {
     setConvOpen(true);
     setMessages([]);
     setConvState('loading');
-    // Placeholder vaayu bubble
     setMessages([{ id: ++msgCounter, role: 'vaayu', text: '…', time: now() }]);
 
     voice.speak(topicId, () => {
-      // After greeting brief → start listening
       setTimeout(startListening, 500);
     });
   }, [voice, startListening]);
@@ -531,7 +597,7 @@ export function JarvisVoicePanel() {
     enabled: !convOpen,
     onWake: (source) => {
       console.debug('[VAAYU] woken by', source);
-      openConversation('market_summary');
+      openConversationListening();
     },
   });
 
@@ -570,14 +636,15 @@ export function JarvisVoicePanel() {
     else                                                             setVaayuConvState('idle');
   }, [convOpen, convState]);
 
-  const micReady   = wakePermission === 'granted';
-  const isSpeaking = convState === 'speaking';
+  const micReady    = wakePermission === 'granted';
+  const isSpeaking  = convState === 'speaking';
   const isListening = convState === 'listening';
 
+  // FAB click: when closed → go directly to listening mode.
+  // When open + speaking → interrupt. When open + listening → close.
   const handleFabClick = () => {
     if (convOpen) {
       if (isSpeaking) {
-        // Interrupt VAAYU — stop audio and start listening
         stopBargeIn();
         voice.stop();
         setTimeout(() => startListenRef.current(), 150);
@@ -587,7 +654,7 @@ export function JarvisVoicePanel() {
         setShowTopics(s => !s);
       }
     } else {
-      setShowTopics(s => !s);
+      openConversationListening();
     }
   };
 
@@ -635,11 +702,11 @@ export function JarvisVoicePanel() {
                   color: isSpeaking ? '#00e5ff' : isListening ? '#a855f7' : 'rgba(0,229,255,0.55)',
                   fontWeight: 700,
                 }}>
-                  {isSpeaking ? 'VAAYU SPEAKING' : isListening ? 'LISTENING' : convState === 'processing' ? 'THINKING…' : 'VAAYU'}
+                  {isSpeaking ? 'VAAYU SPEAKING' : isListening ? 'LISTENING…' : convState === 'processing' ? 'THINKING…' : 'VAAYU'}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                {/* Topic selector mini button */}
+                {/* Topic selector */}
                 <button
                   onClick={() => setShowTopics(s => !s)}
                   style={{
@@ -663,7 +730,7 @@ export function JarvisVoicePanel() {
               </div>
             </div>
 
-            {/* Topic mini-panel (shown when Topics clicked) */}
+            {/* Topic mini-panel */}
             <AnimatePresence>
               {showTopics && (
                 <motion.div
@@ -752,14 +819,18 @@ export function JarvisVoicePanel() {
               )}
             </AnimatePresence>
 
-            {/* Listening bar */}
+            {/* Listening bar / processing indicator */}
             <div style={{ padding: '8px 14px 14px', flexShrink: 0 }}>
               <AnimatePresence>
                 {isListening && (
                   <motion.div
                     initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                   >
-                    <ListeningBar transcript={transcript} timeout={listenTimer} />
+                    <ListeningBar
+                      transcript={transcript}
+                      timeout={listenTimer}
+                      pauseCountdown={pauseCountdown}
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -781,11 +852,11 @@ export function JarvisVoicePanel() {
               )}
               {!isListening && convState === 'closed' && (
                 <p style={{ margin: 0, fontSize: 9.5, color: 'rgba(160,196,224,0.35)', fontFamily: 'monospace', textAlign: 'center' }}>
-                  Conversation ended — clap or click ◈ to restart
+                  Conversation ended — say "Hey VAAYU" or click ◈ to restart
                 </p>
               )}
 
-              {/* ── Text input (always shown while conv is open) ── */}
+              {/* Text input */}
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <input
                   value={textInput}
@@ -889,6 +960,37 @@ export function JarvisVoicePanel() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── "TALK TO VAAYU" label (shown when conversation is closed) ── */}
+      {!convOpen && (
+        <motion.div
+          initial={{ opacity: 0, x: 10 }}
+          animate={{ opacity: 1, x: 0 }}
+          style={{
+            position: 'absolute', right: 68, bottom: 16,
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'rgba(2,4,18,0.90)',
+            border: '1px solid rgba(0,229,255,0.18)',
+            borderRadius: 8, padding: '5px 12px',
+            cursor: 'pointer', pointerEvents: 'all',
+            whiteSpace: 'nowrap',
+          }}
+          onClick={openConversationListening}
+          whileHover={{ borderColor: 'rgba(0,229,255,0.4)', background: 'rgba(0,20,40,0.95)' }}
+        >
+          <motion.div
+            style={{ width: 6, height: 6, borderRadius: '50%', background: micReady ? '#4ade80' : 'rgba(0,229,255,0.4)' }}
+            animate={micReady ? { scale: [1, 1.4, 1], opacity: [1, 0.5, 1] } : {}}
+            transition={{ duration: 2, repeat: Infinity }}
+          />
+          <span style={{
+            fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.15em',
+            color: 'rgba(0,229,255,0.8)', fontWeight: 700,
+          }}>
+            TALK TO VAAYU
+          </span>
+        </motion.div>
+      )}
 
       {/* ── FAB ── */}
       <FabButton

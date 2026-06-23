@@ -1,152 +1,147 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
-export type WakePermission = 'pending' | 'granted' | 'denied';
-export type WakeSource    = 'clap' | 'voice';
-
-interface Options {
-  enabled?: boolean;
-  onWake: (source: WakeSource) => void;
+interface UseWakeWordOptions {
+  enabled: boolean;
+  onWake: (source: 'clap' | 'voice') => void;
 }
 
-/**
- * Always-on wake word listener.
- *
- * Triggers `onWake` when:
- *   • A clap is detected (loud transient via AnalyserNode)
- *   • The user says "Vaayu" / "Vayu" (Web Speech API)
- *
- * Automatically requests mic permission on mount.
- * 2-second cooldown after each trigger to avoid double-firing.
- */
-export function useWakeWord({ enabled = true, onWake }: Options) {
-  const [permission, setPermission] = useState<WakePermission>('pending');
+export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
+  const [permission, setPermission] = useState<'prompt' | 'granted' | 'denied'>('prompt');
 
-  const cooldownRef = useRef(false);
-  const onWakeRef   = useRef(onWake);
-  onWakeRef.current = onWake;
+  const audioCtxRef  = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const recogRef     = useRef<any>(null);
+  const lastWakeRef  = useRef<number>(0);
+  const streamRef    = useRef<MediaStream | null>(null);
 
-  const fire = useCallback((source: WakeSource) => {
-    if (cooldownRef.current) return;
-    cooldownRef.current = true;
-    setTimeout(() => { cooldownRef.current = false; }, 2000);
-    onWakeRef.current(source);
-  }, []);
+  const COOLDOWN_MS = 2000;
 
+  const triggerWake = useCallback((source: 'clap' | 'voice') => {
+    const now = Date.now();
+    if (now - lastWakeRef.current < COOLDOWN_MS) return;
+    lastWakeRef.current = now;
+    onWake(source);
+  }, [onWake]);
+
+  // ── Clap / sound-spike detection ─────────────────────────────────
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+      return;
+    }
 
-    let rafId    = 0;
-    let stopped  = false;
-    let stream:  MediaStream | null  = null;
-    let audioCtx: AudioContext | null = null;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      streamRef.current = stream;
+      setPermission('granted');
 
-    // ── Clap detection via mic ───────────────────────────────────────
-    navigator.mediaDevices
-      .getUserMedia({ audio: true, video: false })
-      .then(s => {
-        if (stopped) { s.getTracks().forEach(t => t.stop()); return; }
-        stream  = s;
-        setPermission('granted');
+      const ctx     = new AudioContext();
+      audioCtxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.3;
+      const src = ctx.createMediaStreamSource(stream);
+      src.connect(analyser);
 
-        audioCtx = new AudioContext();
-        const src      = audioCtx.createMediaStreamSource(s);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 512;
-        // Low smoothing so we catch the sharp attack of a clap
-        analyser.smoothingTimeConstant = 0.05;
-        src.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      let prevRms    = 0;
+      let noiseFloor = 0;
 
-        const buf     = new Float32Array(analyser.fftSize);
-        let prevRMS   = 0;
-        let noisePlane = 0.01; // auto-calibrated quiet-room level
+      const detect = () => {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
 
-        const loop = () => {
-          if (stopped) return;
-          analyser.getFloatTimeDomainData(buf);
+        // Auto-calibrate noise floor (slow smoothing)
+        noiseFloor = noiseFloor * 0.999 + rms * 0.001;
 
-          let sum = 0;
-          for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-          const rms = Math.sqrt(sum / buf.length);
+        // Clap = sudden large spike (>8× previous frame AND >10× noise floor)
+        if (rms > prevRms * 8 && rms > noiseFloor * 10 && rms > 0.015) {
+          triggerWake('clap');
+        }
 
-          // Slowly update noise floor so we adapt to ambient room level
-          noisePlane = noisePlane * 0.999 + rms * 0.001;
+        prevRms = rms * 0.7 + prevRms * 0.3;
+        animFrameRef.current = requestAnimationFrame(detect);
+      };
 
-          // Clap = sudden spike: RMS at least 8× the previous frame AND
-          // absolute level well above the noise floor
-          const ratio = rms / (prevRMS + 0.001);
-          if (rms > Math.max(noisePlane * 10, 0.25) && ratio > 8) {
-            fire('clap');
-          }
-          prevRMS = rms;
-          rafId = requestAnimationFrame(loop);
-        };
-        rafId = requestAnimationFrame(loop);
-      })
-      .catch(() => setPermission('denied'));
+      animFrameRef.current = requestAnimationFrame(detect);
+    }).catch(() => {
+      setPermission('denied');
+    });
 
-    // ── Wake word: "Vaayu" (Web Speech API) ──────────────────────────
-    const SpeechRecog =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    };
+  }, [enabled, triggerWake]);
 
-    let recog: any = null;
-    if (SpeechRecog) {
-      recog = new SpeechRecog();
-      recog.continuous      = true;
-      recog.interimResults  = true;
-      recog.lang            = 'en-IN';
-      recog.maxAlternatives = 3;
+  // ── Voice wake word detection ─────────────────────────────────────
+  useEffect(() => {
+    if (!enabled) {
+      if (recogRef.current) {
+        try { recogRef.current.stop(); } catch {}
+        recogRef.current = null;
+      }
+      return;
+    }
+
+    const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecog) return;
+
+    // All phrases that should trigger VAAYU — covers native pronunciation variants
+    // and common misrecognitions + the explicit "Hey/Hello VAAYU" trigger phrases
+    const WAKE_TRIGGERS = [
+      'vaayu', 'vayu', 'vajyu', 'bayu', 'wayu', 'vayoo', 'bayou',
+      'buy you', 'why you', 'wai u', 'vau', 'vaau',
+      'hey vaayu', 'hey vayu', 'hey bayu', 'hey vaau',
+      'hello vaayu', 'hello vayu', 'hello bayu',
+      'hi vaayu', 'hi vayu',
+      'ok vaayu', 'okay vaayu',
+    ];
+
+    const launch = () => {
+      if (!enabled) return;
+      const recog = new SpeechRecog();
+      recog.continuous     = true;
+      recog.interimResults = true;
+      recog.lang           = 'en-IN';
+      recogRef.current     = recog;
 
       recog.onresult = (e: any) => {
-        // Scan last few results from all alternatives
-        const text = Array.from(e.results as SpeechRecognitionResultList)
-          .slice(-4)
-          .flatMap((r: SpeechRecognitionResult) =>
-            Array.from({ length: r.length }, (_: unknown, i: number) =>
-              r[i].transcript.toLowerCase()
-            )
-          )
-          .join(' ');
+        // Collect all transcripts from this event
+        const texts: string[] = [];
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          texts.push(e.results[i][0].transcript.toLowerCase().trim());
+        }
+        const combined = texts.join(' ');
 
-        // Debug: log what's being heard (visible in DevTools console)
-        if (text.trim()) console.debug('[VAAYU wake] heard:', text.trim());
-
-        if (
-          text.includes('vaayu')   ||
-          text.includes('vayu')    ||
-          text.includes('vajyu')   ||
-          text.includes('bayu')    ||
-          text.includes('wayu')    ||
-          text.includes('vayoo')   ||
-          text.includes('bayou')   ||
-          text.includes('buy you') ||
-          text.includes('why you') ||
-          text.includes('wai u')
-        ) {
-          fire('voice');
+        if (WAKE_TRIGGERS.some(w => combined.includes(w))) {
+          triggerWake('voice');
         }
       };
 
       recog.onend = () => {
-        if (!stopped) {
-          try { recog.start(); } catch {}
-        }
+        recogRef.current = null;
+        if (enabled) setTimeout(launch, 300);
       };
 
+      recog.onerror = () => {};
+
       try { recog.start(); } catch {}
-    }
+    };
+
+    launch();
 
     return () => {
-      stopped = true;
-      cancelAnimationFrame(rafId);
-      stream?.getTracks().forEach(t => t.stop());
-      audioCtx?.close().catch(() => {});
-      if (recog) {
-        recog.onend = null;
-        try { recog.stop(); } catch {}
+      if (recogRef.current) {
+        try { recogRef.current.stop(); } catch {}
+        recogRef.current = null;
       }
     };
-  }, [enabled, fire]);
+  }, [enabled, triggerWake]);
 
   return { permission };
 }
