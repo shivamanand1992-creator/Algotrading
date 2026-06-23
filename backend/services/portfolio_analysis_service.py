@@ -61,7 +61,7 @@ def _compute_ta(symbol: str) -> Dict[str, Any]:
         import yfinance as yf
         import ta as ta_lib
 
-        df = yf.download(f"{symbol}.NS", period="6mo", interval="1d",
+        df = yf.download(f"{symbol}.NS", period="1y", interval="1d",
                          progress=False, auto_adjust=True)
         if df.empty or len(df) < 30:
             return {"error": "Insufficient price data"}
