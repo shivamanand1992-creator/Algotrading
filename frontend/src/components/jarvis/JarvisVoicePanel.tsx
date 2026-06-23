@@ -491,8 +491,6 @@ export function JarvisVoicePanel() {
     if (!SpeechRecog) return;
 
     const _launch = () => {
-      // Only guard on `handled` here — stateRef is set synchronously above.
-      // The onend re-launch uses stateRef to guard against late restarts.
       if (handled) return;
 
       const recog = new SpeechRecog();
@@ -502,17 +500,19 @@ export function JarvisVoicePanel() {
       recog.maxAlternatives = 1;
       recogRef.current = recog;
 
+      // Track the latest interim text so we can fall back to it when
+      // Chrome commits no final result before ending the session.
+      let lastInterim = '';
+
       recog.onresult = (e: any) => {
         const result = e.results[e.results.length - 1];
         const text   = result[0].transcript.trim();
 
         if (result.isFinal && text) {
+          lastInterim = '';
           accumulatedText += (accumulatedText ? ' ' : '') + text;
           setTranscript(accumulatedText);
           clearPauseTimer();
-
-          // Show "Got it…" indicator while waiting to process.
-          // 1.5s feels snappy — similar to Google/ChatGPT voice assistants.
           setPauseCountdown(1);
           pauseTimerRef.current = setTimeout(() => {
             if (!handled && accumulatedText.trim()) {
@@ -524,11 +524,10 @@ export function JarvisVoicePanel() {
           }, 1500);
 
         } else if (!result.isFinal && text) {
-          // Non-empty interim = user actively speaking, reset the pause timer
+          lastInterim = text;
           setTranscript(accumulatedText + (accumulatedText ? ' ' : '') + text);
           clearPauseTimer();
         }
-        // Empty interim (Chrome restart artefact) → ignored, pause timer preserved
       };
 
       recog.onerror = (e: any) => {
@@ -537,17 +536,47 @@ export function JarvisVoicePanel() {
 
       recog.onend = () => {
         recogRef.current = null;
-        // Use stateRef here (async event — React has already re-rendered by now)
-        if (!handled && stateRef.current === 'listening') {
+        if (handled) return;
+
+        // Chrome sometimes ends a session with only interim results and no final commit.
+        // Use the last interim text as a fallback so the query isn't silently lost.
+        if (lastInterim && !accumulatedText.trim()) {
+          accumulatedText = lastInterim;
+          lastInterim = '';
+          setTranscript(accumulatedText);
+          setPauseCountdown(1);
+          pauseTimerRef.current = setTimeout(() => {
+            if (!handled && accumulatedText.trim()) {
+              handled = true;
+              clearPauseTimer();
+              handleUserQuestionRef.current(accumulatedText.trim());
+            }
+          }, 1500);
+          return;
+        }
+
+        if (stateRef.current === 'listening') {
           setTimeout(_launch, 120);
         }
       };
 
-      try { recog.start(); } catch {}
+      try {
+        recog.start();
+      } catch (err) {
+        // Chrome throws if another recognition instance is still active.
+        // Retry after a short delay to let the previous session fully close.
+        console.debug('[VAAYU] recog.start() blocked, retrying in 400ms', err);
+        recogRef.current = null;
+        if (!handled && stateRef.current === 'listening') {
+          setTimeout(_launch, 400);
+        }
+      }
     };
 
-    _launch();
-    startMicMonitor(); // parallel audio-level monitor so user sees bars moving
+    // 300ms head-start: gives Chrome time to fully tear down the wake-word
+    // SpeechRecognition before we try to start the conversation recognition.
+    setTimeout(_launch, 300);
+    startMicMonitor();
   }, [stopListening, clearPauseTimer, startMicMonitor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep startListenRef in sync so barge-in can call latest closure

@@ -14,6 +14,12 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
   const lastWakeRef  = useRef<number>(0);
   const streamRef    = useRef<MediaStream | null>(null);
 
+  // Always-current ref so async callbacks (onend, setTimeout) never read a stale closure value.
+  // Without this, when enabled flips false the pending onend callback still sees enabled=true
+  // and relaunches the recognition — blocking Chrome from starting conversation recognition.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
   const COOLDOWN_MS = 2000;
 
   const triggerWake = useCallback((source: 'clap' | 'voice') => {
@@ -36,13 +42,12 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
       streamRef.current = stream;
       setPermission('granted');
 
-      const ctx     = new AudioContext();
+      const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.3;
-      const src = ctx.createMediaStreamSource(stream);
-      src.connect(analyser);
+      ctx.createMediaStreamSource(stream).connect(analyser);
 
       const buf = new Float32Array(analyser.fftSize);
       let prevRms    = 0;
@@ -54,10 +59,8 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
 
-        // Auto-calibrate noise floor (slow smoothing)
         noiseFloor = noiseFloor * 0.999 + rms * 0.001;
 
-        // Clap = sudden large spike (>8× previous frame AND >10× noise floor)
         if (rms > prevRms * 8 && rms > noiseFloor * 10 && rms > 0.015) {
           triggerWake('clap');
         }
@@ -91,8 +94,6 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
     const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecog) return;
 
-    // All phrases that should trigger VAAYU — covers native pronunciation variants
-    // and common misrecognitions + the explicit "Hey/Hello VAAYU" trigger phrases
     const WAKE_TRIGGERS = [
       'vaayu', 'vayu', 'vajyu', 'bayu', 'wayu', 'vayoo', 'bayou',
       'buy you', 'why you', 'wai u', 'vau', 'vaau',
@@ -103,7 +104,9 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
     ];
 
     const launch = () => {
-      if (!enabled) return;
+      // Read from ref — not the closure — so this always sees the current enabled state
+      if (!enabledRef.current) return;
+
       const recog = new SpeechRecog();
       recog.continuous     = true;
       recog.interimResults = true;
@@ -111,13 +114,11 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
       recogRef.current     = recog;
 
       recog.onresult = (e: any) => {
-        // Collect all transcripts from this event
         const texts: string[] = [];
         for (let i = e.resultIndex; i < e.results.length; i++) {
           texts.push(e.results[i][0].transcript.toLowerCase().trim());
         }
         const combined = texts.join(' ');
-
         if (WAKE_TRIGGERS.some(w => combined.includes(w))) {
           triggerWake('voice');
         }
@@ -125,7 +126,10 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
 
       recog.onend = () => {
         recogRef.current = null;
-        if (enabled) setTimeout(launch, 300);
+        // Use ref here — this callback fires asynchronously after React may have
+        // already flipped enabled to false; without the ref we'd relaunch with a
+        // stale enabled=true and block Chrome from starting conversation recognition.
+        if (enabledRef.current) setTimeout(launch, 300);
       };
 
       recog.onerror = () => {};
@@ -141,7 +145,7 @@ export function useWakeWord({ enabled, onWake }: UseWakeWordOptions) {
         recogRef.current = null;
       }
     };
-  }, [enabled, triggerWake]);
+  }, [enabled, triggerWake]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { permission };
 }
