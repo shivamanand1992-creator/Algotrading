@@ -867,7 +867,10 @@ if _frontend_build.exists():
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        return FileResponse(str(_frontend_build / "index.html"))
+        return FileResponse(
+            str(_frontend_build / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 else:
     @app.get("/")
     async def root():
