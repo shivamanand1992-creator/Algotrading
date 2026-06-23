@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { id: 'sectors',   label: 'SECTORS',   icon: '↻' },
   { id: 'news',      label: 'NEWS',      icon: '≡' },
   { id: 'holdings',  label: 'HOLDINGS',  icon: '⊞' },
+  { id: 'portfolio', label: 'PORTFOLIO', icon: '◫' },
   { id: 'help',      label: 'HELP',      icon: '?' },
 ];
 
