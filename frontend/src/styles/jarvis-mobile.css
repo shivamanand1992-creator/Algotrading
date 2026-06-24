@@ -4,10 +4,10 @@
    All rules activate ONLY on screens ≤ 768px or ≤ 640px.
 ================================================================ */
 
-/* ── Content area: tighter padding on mobile ─────────────────── */
+/* ── Content area: tighter padding, bottom clearance for FAB ─── */
 @media (max-width: 768px) {
   main {
-    padding: 14px 10px !important;
+    padding: 14px 10px 90px !important;
   }
 }
 
@@ -168,5 +168,18 @@
 @media (max-width: 768px) {
   body {
     overflow-x: hidden;
+  }
+}
+
+/* ── TALK TO VAAYU: keep FAB accessible, panel full-width ────── */
+@media (max-width: 768px) {
+  #jarvis-fab {
+    bottom: 16px !important;
+    right: 12px !important;
+  }
+  /* Conversation/topic panel: expand to almost full screen width */
+  .jarvis-conv-panel {
+    width: calc(100vw - 24px) !important;
+    right: -12px !important;
   }
 }

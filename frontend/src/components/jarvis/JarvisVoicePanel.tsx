@@ -750,12 +750,13 @@ export function JarvisVoicePanel() {
   };
 
   return (
-    <div style={{ position: 'fixed', bottom: 28, right: 28, zIndex: 1000 }}>
+    <div id="jarvis-fab" style={{ position: 'fixed', bottom: 28, right: 28, zIndex: 1000 }}>
 
       {/* ── Conversation panel ── */}
       <AnimatePresence>
         {convOpen && (
           <motion.div
+            className="jarvis-conv-panel"
             initial={{ opacity: 0, y: 24, scale: 0.93 }}
             animate={{ opacity: 1, y: 0,  scale: 1 }}
             exit={{    opacity: 0, y: 24, scale: 0.93 }}
@@ -1011,6 +1012,7 @@ export function JarvisVoicePanel() {
             animate={{ opacity: 1, y: 0,  scale: 1 }}
             exit={{    opacity: 0, y: 12, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+            className="jarvis-conv-panel"
             style={{
               position: 'absolute', bottom: 72, right: 0, width: 300,
               background: 'rgba(2,4,18,0.97)',
