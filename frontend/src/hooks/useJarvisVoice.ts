@@ -19,6 +19,17 @@ export interface JarvisVoiceState {
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// Persistent AudioContext — created once on first user interaction and reused
+// so Chrome/Android's autoplay policy doesn't block subsequent playbacks.
+let _sharedCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext {
+  if (!_sharedCtx || _sharedCtx.state === 'closed') {
+    _sharedCtx = new AudioContext();
+  }
+  return _sharedCtx;
+}
+
 export function useJarvisVoice(): JarvisVoiceState {
   const [state,    setState]    = useState<VoiceState>('idle');
   const [script,   setScript]   = useState('');
@@ -27,19 +38,20 @@ export function useJarvisVoice(): JarvisVoiceState {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const audioRef    = useRef<HTMLAudioElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef   = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stop = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.onended = null;
       audioRef.current.src = '';
       audioRef.current = null;
     }
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-      audioCtxRef.current.close().catch(() => {});
-      audioCtxRef.current = null;
+    if (sourceRef.current) {
+      try { sourceRef.current.disconnect(); } catch {}
+      sourceRef.current = null;
     }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     setAnalyser(null);
     setState('idle');
   }, []);
@@ -61,30 +73,53 @@ export function useJarvisVoice(): JarvisVoiceState {
       const url   = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.setAttribute('playsinline', '');
+      audio.setAttribute('webkit-playsinline', '');
       audioRef.current = audio;
 
       if (!isIOS) {
-        // Desktop/Android: route through AudioContext for waveform visualiser
-        const ctx  = new AudioContext();
-        const anl  = ctx.createAnalyser();
-        anl.fftSize = 64;
-        anl.smoothingTimeConstant = 0.8;
-        const src = ctx.createMediaElementSource(audio);
-        src.connect(anl);
-        anl.connect(ctx.destination);
-        audioCtxRef.current = ctx;
-        setAnalyser(anl);
+        // Desktop/Android: route through shared AudioContext for waveform visualiser.
+        // Reusing a single context means Chrome's autoplay policy won't block it
+        // even when audio is triggered outside a direct user gesture.
+        try {
+          const ctx = getSharedAudioContext();
+          if (ctx.state === 'suspended') await ctx.resume();
+          const anl = ctx.createAnalyser();
+          anl.fftSize = 64;
+          anl.smoothingTimeConstant = 0.8;
+          const src = ctx.createMediaElementSource(audio);
+          src.connect(anl);
+          anl.connect(ctx.destination);
+          sourceRef.current = src;
+          setAnalyser(anl);
+        } catch {
+          // AudioContext setup failed — play without visualiser
+        }
       }
-      // On iOS: play directly — AudioContext routes to earpiece, direct play uses loudspeaker
+      // On iOS: play directly — AudioContext routes to earpiece; direct play uses loudspeaker
 
       setState('speaking');
-      await audio.play();
+      try {
+        await audio.play();
+      } catch {
+        // Autoplay blocked (can happen on first load) — fall through to TTS
+        if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch {} sourceRef.current = null; }
+        setAnalyser(null);
+        URL.revokeObjectURL(url);
+        setState('speaking');
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.rate  = 0.92; utter.pitch = 0.85; utter.volume = 1;
+        const voices = window.speechSynthesis.getVoices();
+        const best   = voices.find(v => /en.*gb/i.test(v.lang)) ?? voices.find(v => /en/i.test(v.lang));
+        if (best) utter.voice = best;
+        utter.onend   = () => { setState('idle'); onEnd?.(); };
+        utter.onerror = () => { setState('idle'); onEnd?.(); };
+        window.speechSynthesis.speak(utter);
+        return;
+      }
+
       audio.onended = () => {
         URL.revokeObjectURL(url);
-        if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-          audioCtxRef.current.close().catch(() => {});
-        }
-        audioCtxRef.current = null;
+        if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch {} sourceRef.current = null; }
         setAnalyser(null);
         setState('idle');
         onEnd?.();
@@ -96,13 +131,24 @@ export function useJarvisVoice(): JarvisVoiceState {
       utter.rate    = 0.92;
       utter.pitch   = 0.85;
       utter.volume  = 1;
-      const voices  = window.speechSynthesis.getVoices();
-      const best    = voices.find(v => /en.*gb/i.test(v.lang) && /male/i.test(v.name))
-        ?? voices.find(v => /en/i.test(v.lang));
-      if (best) utter.voice = best;
-      utter.onend   = () => { setState('idle'); onEnd?.(); };
-      utter.onerror = () => { setState('idle'); onEnd?.(); };
-      window.speechSynthesis.speak(utter);
+      // getVoices() returns [] synchronously on first call — use onvoiceschanged if needed
+      const trySpeak = () => {
+        const voices  = window.speechSynthesis.getVoices();
+        const best    = voices.find(v => /en.*gb/i.test(v.lang) && /male/i.test(v.name))
+          ?? voices.find(v => /en/i.test(v.lang));
+        if (best) utter.voice = best;
+        utter.onend   = () => { setState('idle'); onEnd?.(); };
+        utter.onerror = () => { setState('idle'); onEnd?.(); };
+        window.speechSynthesis.speak(utter);
+      };
+      if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.onvoiceschanged = null;
+          trySpeak();
+        };
+      } else {
+        trySpeak();
+      }
     }
   }, []);
 

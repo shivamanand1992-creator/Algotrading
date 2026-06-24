@@ -8,57 +8,86 @@ import { setVaayuConvState } from '../../stores/vaayuStore';
 
 // ── Press-to-talk mic button (iOS / no-SpeechRecognition fallback) ────────
 
-function MicRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
-  const [recording, setRecording]   = useState(false);
-  const [status,    setStatus]      = useState<'idle' | 'recording' | 'uploading' | 'error'>('idle');
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef   = useRef<BlobPart[]>([]);
+// Pick the best supported MIME type for this browser/device
+function getBestMimeType(): string {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg'];
+  for (const t of types) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
 
-  const startRec = async () => {
+// File extension that Whisper API understands
+function mimeToExt(mime: string): string {
+  if (mime.includes('mp4')) return 'm4a';
+  if (mime.includes('ogg')) return 'ogg';
+  return 'webm';
+}
+
+function MicRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
+  const [status, setStatus] = useState<'idle' | 'recording' | 'uploading' | 'error'>('idle');
+  const recorderRef  = useRef<MediaRecorder | null>(null);
+  const chunksRef    = useRef<BlobPart[]>([]);
+  const autoStopRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopRec = useCallback(() => {
+    if (autoStopRef.current) { clearTimeout(autoStopRef.current); autoStopRef.current = null; }
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop();
+    }
+  }, []);
+
+  const startRec = useCallback(async () => {
+    if (status === 'recording' || status === 'uploading') return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       chunksRef.current = [];
-      const rec = new MediaRecorder(stream);
-      rec.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      const mimeType = getBestMimeType();
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+
       rec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
+        if (chunksRef.current.length === 0) { setStatus('idle'); return; }
         setStatus('uploading');
         try {
-          const mimeType = rec.mimeType || 'audio/webm';
-          const blob = new Blob(chunksRef.current, { type: mimeType });
-          const fd = new FormData();
-          fd.append('audio', blob, 'recording.webm');
-          const res = await api.post<{ transcript: string }>('/api/jarvis/transcribe', fd);
+          const actualMime = rec.mimeType || mimeType || 'audio/webm';
+          const ext  = mimeToExt(actualMime);
+          const blob = new Blob(chunksRef.current, { type: actualMime });
+          const fd   = new FormData();
+          fd.append('audio', blob, `recording.${ext}`);
+          const res  = await api.post<{ transcript: string }>('/api/jarvis/transcribe', fd);
           const text = res.data.transcript?.trim();
-          if (text) onTranscript(text);
+          if (text) { setStatus('idle'); onTranscript(text); }
           else setStatus('idle');
         } catch {
           setStatus('error');
-          setTimeout(() => setStatus('idle'), 2000);
+          setTimeout(() => setStatus('idle'), 2500);
         }
       };
-      rec.start();
+
+      rec.start(250); // collect data every 250ms
       recorderRef.current = rec;
-      setRecording(true);
       setStatus('recording');
+
+      // Auto-stop after 30 seconds so we don't block the user
+      autoStopRef.current = setTimeout(() => stopRec(), 30000);
     } catch {
       setStatus('error');
-      setTimeout(() => setStatus('idle'), 2000);
+      setTimeout(() => setStatus('idle'), 2500);
     }
+  }, [status, stopRec, onTranscript]);
+
+  const handlePress = () => {
+    if (status === 'idle' || status === 'error') startRec();
+    else if (status === 'recording') stopRec();
   };
 
-  const stopRec = () => {
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop();
-      recorderRef.current = null;
-    }
-    setRecording(false);
-  };
-
-  const label = status === 'recording' ? 'RELEASE TO SEND'
+  const label = status === 'recording' ? 'TAP AGAIN TO SEND'
     : status === 'uploading' ? 'TRANSCRIBING…'
     : status === 'error'     ? 'MIC ERROR — TAP TO RETRY'
-    : 'HOLD TO SPEAK';
+    : 'TAP TO SPEAK';
 
   const col = status === 'recording' ? '#f87171'
     : status === 'uploading' ? '#fbbf24'
@@ -68,27 +97,28 @@ function MicRecordButton({ onTranscript }: { onTranscript: (text: string) => voi
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '4px 0' }}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '6px 0' }}
     >
       <motion.button
-        onPointerDown={startRec}
-        onPointerUp={stopRec}
-        onPointerLeave={stopRec}
-        animate={recording ? { scale: [1, 1.08, 1], boxShadow: [`0 0 0px ${col}`, `0 0 22px ${col}66`, `0 0 0px ${col}`] } : {}}
-        transition={{ duration: 1.2, repeat: Infinity }}
+        onClick={handlePress}
+        animate={status === 'recording'
+          ? { scale: [1, 1.1, 1], boxShadow: [`0 0 0px ${col}`, `0 0 28px ${col}66`, `0 0 0px ${col}`] }
+          : {}}
+        transition={{ duration: 1.1, repeat: Infinity }}
         style={{
-          width: 64, height: 64, borderRadius: '50%',
-          background: recording ? `${col}22` : 'rgba(168,85,247,0.08)',
+          width: 72, height: 72, borderRadius: '50%',
+          background: status === 'recording' ? `${col}22` : 'rgba(168,85,247,0.08)',
           border: `2px solid ${col}`,
-          color: col, fontSize: 24, cursor: 'pointer',
+          color: col, fontSize: 28, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           userSelect: 'none', WebkitUserSelect: 'none',
           transition: 'background 0.2s, border-color 0.2s',
+          touchAction: 'manipulation',
         }}
       >
-        {status === 'uploading' ? '⟳' : '🎙'}
+        {status === 'uploading' ? '⟳' : status === 'recording' ? '■' : '🎙'}
       </motion.button>
-      <span style={{ fontSize: 9, color: col, fontFamily: 'monospace', letterSpacing: '0.15em' }}>
+      <span style={{ fontSize: 10, color: col, fontFamily: 'monospace', letterSpacing: '0.12em', textAlign: 'center' }}>
         {label}
       </span>
     </motion.div>

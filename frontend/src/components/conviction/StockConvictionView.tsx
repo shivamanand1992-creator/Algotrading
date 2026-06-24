@@ -89,6 +89,162 @@ interface WatchedStock {
   score: number; action: string; timestamp: string;
 }
 
+// ── NSE Stock List (for autocomplete) ─────────────────────────────────────────
+
+const NSE_STOCKS = [
+  { sym: 'RELIANCE', name: 'Reliance Industries' },
+  { sym: 'TCS', name: 'Tata Consultancy Services' },
+  { sym: 'HDFCBANK', name: 'HDFC Bank' },
+  { sym: 'INFY', name: 'Infosys' },
+  { sym: 'ICICIBANK', name: 'ICICI Bank' },
+  { sym: 'HINDUNILVR', name: 'Hindustan Unilever' },
+  { sym: 'ITC', name: 'ITC' },
+  { sym: 'SBIN', name: 'State Bank of India' },
+  { sym: 'BHARTIARTL', name: 'Bharti Airtel' },
+  { sym: 'KOTAKBANK', name: 'Kotak Mahindra Bank' },
+  { sym: 'BAJFINANCE', name: 'Bajaj Finance' },
+  { sym: 'LT', name: 'Larsen & Toubro' },
+  { sym: 'HCLTECH', name: 'HCL Technologies' },
+  { sym: 'ASIANPAINT', name: 'Asian Paints' },
+  { sym: 'MARUTI', name: 'Maruti Suzuki India' },
+  { sym: 'AXISBANK', name: 'Axis Bank' },
+  { sym: 'SUNPHARMA', name: 'Sun Pharmaceutical Industries' },
+  { sym: 'NESTLEIND', name: 'Nestle India' },
+  { sym: 'TITAN', name: 'Titan Company' },
+  { sym: 'WIPRO', name: 'Wipro' },
+  { sym: 'ULTRACEMCO', name: 'UltraTech Cement' },
+  { sym: 'BAJAJFINSV', name: 'Bajaj Finserv' },
+  { sym: 'POWERGRID', name: 'Power Grid Corporation of India' },
+  { sym: 'NTPC', name: 'NTPC' },
+  { sym: 'TATAMOTORS', name: 'Tata Motors' },
+  { sym: 'M&M', name: 'Mahindra & Mahindra' },
+  { sym: 'TECHM', name: 'Tech Mahindra' },
+  { sym: 'JSWSTEEL', name: 'JSW Steel' },
+  { sym: 'GRASIM', name: 'Grasim Industries' },
+  { sym: 'DRREDDY', name: "Dr Reddy's Laboratories" },
+  { sym: 'CIPLA', name: 'Cipla' },
+  { sym: 'TATACONSUM', name: 'Tata Consumer Products' },
+  { sym: 'EICHERMOT', name: 'Eicher Motors' },
+  { sym: 'BRITANNIA', name: 'Britannia Industries' },
+  { sym: 'ADANIENT', name: 'Adani Enterprises' },
+  { sym: 'ADANIPORTS', name: 'Adani Ports & SEZ' },
+  { sym: 'HINDALCO', name: 'Hindalco Industries' },
+  { sym: 'TATASTEEL', name: 'Tata Steel' },
+  { sym: 'COALINDIA', name: 'Coal India' },
+  { sym: 'BPCL', name: 'Bharat Petroleum Corporation' },
+  { sym: 'IOC', name: 'Indian Oil Corporation' },
+  { sym: 'ONGC', name: 'Oil & Natural Gas Corporation' },
+  { sym: 'HEROMOTOCO', name: 'Hero MotoCorp' },
+  { sym: 'APOLLOHOSP', name: 'Apollo Hospitals Enterprise' },
+  { sym: 'DIVISLAB', name: "Divi's Laboratories" },
+  { sym: 'INDUSINDBK', name: 'IndusInd Bank' },
+  { sym: 'BAJAJ-AUTO', name: 'Bajaj Auto' },
+  { sym: 'SOLARINDS', name: 'Solar Industries India' },
+  { sym: 'HAL', name: 'Hindustan Aeronautics' },
+  { sym: 'BEL', name: 'Bharat Electronics' },
+  { sym: 'SIEMENS', name: 'Siemens India' },
+  { sym: 'ABB', name: 'ABB India' },
+  { sym: 'PIDILITIND', name: 'Pidilite Industries' },
+  { sym: 'GODREJCP', name: 'Godrej Consumer Products' },
+  { sym: 'DABUR', name: 'Dabur India' },
+  { sym: 'MARICO', name: 'Marico' },
+  { sym: 'COLPAL', name: 'Colgate-Palmolive India' },
+  { sym: 'BERGEPAINT', name: 'Berger Paints India' },
+  { sym: 'HAVELLS', name: 'Havells India' },
+  { sym: 'VOLTAS', name: 'Voltas' },
+  { sym: 'ZOMATO', name: 'Zomato' },
+  { sym: 'PAYTM', name: 'One97 Communications (Paytm)' },
+  { sym: 'NYKAA', name: 'FSN E-Commerce Ventures (Nykaa)' },
+  { sym: 'POLICYBZR', name: 'PB Fintech (Policybazaar)' },
+  { sym: 'IRCTC', name: 'Indian Railway Catering & Tourism' },
+  { sym: 'DMART', name: 'Avenue Supermarts (DMart)' },
+  { sym: 'TRENT', name: 'Trent' },
+  { sym: 'VEDL', name: 'Vedanta' },
+  { sym: 'SAIL', name: 'Steel Authority of India' },
+  { sym: 'NMDC', name: 'NMDC' },
+  { sym: 'PNB', name: 'Punjab National Bank' },
+  { sym: 'BANKBARODA', name: 'Bank of Baroda' },
+  { sym: 'FEDERALBNK', name: 'Federal Bank' },
+  { sym: 'IDFCFIRSTB', name: 'IDFC First Bank' },
+  { sym: 'BANDHANBNK', name: 'Bandhan Bank' },
+  { sym: 'YESBANK', name: 'Yes Bank' },
+  { sym: 'MUTHOOTFIN', name: 'Muthoot Finance' },
+  { sym: 'CHOLAFIN', name: 'Cholamandalam Financial Holdings' },
+  { sym: 'MOTHERSON', name: 'Samvardhana Motherson International' },
+  { sym: 'BALKRISIND', name: 'Balkrishna Industries' },
+  { sym: 'APOLLOTYRE', name: 'Apollo Tyres' },
+  { sym: 'MRF', name: 'MRF' },
+  { sym: 'TATAPOWER', name: 'Tata Power Company' },
+  { sym: 'ADANIPOWER', name: 'Adani Power' },
+  { sym: 'ADANIGREEN', name: 'Adani Green Energy' },
+  { sym: 'TORNTPOWER', name: 'Torrent Power' },
+  { sym: 'RECLTD', name: 'REC' },
+  { sym: 'PFC', name: 'Power Finance Corporation' },
+  { sym: 'IRFC', name: 'Indian Railway Finance Corporation' },
+  { sym: 'RVNL', name: 'Rail Vikas Nigam' },
+  { sym: 'DLF', name: 'DLF' },
+  { sym: 'GODREJPROP', name: 'Godrej Properties' },
+  { sym: 'OBEROIRLTY', name: 'Oberoi Realty' },
+  { sym: 'PRESTIGE', name: 'Prestige Estates Projects' },
+  { sym: 'DEEPAKNTR', name: 'Deepak Nitrite' },
+  { sym: 'SRF', name: 'SRF' },
+  { sym: 'PIIND', name: 'PI Industries' },
+  { sym: 'UPL', name: 'UPL' },
+  { sym: 'ASTRAL', name: 'Astral' },
+  { sym: 'POLYCAB', name: 'Polycab India' },
+  { sym: 'CUMMINSIND', name: 'Cummins India' },
+  { sym: 'BHEL', name: 'Bharat Heavy Electricals' },
+  { sym: 'MAZAGON', name: 'Mazagon Dock Shipbuilders' },
+  { sym: 'BIOCON', name: 'Biocon' },
+  { sym: 'TORNTPHARM', name: 'Torrent Pharmaceuticals' },
+  { sym: 'LUPIN', name: 'Lupin' },
+  { sym: 'AUROPHARMA', name: 'Aurobindo Pharma' },
+  { sym: 'ALKEM', name: 'Alkem Laboratories' },
+  { sym: 'LAURUSLABS', name: 'Laurus Labs' },
+  { sym: 'LTIM', name: 'LTIMindtree' },
+  { sym: 'MPHASIS', name: 'Mphasis' },
+  { sym: 'COFORGE', name: 'Coforge' },
+  { sym: 'PERSISTENT', name: 'Persistent Systems' },
+  { sym: 'KPITTECH', name: 'KPIT Technologies' },
+  { sym: 'TATAELXSI', name: 'Tata Elxsi' },
+  { sym: 'DIXON', name: 'Dixon Technologies India' },
+  { sym: 'NHPC', name: 'NHPC' },
+  { sym: 'NBCC', name: 'NBCC India' },
+  { sym: 'IRCON', name: 'Ircon International' },
+  { sym: 'COCHINSHIP', name: 'Cochin Shipyard' },
+  { sym: 'KAYNES', name: 'Kaynes Technology India' },
+  { sym: 'AMBER', name: 'Amber Enterprises India' },
+  { sym: 'GLENMARK', name: 'Glenmark Pharmaceuticals' },
+  { sym: 'METROPOLIS', name: 'Metropolis Healthcare' },
+  { sym: 'PHOENIXLTD', name: 'The Phoenix Mills' },
+  { sym: 'CEAT', name: 'CEAT' },
+  { sym: 'THERMAX', name: 'Thermax' },
+  { sym: 'LINDEINDIA', name: 'Linde India' },
+  { sym: 'ATUL', name: 'Atul' },
+  { sym: 'INTELLECT', name: 'Intellect Design Arena' },
+  { sym: 'TANLA', name: 'Tanla Platforms' },
+  { sym: 'PIDILITIND', name: 'Pidilite Industries' },
+  { sym: 'GRINDWELL', name: 'Grindwell Norton' },
+  { sym: 'KEI', name: 'KEI Industries' },
+  { sym: 'HAVELLS', name: 'Havells India' },
+  { sym: 'WHIRLPOOL', name: 'Whirlpool of India' },
+  { sym: 'BAJAJ-AUTO', name: 'Bajaj Auto' },
+  { sym: 'PAGEIND', name: 'Page Industries' },
+  { sym: 'MCDOWELL-N', name: 'United Spirits (McDowell)' },
+  { sym: 'UBL', name: 'United Breweries' },
+  { sym: 'RADICO', name: 'Radico Khaitan' },
+  { sym: 'VARUNBEV', name: 'Varun Beverages' },
+  { sym: 'TVSMOTOR', name: 'TVS Motor Company' },
+  { sym: 'ESCORTS', name: 'Escorts Kubota' },
+  { sym: 'ASHOKLEY', name: 'Ashok Leyland' },
+  { sym: 'TIINDIA', name: 'Tube Investments of India' },
+  { sym: 'SUNTV', name: 'Sun TV Network' },
+  { sym: 'ZEEL', name: 'Zee Entertainment Enterprises' },
+  { sym: 'PVR', name: 'PVR INOX' },
+  { sym: 'INOXWIND', name: 'Inox Wind' },
+  { sym: 'SUZLON', name: 'Suzlon Energy' },
+];
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const WATCH_KEY = 'vaayu_conviction_watchlist';
@@ -688,17 +844,52 @@ function WatchListPills({ onSelect, refreshKey }: { onSelect: (t: string) => voi
 // ── Main View ─────────────────────────────────────────────────────────────────
 
 export function StockConvictionView() {
-  const [ticker,     setTicker]     = useState('');
-  const [loading,    setLoading]    = useState(false);
-  const [result,     setResult]     = useState<ConvictionResult | null>(null);
-  const [error,      setError]      = useState<string | null>(null);
-  const [watchKey,   setWatchKey]   = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [ticker,      setTicker]      = useState('');
+  const [loading,     setLoading]     = useState(false);
+  const [result,      setResult]      = useState<ConvictionResult | null>(null);
+  const [error,       setError]       = useState<string | null>(null);
+  const [watchKey,    setWatchKey]    = useState(0);
+  const [suggestions, setSuggestions] = useState<typeof NSE_STOCKS>([]);
+  const [showSug,     setShowSug]     = useState(false);
+  const inputRef      = useRef<HTMLInputElement>(null);
+  const sugRef        = useRef<HTMLDivElement>(null);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sugRef.current && !sugRef.current.contains(e.target as Node) &&
+          inputRef.current && !inputRef.current.contains(e.target as Node)) {
+        setShowSug(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleTickerChange = (val: string) => {
+    const upper = val.toUpperCase();
+    setTicker(upper);
+    if (upper.length === 0) { setSuggestions([]); setShowSug(false); return; }
+    const filtered = NSE_STOCKS.filter(s =>
+      s.sym.startsWith(upper) || s.name.toUpperCase().includes(upper)
+    ).slice(0, 8);
+    setSuggestions(filtered);
+    setShowSug(filtered.length > 0);
+  };
+
+  const selectSuggestion = (sym: string) => {
+    setTicker(sym);
+    setSuggestions([]);
+    setShowSug(false);
+    analyze(sym);
+  };
 
   const analyze = useCallback(async (sym?: string) => {
     const t = (sym ?? ticker).trim().toUpperCase();
     if (!t) return;
     if (sym) setTicker(sym);
+    setShowSug(false);
+    setSuggestions([]);
     setLoading(true);
     setError(null);
     setResult(null);
@@ -731,7 +922,6 @@ export function StockConvictionView() {
     }
   }, [ticker]);
 
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') analyze(); };
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', fontFamily: "'Courier New', monospace" }}>
@@ -750,24 +940,76 @@ export function StockConvictionView() {
       <WatchListPills onSelect={(t) => analyze(t)} refreshKey={watchKey} />
 
       {/* Search */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
-        <input
-          ref={inputRef}
-          value={ticker}
-          onChange={e => setTicker(e.target.value.toUpperCase())}
-          onKeyDown={handleKey}
-          placeholder="e.g. SOLARINDS  HDFCBANK  RELIANCE  INFY"
-          disabled={loading}
-          style={{
-            flex: 1,
-            background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.2)',
-            borderRadius: 6, padding: '11px 14px',
-            color: '#00e5ff', fontFamily: "'Courier New', monospace", fontSize: 13,
-            letterSpacing: 1, outline: 'none',
-          }}
-        />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 28, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <input
+            ref={inputRef}
+            value={ticker}
+            onChange={e => handleTickerChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { setShowSug(false); analyze(); }
+              if (e.key === 'Escape') setShowSug(false);
+            }}
+            onFocus={() => { if (suggestions.length > 0) setShowSug(true); }}
+            placeholder="Type a stock name or ticker…"
+            disabled={loading}
+            autoComplete="off"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: 'rgba(0,229,255,0.04)',
+              border: `1px solid ${showSug ? 'rgba(0,229,255,0.45)' : 'rgba(0,229,255,0.2)'}`,
+              borderRadius: showSug ? '6px 6px 0 0' : 6,
+              padding: '11px 14px',
+              color: '#00e5ff', fontFamily: "'Courier New', monospace", fontSize: 13,
+              letterSpacing: 1, outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+          />
+          {/* Autocomplete dropdown */}
+          {showSug && suggestions.length > 0 && (
+            <div
+              ref={sugRef}
+              style={{
+                position: 'absolute', top: '100%', left: 0, right: 0,
+                background: 'rgba(2,6,18,0.98)',
+                border: '1px solid rgba(0,229,255,0.35)',
+                borderTop: 'none',
+                borderRadius: '0 0 8px 8px',
+                zIndex: 200,
+                overflow: 'hidden',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+              }}
+            >
+              {suggestions.map((s, i) => (
+                <div
+                  key={s.sym}
+                  onMouseDown={() => selectSuggestion(s.sym)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 14px',
+                    borderTop: i > 0 ? '1px solid rgba(0,229,255,0.06)' : 'none',
+                    cursor: 'pointer',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,229,255,0.07)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{
+                    color: '#00e5ff', fontFamily: "'Courier New', monospace",
+                    fontWeight: 900, fontSize: 13, letterSpacing: 1, minWidth: 110,
+                  }}>
+                    {s.sym}
+                  </span>
+                  <span style={{ color: 'rgba(160,196,224,0.55)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <button
-          onClick={() => analyze()}
+          onClick={() => { setShowSug(false); analyze(); }}
           disabled={loading || !ticker.trim()}
           style={{
             background: loading ? 'rgba(0,229,255,0.03)' : 'rgba(0,229,255,0.1)',
