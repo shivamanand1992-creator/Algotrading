@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../../api/client';
+import { useBalanceVisibility, maskAmount } from '../../context/BalanceVisibilityContext';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -299,6 +300,8 @@ function AnalysisPanel({ analysis }: { analysis: AnalysisData }) {
 // ── Main view ────────────────────────────────────────────────────────────────
 
 export function PortfolioView() {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   const [data, setData]               = useState<PortfolioData | null>(null);
   const [loading, setLoading]         = useState(true);
   const [syncing, setSyncing]         = useState(false);
@@ -404,11 +407,11 @@ export function PortfolioView() {
       {data && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
           {([
-            { label: 'Total Invested',  value: INR(data.total_invested),     color: '#00e5ff'  },
-            { label: 'Market Value',    value: INR(data.total_market_value),  color: '#a78bfa'  },
+            { label: 'Total Invested',  value: M(INR(data.total_invested)),     color: '#00e5ff'  },
+            { label: 'Market Value',    value: M(INR(data.total_market_value)),  color: '#a78bfa'  },
             {
               label: 'Total P&L',
-              value: `${data.total_pnl >= 0 ? '+' : ''}${INR(data.total_pnl)}`,
+              value: `${data.total_pnl >= 0 ? '+' : ''}${M(INR(data.total_pnl))}`,
               color: pnlCol(data.total_pnl),
             },
             {
@@ -481,16 +484,16 @@ export function PortfolioView() {
                   <Cell label="LTP"       value={`₹${h.current_price.toFixed(2)}`} />
                   <Cell
                     label="Invested"
-                    value={h.invested_value >= 1000
+                    value={M(h.invested_value >= 1000
                       ? `₹${(h.invested_value / 1000).toFixed(1)}K`
-                      : `₹${h.invested_value.toFixed(0)}`}
+                      : `₹${h.invested_value.toFixed(0)}`)}
                   />
 
                   {/* P&L */}
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ color: 'rgba(160,196,224,0.4)', fontSize: 9, letterSpacing: 1, textTransform: 'uppercase' }}>P&L</div>
                     <div style={{ color: pnlCol(h.pnl), fontFamily: "'Courier New', monospace", fontSize: 13, fontWeight: 700, marginTop: 2 }}>
-                      {h.pnl >= 0 ? '+' : ''}₹{Math.abs(h.pnl).toFixed(0)}
+                      {h.pnl >= 0 ? '+' : ''}{M(`₹${Math.abs(h.pnl).toFixed(0)}`)}
                     </div>
                     <div style={{ color: pnlCol(h.pnl_pct), fontSize: 10, marginTop: 1 }}>
                       {h.pnl_pct >= 0 ? '+' : ''}{h.pnl_pct.toFixed(2)}%

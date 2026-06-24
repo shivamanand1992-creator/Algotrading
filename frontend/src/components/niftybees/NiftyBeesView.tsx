@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { niftyBeesApi } from '../../api/client';
 import { Card } from '../ui/Card';
 import type { NiftyBeesConfig, NiftyBeesBuyEntry, NiftyBeesPosition, NiftyBeesStatus } from '../../types/api';
+import { useBalanceVisibility, maskAmount } from '../../context/BalanceVisibilityContext';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -100,6 +101,8 @@ function ConfigForm({ config, saving, onSave }: ConfigFormProps) {
 // ---------------------------------------------------------------------------
 
 function BuysTable({ buys }: { buys: NiftyBeesBuyEntry[] }) {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   if (!buys?.length) return null;
   return (
     <div className="mt-3 overflow-x-auto">
@@ -121,7 +124,7 @@ function BuysTable({ buys }: { buys: NiftyBeesBuyEntry[] }) {
               <td className="pr-3 text-jarvis-text-secondary">{b.date?.slice(0, 10)}</td>
               <td className="text-right pr-3 font-mono text-white">{b.qty}</td>
               <td className="text-right pr-3 font-mono text-white">₹{b.price.toFixed(2)}</td>
-              <td className="text-right pr-3 font-mono text-jarvis-text-secondary">₹{b.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+              <td className="text-right pr-3 font-mono text-jarvis-text-secondary">{M(`₹${b.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)}</td>
               <td className="text-right pr-3">
                 <span className="text-orange-400">▼{b.nifty_dip_pct.toFixed(2)}%</span>
               </td>
@@ -134,6 +137,8 @@ function BuysTable({ buys }: { buys: NiftyBeesBuyEntry[] }) {
 }
 
 function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () => void }) {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   const pnlPos = pos.pnl_pct >= 0;
   const numBuys = pos.buys?.length ?? 0;
 
@@ -176,13 +181,13 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
           label="Unrealized P&L"
           value={
             <span style={{ color: pos.unrealized_pnl >= 0 ? '#00e676' : '#ff5252' }}>
-              {pos.unrealized_pnl >= 0 ? '+' : ''}₹{pos.unrealized_pnl.toFixed(2)}
+              {pos.unrealized_pnl >= 0 ? '+' : ''}{M(`₹${pos.unrealized_pnl.toFixed(2)}`)}
             </span>
           }
         />
         <Stat
           label="Total Invested"
-          value={`₹${pos.total_invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+          value={M(`₹${pos.total_invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)}
         />
         <Stat
           label="Target @ 5%"
@@ -234,6 +239,8 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
 // ---------------------------------------------------------------------------
 
 function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   if (!history.length) return (
     <p className="text-center text-jarvis-text-secondary text-sm py-6">No closed trades yet.</p>
   );
@@ -261,7 +268,7 @@ function HistoryTable({ history }: { history: NiftyBeesPosition[] }) {
               <td className="text-right pr-3 font-mono">₹{h.avg_entry_price.toFixed(2)}</td>
               <td className="text-right pr-3 font-mono">₹{(h.exit_price ?? 0).toFixed(2)}</td>
               <td className={`text-right pr-3 font-mono font-bold ${(h.realized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {(h.realized_pnl ?? 0) >= 0 ? '+' : ''}₹{(h.realized_pnl ?? 0).toFixed(2)}
+                {(h.realized_pnl ?? 0) >= 0 ? '+' : ''}{M(`₹${(h.realized_pnl ?? 0).toFixed(2)}`)}
               </td>
               <td className="text-right pr-3"><PnLBadge value={h.gain_pct ?? 0} /></td>
               <td className="text-xs text-jarvis-text-secondary capitalize">{h.close_reason?.replace(/_/g, ' ')}</td>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../api/client';
+import { useBalanceVisibility, maskAmount } from '../../context/BalanceVisibilityContext';
 
 interface ETFHolding {
   symbol: string;
@@ -23,6 +24,8 @@ interface HoldingsResponse {
 }
 
 export function ETFHoldingsView() {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   const [holdings, setHoldings] = useState<ETFHolding[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -214,11 +217,11 @@ export function ETFHoldingsView() {
       {holdings.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SummaryCard label="Holdings" value={`${holdings.length} ETF${holdings.length !== 1 ? 's' : ''}`} />
-          <SummaryCard label="Invested" value={`₹${totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
-          <SummaryCard label="Current Value" value={`₹${totalCurrent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
+          <SummaryCard label="Invested" value={M(`₹${totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)} />
+          <SummaryCard label="Current Value" value={M(`₹${totalCurrent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)} />
           <SummaryCard
             label="Total P&L"
-            value={`${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%)`}
+            value={`${totalPnl >= 0 ? '+' : ''}${M(`₹${totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)} (${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%)`}
             highlight={totalPnl >= 0 ? 'green' : 'red'}
           />
         </div>
@@ -287,6 +290,8 @@ function SummaryCard({
 
 
 function HoldingCard({ holding: h, targetPct }: { holding: ETFHolding; targetPct: number }) {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   const pnlColor  = h.pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
   const barColor  = h.pnl_pct >= targetPct ? 'bg-emerald-400' : 'bg-jarvis-primary';
   const barWidth  = Math.min(100, Math.max(0, (h.pnl_pct / targetPct) * 100));
@@ -324,7 +329,7 @@ function HoldingCard({ holding: h, targetPct }: { holding: ETFHolding; targetPct
             {h.pnl_pct >= 0 ? '+' : ''}{h.pnl_pct.toFixed(2)}%
           </div>
           <div className={`text-xs ${pnlColor}`}>
-            {h.pnl >= 0 ? '+' : ''}₹{h.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            {h.pnl >= 0 ? '+' : ''}{M(`₹${h.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)}
           </div>
         </div>
       </div>
@@ -333,7 +338,7 @@ function HoldingCard({ holding: h, targetPct }: { holding: ETFHolding; targetPct
       <div className="mt-4">
         <div className="flex justify-between text-xs text-jarvis-text-secondary mb-1">
           <span>Progress to {targetPct}% target</span>
-          <span>Target: ₹{h.target_price.toFixed(2)}</span>
+          <span>Target: {M(`₹${h.target_price.toFixed(2)}`)}</span>
         </div>
         <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
           <div

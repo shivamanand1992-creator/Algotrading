@@ -4,6 +4,7 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { marketApi, niftyBeesApi, stocksApi, systemApi, api } from '../../api/client';
 import { formatCurrency } from '../../utils/formatters';
 import type { MarketData, GlobalCue, NewsItem, NiftyBeesStatus, SwingPosition } from '../../types/api';
+import { useBalanceVisibility, maskAmount } from '../../context/BalanceVisibilityContext';
 import { OrderFlowVectors } from '../ui/OrderFlowVectors';
 import { ExecutionLogFeed, type LogEntry } from '../ui/ExecutionLogFeed';
 import { useTilt } from '../../hooks/useTilt';
@@ -244,6 +245,8 @@ interface IntradayCandle {
 }
 
 export function DashboardView() {
+  const { balVisible } = useBalanceVisibility();
+  const M = (v: string) => maskAmount(v, balVisible);
   const { connected, marketData: wsMarketData } = useWebSocket();
   const [marketData, setMarketData]         = useState<MarketData | null>(null);
   const [intradayCandles, setIntradayCandles] = useState<IntradayCandle[]>([]);
@@ -627,19 +630,19 @@ export function DashboardView() {
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Available Cash</div>
               <div className={`text-base font-mono font-bold ${balLow ? 'text-red-400' : balDataAvail ? 'text-green-400' : 'text-jarvis-text-secondary'}`}>
-                {balDataAvail ? `₹${balance!.available_cash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                {balDataAvail ? M(`₹${balance!.available_cash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`) : '—'}
               </div>
             </div>
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Net Value</div>
               <div className="text-base font-mono font-bold text-jarvis-primary">
-                {balDataAvail ? `₹${balance!.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                {balDataAvail ? M(`₹${balance!.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`) : '—'}
               </div>
             </div>
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Next DCA Chunk</div>
               <div className="text-base font-mono font-bold text-jarvis-accent">
-                {nbConf ? `₹${nbConf.capital_amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                {nbConf ? M(`₹${nbConf.capital_amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`) : '—'}
               </div>
             </div>
             {balDataAvail && nbConf && (
@@ -722,14 +725,14 @@ export function DashboardView() {
                     {nbPnlPct >= 0 ? '+' : ''}{nbPnlPct.toFixed(2)}%
                   </div>
                   <div className={`text-xs font-mono ${(nb.unrealized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {(nb.unrealized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(nb.unrealized_pnl ?? 0)}
+                    {(nb.unrealized_pnl ?? 0) >= 0 ? '+' : ''}{M(formatCurrency(nb.unrealized_pnl ?? 0))}
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'Deployed', value: formatCurrency(nb.total_invested ?? 0), color: 'text-yellow-400' },
-                  { label: 'Curr Value', value: formatCurrency((nb.total_qty ?? 0) * (nb.current_price ?? nb.avg_entry_price ?? 0)), color: 'text-jarvis-primary' },
+                  { label: 'Deployed', value: M(formatCurrency(nb.total_invested ?? 0)), color: 'text-yellow-400' },
+                  { label: 'Curr Value', value: M(formatCurrency((nb.total_qty ?? 0) * (nb.current_price ?? nb.avg_entry_price ?? 0))), color: 'text-jarvis-primary' },
                   { label: 'CMP', value: `₹${(nb.current_price ?? 0).toFixed(2)}`, color: 'text-jarvis-accent' },
                 ].map(item => (
                   <div key={item.label} className="rounded-lg px-2 py-2 text-center" style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.07)' }}>
@@ -778,7 +781,7 @@ export function DashboardView() {
             {openSwings.length > 0 && (
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-mono font-bold ${swingPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {swingPnl >= 0 ? '+' : ''}{formatCurrency(swingPnl)}
+                  {swingPnl >= 0 ? '+' : ''}{M(formatCurrency(swingPnl))}
                 </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,229,255,0.1)', color: '#00e5ff' }}>
                   {openSwings.length} OPEN
@@ -790,7 +793,7 @@ export function DashboardView() {
           {openSwings.length > 0 ? (
             <div className="space-y-1.5">
               <div className="flex justify-between text-[10px] text-jarvis-text-secondary px-2 pb-1 border-b border-white/5">
-                <span>Total Deployed: <span className="text-yellow-400 font-mono font-bold">{formatCurrency(swingDeployed)}</span></span>
+                <span>Total Deployed: <span className="text-yellow-400 font-mono font-bold">{M(formatCurrency(swingDeployed))}</span></span>
                 <span className={`font-mono font-bold ${swingPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   Avg P&L: {swingPnlPct >= 0 ? '+' : ''}{swingPnlPct.toFixed(2)}%
                 </span>
@@ -806,7 +809,7 @@ export function DashboardView() {
                     </div>
                     <div>
                       <div className="text-[9px] text-jarvis-text-secondary">Deployed</div>
-                      <div className="text-xs font-mono text-yellow-400">{formatCurrency(deployed)}</div>
+                      <div className="text-xs font-mono text-yellow-400">{M(formatCurrency(deployed))}</div>
                     </div>
                     <div>
                       <div className="text-[9px] text-jarvis-text-secondary">Entry→CMP</div>
@@ -819,7 +822,7 @@ export function DashboardView() {
                         {up ? '+' : ''}{(pos.pnl_pct ?? 0).toFixed(2)}%
                       </span>
                       <div className={`text-[9px] font-mono ${up ? 'text-green-400/70' : 'text-red-400/70'}`}>
-                        {formatCurrency(pos.unrealized_pnl ?? 0)}
+                        {M(formatCurrency(pos.unrealized_pnl ?? 0))}
                       </div>
                     </div>
                   </div>

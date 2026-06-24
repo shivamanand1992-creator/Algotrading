@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BalanceVisibilityProvider } from './context/BalanceVisibilityContext';
 import { MainLayout } from './components/layout/MainLayout';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { MarketDataView } from './components/market/MarketDataView';
@@ -83,9 +84,11 @@ function App() {
   }
 
   return (
-    <MainLayout activeView={currentView} onNavigate={setCurrentView} onLogout={handleLogout}>
-      {renderView()}
-    </MainLayout>
+    <BalanceVisibilityProvider>
+      <MainLayout activeView={currentView} onNavigate={setCurrentView} onLogout={handleLogout}>
+        {renderView()}
+      </MainLayout>
+    </BalanceVisibilityProvider>
   );
 }
 
