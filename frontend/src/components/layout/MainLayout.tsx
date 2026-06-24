@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { id: 'news',      label: 'NEWS',      icon: '≡' },
   { id: 'holdings',  label: 'ETF HOLDINGS', icon: '⊞' },
   { id: 'portfolio', label: 'PORTFOLIO', icon: '◫' },
+  { id: 'conviction', label: 'ANALYSE',  icon: '⊛' },
   { id: 'help',      label: 'HELP',      icon: '?' },
 ];
 
