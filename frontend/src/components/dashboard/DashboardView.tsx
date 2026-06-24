@@ -248,6 +248,14 @@ export function DashboardView() {
   const { balVisible } = useBalanceVisibility();
   const M = (v: string) => maskAmount(v, balVisible);
   const { connected, marketData: wsMarketData } = useWebSocket();
+
+  // Responsive globe size — never wider than the viewport
+  const [globeSize, setGlobeSize] = useState(() => Math.min(460, window.innerWidth - 16));
+  useEffect(() => {
+    const onResize = () => setGlobeSize(Math.min(460, window.innerWidth - 16));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [marketData, setMarketData]         = useState<MarketData | null>(null);
   const [intradayCandles, setIntradayCandles] = useState<IntradayCandle[]>([]);
   const [globalCues, setGlobalCues]         = useState<GlobalCue[]>([]);
@@ -543,7 +551,7 @@ export function DashboardView() {
                 change={change}
                 changePct={changePct}
                 isUp={isUp}
-                size={460}
+                size={globeSize}
                 sectors={globeSectors}
                 topHolding={globeHolding}
               />

@@ -18,7 +18,8 @@ _holdings_cache: list = []
 _holdings_cache_time: float = 0.0
 _HOLDINGS_TTL = 300.0
 
-from fastapi import APIRouter, Depends, HTTPException
+import os
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from loguru import logger
 
@@ -49,6 +50,35 @@ class ChatRequest(BaseModel):
     message: str
     context_topic: str = "full_briefing"
     history: List[ConversationTurn] = []
+
+
+@router.post("/transcribe")
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+    _: str = Depends(get_current_user),
+):
+    """Transcribe voice recording via OpenAI Whisper — used on iOS where SpeechRecognition is unavailable."""
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
+
+    audio_bytes = await audio.read()
+    content_type = audio.content_type or "audio/webm"
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": ("recording.webm", audio_bytes, content_type)},
+            data={"model": "whisper-1", "language": "en"},
+        )
+
+    if resp.status_code != 200:
+        logger.warning(f"Whisper API error {resp.status_code}: {resp.text}")
+        raise HTTPException(status_code=502, detail="Transcription failed")
+
+    transcript = resp.json().get("text", "").strip()
+    return {"transcript": transcript}
 
 
 @router.get("/topics")

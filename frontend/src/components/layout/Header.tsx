@@ -6,9 +6,10 @@ import { useBalanceVisibility } from '../../context/BalanceVisibilityContext';
 
 interface HeaderProps {
   onLogout?: () => void;
+  onHamburger?: () => void;
 }
 
-export function Header({ onLogout }: HeaderProps) {
+export function Header({ onLogout, onHamburger }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const { balVisible, toggleBalVisible } = useBalanceVisibility();
@@ -52,8 +53,31 @@ export function Header({ onLogout }: HeaderProps) {
       {/* Scanning beam */}
       <div className="diagonal-beam" />
 
-      {/* Left — VAAYU wordmark */}
+      {/* Left — hamburger (mobile) + VAAYU wordmark */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Hamburger — only visible on mobile via CSS */}
+        {onHamburger && (
+          <button
+            className="mob-hamburger"
+            onClick={onHamburger}
+            aria-label="Open menu"
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(0,229,255,0.2)',
+              color: 'rgba(0,229,255,0.6)',
+              width: 34, height: 34, borderRadius: 6,
+              display: 'none', // shown via CSS on mobile
+              alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0, gap: 0, padding: 0,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3.5" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+              <rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+              <rect x="2" y="11" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+            </svg>
+          </button>
+        )}
         {/* Hexagon logo */}
         <svg width={30} height={30} viewBox="0 0 30 30" style={{ flexShrink: 0 }}>
           <defs>

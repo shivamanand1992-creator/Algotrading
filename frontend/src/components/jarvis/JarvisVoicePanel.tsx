@@ -6,6 +6,95 @@ import { AudioVisualizer } from './AudioVisualizer';
 import { api } from '../../api/client';
 import { setVaayuConvState } from '../../stores/vaayuStore';
 
+// ── Press-to-talk mic button (iOS / no-SpeechRecognition fallback) ────────
+
+function MicRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
+  const [recording, setRecording]   = useState(false);
+  const [status,    setStatus]      = useState<'idle' | 'recording' | 'uploading' | 'error'>('idle');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef   = useRef<BlobPart[]>([]);
+
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const rec = new MediaRecorder(stream);
+      rec.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setStatus('uploading');
+        try {
+          const mimeType = rec.mimeType || 'audio/webm';
+          const blob = new Blob(chunksRef.current, { type: mimeType });
+          const fd = new FormData();
+          fd.append('audio', blob, 'recording.webm');
+          const res = await api.post<{ transcript: string }>('/api/jarvis/transcribe', fd);
+          const text = res.data.transcript?.trim();
+          if (text) onTranscript(text);
+          else setStatus('idle');
+        } catch {
+          setStatus('error');
+          setTimeout(() => setStatus('idle'), 2000);
+        }
+      };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+      setStatus('recording');
+    } catch {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 2000);
+    }
+  };
+
+  const stopRec = () => {
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+    }
+    setRecording(false);
+  };
+
+  const label = status === 'recording' ? 'RELEASE TO SEND'
+    : status === 'uploading' ? 'TRANSCRIBING…'
+    : status === 'error'     ? 'MIC ERROR — TAP TO RETRY'
+    : 'HOLD TO SPEAK';
+
+  const col = status === 'recording' ? '#f87171'
+    : status === 'uploading' ? '#fbbf24'
+    : status === 'error'     ? '#f87171'
+    : '#a855f7';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '4px 0' }}
+    >
+      <motion.button
+        onPointerDown={startRec}
+        onPointerUp={stopRec}
+        onPointerLeave={stopRec}
+        animate={recording ? { scale: [1, 1.08, 1], boxShadow: [`0 0 0px ${col}`, `0 0 22px ${col}66`, `0 0 0px ${col}`] } : {}}
+        transition={{ duration: 1.2, repeat: Infinity }}
+        style={{
+          width: 64, height: 64, borderRadius: '50%',
+          background: recording ? `${col}22` : 'rgba(168,85,247,0.08)',
+          border: `2px solid ${col}`,
+          color: col, fontSize: 24, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          userSelect: 'none', WebkitUserSelect: 'none',
+          transition: 'background 0.2s, border-color 0.2s',
+        }}
+      >
+        {status === 'uploading' ? '⟳' : '🎙'}
+      </motion.button>
+      <span style={{ fontSize: 9, color: col, fontFamily: 'monospace', letterSpacing: '0.15em' }}>
+        {label}
+      </span>
+    </motion.div>
+  );
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 type ConvState = 'closed' | 'loading' | 'speaking' | 'listening' | 'processing';
@@ -938,21 +1027,7 @@ export function JarvisVoicePanel() {
                   </motion.div>
                 )}
                 {isListening && !hasSTT && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                    style={{
-                      padding: '8px 12px',
-                      background: 'rgba(168,85,247,0.06)',
-                      border: '1px solid rgba(168,85,247,0.2)',
-                      borderRadius: 8,
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                  >
-                    <span style={{ fontSize: 14 }}>⌨️</span>
-                    <span style={{ fontSize: 10, color: 'rgba(168,85,247,0.8)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
-                      Voice not available on this browser — type below ↓
-                    </span>
-                  </motion.div>
+                  <MicRecordButton onTranscript={q => { handleUserQuestion(q); }} />
                 )}
               </AnimatePresence>
               {convState === 'processing' && (

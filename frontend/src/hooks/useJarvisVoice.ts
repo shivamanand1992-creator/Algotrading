@@ -14,6 +14,11 @@ export interface JarvisVoiceState {
   stop:     () => void;
 }
 
+// iOS Safari routes AudioContext audio through the earpiece (voice call audio session).
+// Detect iOS once so we can skip AudioContext routing and play directly to loudspeaker.
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 export function useJarvisVoice(): JarvisVoiceState {
   const [state,    setState]    = useState<VoiceState>('idle');
   const [script,   setScript]   = useState('');
@@ -55,17 +60,22 @@ export function useJarvisVoice(): JarvisVoiceState {
       const blob  = new Blob([arr], { type: 'audio/mpeg' });
       const url   = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      audio.setAttribute('playsinline', '');
       audioRef.current = audio;
 
-      const ctx  = new AudioContext();
-      const anl  = ctx.createAnalyser();
-      anl.fftSize = 64;
-      anl.smoothingTimeConstant = 0.8;
-      const src = ctx.createMediaElementSource(audio);
-      src.connect(anl);
-      anl.connect(ctx.destination);
-      audioCtxRef.current = ctx;
-      setAnalyser(anl);
+      if (!isIOS) {
+        // Desktop/Android: route through AudioContext for waveform visualiser
+        const ctx  = new AudioContext();
+        const anl  = ctx.createAnalyser();
+        anl.fftSize = 64;
+        anl.smoothingTimeConstant = 0.8;
+        const src = ctx.createMediaElementSource(audio);
+        src.connect(anl);
+        anl.connect(ctx.destination);
+        audioCtxRef.current = ctx;
+        setAnalyser(anl);
+      }
+      // On iOS: play directly — AudioContext routes to earpiece, direct play uses loudspeaker
 
       setState('speaking');
       await audio.play();

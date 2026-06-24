@@ -11,17 +11,14 @@
   }
 }
 
-/* ── Navigation: horizontal scroll ──────────────────────────── */
+/* ── Navigation: hide top nav on mobile, use hamburger drawer ── */
 @media (max-width: 768px) {
   .top-nav-bar {
-    justify-content: flex-start !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding: 0 6px !important;
-    gap: 0 !important;
+    display: none !important;
   }
-  .top-nav-bar::-webkit-scrollbar { display: none; }
+  .mob-hamburger {
+    display: flex !important;
+  }
 }
 
 /* ── Header: hide clock on small screens ─────────────────────── */
