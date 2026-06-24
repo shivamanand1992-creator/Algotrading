@@ -320,8 +320,14 @@ export function JarvisVoicePanel() {
   const [textInput,      setTextInput]      = useState('');
   const [micLevel,      setMicLevel]       = useState(0);
 
+  // Detect once: Safari / iOS Chrome have no SpeechRecognition API
+  const hasSTT = !!(
+    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  );
+
   const voice          = useJarvisVoice();
   const scrollRef      = useRef<HTMLDivElement>(null);
+  const textInputRef   = useRef<HTMLInputElement>(null);
   const recogRef       = useRef<any>(null);
   const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stateRef        = useRef<ConvState>('closed');
@@ -460,11 +466,16 @@ export function JarvisVoicePanel() {
   // ── Start listening for user question ────────────────────────────
   const startListening = useCallback(() => {
     stopListening();
-    // Set stateRef immediately — React state update is async so stateRef.current
-    // would still hold the previous value (e.g. 'speaking') when _launch() runs.
     stateRef.current = 'listening';
     setConvState('listening');
     setTranscript('');
+
+    // iOS Safari / Chrome on iOS: SpeechRecognition not available.
+    // Skip the fake 20-second listen loop — just focus the text input instead.
+    if (!hasSTT) {
+      setTimeout(() => textInputRef.current?.focus(), 150);
+      return;
+    }
 
     const TIMEOUT_S = 20;
     let elapsed = 0;
@@ -794,7 +805,7 @@ export function JarvisVoicePanel() {
                   color: isSpeaking ? '#00e5ff' : isListening ? '#a855f7' : 'rgba(0,229,255,0.55)',
                   fontWeight: 700,
                 }}>
-                  {isSpeaking ? 'VAAYU SPEAKING' : isListening ? 'LISTENING…' : convState === 'processing' ? 'THINKING…' : 'VAAYU'}
+                  {isSpeaking ? 'VAAYU SPEAKING' : isListening ? (hasSTT ? 'LISTENING…' : 'TYPE BELOW') : convState === 'processing' ? 'THINKING…' : 'VAAYU'}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
@@ -914,7 +925,7 @@ export function JarvisVoicePanel() {
             {/* Listening bar / processing indicator */}
             <div style={{ padding: '8px 14px 14px', flexShrink: 0 }}>
               <AnimatePresence>
-                {isListening && (
+                {isListening && hasSTT && (
                   <motion.div
                     initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                   >
@@ -924,6 +935,23 @@ export function JarvisVoicePanel() {
                       pauseCountdown={pauseCountdown}
                       micLevel={micLevel}
                     />
+                  </motion.div>
+                )}
+                {isListening && !hasSTT && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(168,85,247,0.06)',
+                      border: '1px solid rgba(168,85,247,0.2)',
+                      borderRadius: 8,
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>⌨️</span>
+                    <span style={{ fontSize: 10, color: 'rgba(168,85,247,0.8)', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+                      Voice not available on this browser — type below ↓
+                    </span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -945,13 +973,16 @@ export function JarvisVoicePanel() {
               )}
               {!isListening && convState === 'closed' && (
                 <p style={{ margin: 0, fontSize: 9.5, color: 'rgba(160,196,224,0.35)', fontFamily: 'monospace', textAlign: 'center' }}>
-                  Conversation ended — say "Hey VAAYU" or click ◈ to restart
+                  {hasSTT
+                    ? 'Conversation ended — say "Hey VAAYU" or click ◈ to restart'
+                    : 'Conversation ended — click ◈ to restart'}
                 </p>
               )}
 
               {/* Text input */}
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <input
+                  ref={textInputRef}
                   value={textInput}
                   onChange={e => setTextInput(e.target.value)}
                   onKeyDown={e => {
@@ -961,7 +992,7 @@ export function JarvisVoicePanel() {
                       setTextInput('');
                     }
                   }}
-                  placeholder={isListening ? 'Listening… (or type here)' : 'Type a message…'}
+                  placeholder={isListening && hasSTT ? 'Listening… (or type here)' : 'Type your message…'}
                   disabled={convState === 'loading' || convState === 'processing'}
                   style={{
                     flex: 1,
