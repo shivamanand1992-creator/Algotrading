@@ -186,7 +186,7 @@ function ConvictionCard({ result }: { result: ConvictionResult }) {
       </div>
 
       {/* Key metrics row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+      <div className="mob-cv-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
         {[
           { label: 'Current Price', value: `₹${result.current_price.toLocaleString('en-IN')}`, color: '#00e5ff', raw: false },
           { label: 'Est. Fair Value', value: M(INR(c.estimated_fair_value)), color: '#a78bfa', raw: false,
@@ -232,7 +232,7 @@ function ConvictionCard({ result }: { result: ConvictionResult }) {
       </div>
 
       {/* TA quick strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+      <div className="mob-cv-ta" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
         {[
           { label: 'MACD', value: ta.macd_bullish ? '▲ Bullish' : '▼ Bearish', color: ta.macd_bullish ? '#4ade80' : '#f87171' },
           { label: 'BB', value: ta.bb_position, color: ta.bb_position?.includes('Above') ? '#f87171' : ta.bb_position?.includes('Below') ? '#4ade80' : 'rgba(160,196,224,0.6)' },
@@ -267,7 +267,7 @@ function ThesisScorecard({ thesis, currentPrice }: { thesis: ConvictionResult['t
   return (
     <div>
       <SectionHeader title="THESIS SCORECARD" subtitle="Three competing scenarios — probabilities must sum to 100%" />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+      <div className="mob-cv-thesis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
         {cases.map(({ label, data, color }) => {
           const upPct = data.fair_value ? ((data.fair_value - currentPrice) / currentPrice * 100) : null;
           return (
@@ -837,7 +837,7 @@ export function StockConvictionView() {
           {result.entry_zones && (
             <div>
               <SectionHeader title="ENTRY / EXIT ZONES" subtitle="Price zones with risk/reward context" />
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14 }}>
+              <div className="mob-cv-entry" style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14 }}>
                 <EntryZonesPanel zones={result.entry_zones} currentPrice={result.current_price} />
                 {result.price_distribution && <PriceDistributionPanel dist={result.price_distribution} />}
               </div>
@@ -848,7 +848,7 @@ export function StockConvictionView() {
           {result.peers?.length > 0 && (
             <div>
               <SectionHeader title="PEER COMPARISON" subtitle="Valuation vs growth — cyan dot = this stock, purple = peers" />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div className="mob-cv-peer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <Card>
                   <PeerScatterPlot
                     peers={result.peers}

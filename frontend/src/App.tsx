@@ -15,6 +15,7 @@ import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
 import './styles/jarvis-hud.css';
+import './styles/jarvis-mobile.css';
 
 const TOKEN_KEY = 'algo_auth_token';
 

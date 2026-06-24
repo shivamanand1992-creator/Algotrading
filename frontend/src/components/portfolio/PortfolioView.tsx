@@ -170,7 +170,7 @@ function AnalysisPanel({ analysis }: { analysis: AnalysisData }) {
       </div>
 
       {/* TA + FA columns */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+      <div className="mob-pf-ta-fa" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         {/* Technical */}
         <div style={{
           background: 'rgba(0,229,255,0.03)', border: '1px solid rgba(0,229,255,0.1)',
@@ -264,7 +264,7 @@ function AnalysisPanel({ analysis }: { analysis: AnalysisData }) {
 
       {/* Key positives + risks */}
       {(ai.key_positives.length > 0 || ai.key_risks.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div className="mob-pf-ta-fa" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           {ai.key_positives.length > 0 && (
             <div>
               <div style={{ color: '#4ade80', fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6, fontFamily: "'Courier New', monospace" }}>
@@ -405,7 +405,7 @@ export function PortfolioView() {
 
       {/* ── Summary cards ── */}
       {data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
+        <div className="mob-portfolio-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
           {([
             { label: 'Total Invested',  value: M(INR(data.total_invested)),     color: '#00e5ff'  },
             { label: 'Market Value',    value: M(INR(data.total_market_value)),  color: '#a78bfa'  },
@@ -447,7 +447,8 @@ export function PortfolioView() {
           NO HOLDINGS FOUND — CLICK SYNC BROKER TO FETCH
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="mob-table-scroll">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 560 }}>
           {holdings.map(h => {
             const isOpen   = expandedSym === h.symbol;
             const analysis = analyses[h.symbol];
@@ -547,6 +548,7 @@ export function PortfolioView() {
               </div>
             );
           })}
+        </div>
         </div>
       )}
     </div>

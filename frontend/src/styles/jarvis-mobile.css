@@ -1,0 +1,172 @@
+/* ================================================================
+   VAAYU — Mobile Responsive Overrides
+   Desktop layout is pixel-for-pixel identical.
+   All rules activate ONLY on screens ≤ 768px or ≤ 640px.
+================================================================ */
+
+/* ── Content area: tighter padding on mobile ─────────────────── */
+@media (max-width: 768px) {
+  main {
+    padding: 14px 10px !important;
+  }
+}
+
+/* ── Navigation: horizontal scroll ──────────────────────────── */
+@media (max-width: 768px) {
+  .top-nav-bar {
+    justify-content: flex-start !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0 6px !important;
+    gap: 0 !important;
+  }
+  .top-nav-bar::-webkit-scrollbar { display: none; }
+}
+
+/* ── Header: hide clock on small screens ─────────────────────── */
+@media (max-width: 600px) {
+  .site-header { padding: 0 10px !important; }
+  .hdr-clock { display: none !important; }
+}
+
+/* Hide status pills on very small screens */
+@media (max-width: 400px) {
+  .hdr-status { display: none !important; }
+}
+
+/* ── Dashboard: Globe command center 3-col → 1-col ───────────── */
+@media (max-width: 768px) {
+  .mob-globe-center {
+    grid-template-columns: 1fr !important;
+    min-height: unset !important;
+  }
+  /* Hide left/right HUD panels — globe takes full width */
+  .mob-globe-hud {
+    display: none !important;
+  }
+}
+
+/* ── Dashboard: Balance strip → column on mobile ─────────────── */
+@media (max-width: 640px) {
+  .mob-bal-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 12px 14px !important;
+  }
+  .mob-bal-amounts {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+    width: 100%;
+  }
+  .mob-bal-amounts > div {
+    min-width: 90px;
+  }
+}
+
+/* ── Dashboard: Global cues 4-col → 2-col ───────────────────── */
+@media (max-width: 640px) {
+  .mob-cues-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ── Dashboard: NiftyBees + Swing 2-col → 1-col ─────────────── */
+@media (max-width: 640px) {
+  .mob-two-col {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Dashboard: News 2-col → 1-col ──────────────────────────── */
+@media (max-width: 640px) {
+  .mob-news-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Scrollable tables ──────────────────────────────────────── */
+.mob-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.2) transparent;
+}
+.mob-table-scroll::-webkit-scrollbar { height: 3px; }
+.mob-table-scroll::-webkit-scrollbar-track { background: transparent; }
+.mob-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* ── Portfolio: summary 4-col → 2-col ───────────────────────── */
+@media (max-width: 640px) {
+  .mob-portfolio-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ── Portfolio: TA/FA 2-col → 1-col ─────────────────────────── */
+@media (max-width: 640px) {
+  .mob-pf-ta-fa {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Conviction: Thesis 3-col → 1-col ───────────────────────── */
+@media (max-width: 768px) {
+  .mob-cv-thesis {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Conviction: Key metrics 3-col → 1-col ──────────────────── */
+@media (max-width: 480px) {
+  .mob-cv-stats {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Conviction: TA strip 4-col → 2-col ─────────────────────── */
+@media (max-width: 640px) {
+  .mob-cv-ta {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ── Conviction: Entry zones 3:2 → 1-col ────────────────────── */
+@media (max-width: 768px) {
+  .mob-cv-entry {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Conviction: Peer scatter + table 1:1 → 1-col ───────────── */
+@media (max-width: 768px) {
+  .mob-cv-peer {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── ETF Holdings: summary auto-col fix ─────────────────────── */
+@media (max-width: 480px) {
+  .mob-etf-summary {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ── Global touch target sizes ───────────────────────────────── */
+@media (max-width: 768px) {
+  /* Ensure buttons are at least 44px tall (Apple HIG) */
+  button[style*="cursor: pointer"] {
+    min-height: 36px;
+  }
+}
+
+/* ── Prevent horizontal overflow on body ─────────────────────── */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+}

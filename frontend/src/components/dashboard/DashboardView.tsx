@@ -487,6 +487,7 @@ export function DashboardView() {
 
           {/* 3-column layout: left HUD | globe | right HUD */}
           <div
+            className="mob-globe-center"
             style={{
               display: 'grid',
               gridTemplateColumns: '180px 1fr 180px',
@@ -497,7 +498,7 @@ export function DashboardView() {
             }}
           >
             {/* Left HUD panel */}
-            <div style={{
+            <div className="mob-globe-hud" style={{
               display: 'flex', flexDirection: 'column',
               justifyContent: 'center', gap: 10,
               padding: '28px 16px 28px 20px',
@@ -549,7 +550,7 @@ export function DashboardView() {
             </div>
 
             {/* Right HUD panel */}
-            <div style={{
+            <div className="mob-globe-hud" style={{
               display: 'flex', flexDirection: 'column',
               justifyContent: 'center', gap: 10,
               padding: '28px 20px 28px 16px',
@@ -605,7 +606,7 @@ export function DashboardView() {
       {/* ── BALANCE STRIP ─────────────────────────────────────────── */}
       <motion.div variants={staggerItem}>
         <div
-          className="rounded-xl px-5 py-3 flex items-center justify-between"
+          className="mob-bal-row rounded-xl px-5 py-3 flex items-center justify-between"
           style={{
             background: balLow ? 'rgba(248,113,113,0.05)' : 'rgba(0,229,255,0.03)',
             border: `1px solid ${balLow ? 'rgba(248,113,113,0.25)' : 'rgba(0,229,255,0.1)'}`,
@@ -626,7 +627,7 @@ export function DashboardView() {
               </motion.span>
             )}
           </div>
-          <div className="flex items-center gap-6">
+          <div className="mob-bal-amounts flex items-center gap-6">
             <div className="text-right">
               <div className="text-[9px] text-jarvis-text-secondary/50 uppercase">Available Cash</div>
               <div className={`text-base font-mono font-bold ${balLow ? 'text-red-400' : balDataAvail ? 'text-green-400' : 'text-jarvis-text-secondary'}`}>
@@ -664,13 +665,13 @@ export function DashboardView() {
           <div className="flex-1 h-px bg-jarvis-primary/10" />
         </div>
         {cuesLoading ? (
-          <div className="grid grid-cols-4 gap-3">
+          <div className="mob-cues-grid grid grid-cols-4 gap-3">
             {[...Array(8)].map((_, i) => (
               <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-3 reveal-grid">
+          <div className="mob-cues-grid grid grid-cols-4 gap-3 reveal-grid">
             {globalCues.map(cue => (
               <CueCard key={cue.symbol} cue={cue} />
             ))}
@@ -679,7 +680,7 @@ export function DashboardView() {
       </motion.div>
 
       {/* ── NIFTYBEES + SWING ─────────────────────────────────────── */}
-      <motion.div variants={staggerItem} className="grid grid-cols-2 gap-5">
+      <motion.div variants={staggerItem} className="mob-two-col grid grid-cols-2 gap-5">
 
         {/* NiftyBees Card */}
         <div
@@ -851,13 +852,13 @@ export function DashboardView() {
           <span className="text-[9px] text-jarvis-text-secondary/40">ET Markets · refreshed at open</span>
         </div>
         {newsLoading ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="mob-news-grid grid grid-cols-2 gap-3">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="h-24 rounded-xl animate-pulse" style={{ background: 'rgba(0,229,255,0.04)' }} />
             ))}
           </div>
         ) : news.length > 0 ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="mob-news-grid grid grid-cols-2 gap-3">
             {news.slice(0, 8).map((item, i) => (
               <motion.a
                 key={i}

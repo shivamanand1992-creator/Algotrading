@@ -20,6 +20,7 @@ const NAV_ITEMS = [
 function TopNav({ activeView, onNavigate }: { activeView: string; onNavigate: (v: string) => void }) {
   return (
     <nav
+      className="top-nav-bar"
       style={{
         height: 40,
         display: 'flex',

@@ -35,6 +35,7 @@ export function Header({ onLogout }: HeaderProps) {
 
   return (
     <header
+      className="site-header"
       style={{
         height: 52,
         display: 'flex',
@@ -97,7 +98,7 @@ export function Header({ onLogout }: HeaderProps) {
       </div>
 
       {/* Center — clock */}
-      <div style={{ textAlign: 'center', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+      <div className="hdr-clock" style={{ textAlign: 'center', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
         <motion.div
           style={{
             fontSize: 20,
@@ -122,7 +123,7 @@ export function Header({ onLogout }: HeaderProps) {
       {/* Right — status + logout */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         {/* Status indicators */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="hdr-status" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <StatusPill label="SYS" ok={sysOk} />
           <StatusPill label="BROKER" ok={!!brokerOk} />
         </div>
