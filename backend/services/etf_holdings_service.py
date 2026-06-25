@@ -31,7 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 _IST = pytz.timezone("Asia/Kolkata")
 
-_DEFAULT_PROFIT_TARGET_PCT = 5.0
+_DEFAULT_PROFIT_TARGET_PCT = 50.0
 _CONFIG_FILE = Path(__file__).parent.parent.parent / "data" / "etf_config.json"
 
 
