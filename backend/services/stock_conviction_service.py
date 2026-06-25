@@ -341,7 +341,7 @@ Return ONLY valid JSON (no markdown) matching this EXACT schema:
 Rules:
 - bull + bear + base probabilities MUST sum to 100
 - Be specific with ₹ numbers based on current price
-- peer_tickers: exact NSE symbols (no .NS suffix) of 3-4 closest sector peers
+- peer_tickers: use EXACT full NSE tradingsymbols (e.g. KOTAKBANK not KOTAK, INDUSINDBK not INDUSIND, BAJAJ-AUTO not BAJAJAUTO). No .NS suffix. 3-4 closest sector peers.
 - Provide at least 2 red_flags and 3 green_flags (if any exist)
 - Provide at least 3 catalysts for the next 12 months"""
 
