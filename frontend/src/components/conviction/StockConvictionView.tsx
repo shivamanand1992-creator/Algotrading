@@ -895,7 +895,7 @@ export function StockConvictionView() {
     setResult(null);
 
     try {
-      const res = await api.post('/api/stocks/conviction', { ticker: t });
+      const res = await api.post('/api/stocks/conviction', { ticker: t }, { timeout: 120000 });
       const data = res.data as ConvictionResult;
       setResult(data);
 
@@ -1035,7 +1035,8 @@ export function StockConvictionView() {
           <div style={{ color: '#00e5ff', fontSize: 13, letterSpacing: 4, marginBottom: 10 }}>ANALYSING {ticker}…</div>
           <div style={{ color: 'rgba(160,196,224,0.4)', fontSize: 11, lineHeight: 1.7 }}>
             Fetching 1 year of price data · Computing RSI / MACD / Bollinger Bands<br />
-            Fetching fundamentals · Generating AI conviction thesis
+            Fetching fundamentals · Generating AI conviction thesis<br />
+            <span style={{ color: 'rgba(160,196,224,0.25)', fontSize: 10 }}>This takes 30–60 seconds — please wait…</span>
           </div>
           <div style={{ marginTop: 20, height: 2, background: 'rgba(0,229,255,0.07)', borderRadius: 1, overflow: 'hidden' }}>
             <div style={{
