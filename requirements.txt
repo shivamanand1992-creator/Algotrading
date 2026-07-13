@@ -28,7 +28,7 @@ streamlit==1.29.0
 plotly==5.18.0
 
 # Alerts
-python-telegram-bot==20.7
+python-telegram-bot>=21.0
 
 # Config & Utils
 PyYAML==6.0.1
