@@ -103,12 +103,13 @@ class SwingTradeService:
         self._total_capital      = default_cap
 
         # Autopilot settings (controlled via API / UI)
-        self._autopilot_enabled           = False
-        self._autopilot_mode              = "paper"
-        self._autopilot_capital_per_trade = 1000.0   # ₹ to invest per trade
-        self._autopilot_max_trades        = 3
+        self._autopilot_enabled            = False
+        self._autopilot_mode               = "paper"
+        self._autopilot_capital_per_trade  = 1000.0   # ₹ to invest per trade
+        self._autopilot_max_trades         = 3
+        self._autopilot_optimizer_method   = "confidence_weighted"  # equal_weight | risk_parity | kelly | confidence_weighted
         self._autopilot_last_run: Optional[datetime] = None
-        self._autopilot_last_result: dict             = {}
+        self._autopilot_last_result: dict              = {}
 
         self._orders_ledger: List[dict] = []   # all orders ever placed by this system
         self._load_state()
@@ -134,6 +135,7 @@ class SwingTradeService:
                 "mode":              self._autopilot_mode,
                 "capital_per_trade": self._autopilot_capital_per_trade,
                 "max_trades":        self._autopilot_max_trades,
+                "optimizer_method":  self._autopilot_optimizer_method,
                 "last_run":          self._autopilot_last_run.isoformat() if self._autopilot_last_run else None,
                 "last_result":       self._autopilot_last_result,
             },
@@ -173,10 +175,11 @@ class SwingTradeService:
                 )
         ap = state.get("autopilot", {})
         if ap.get("enabled") is not None:
-            self._autopilot_enabled           = bool(ap["enabled"])
-            self._autopilot_mode              = ap.get("mode", "paper")
-            self._autopilot_capital_per_trade = float(ap.get("capital_per_trade", 1000.0))
-            self._autopilot_max_trades        = int(ap.get("max_trades", 3))
+            self._autopilot_enabled            = bool(ap["enabled"])
+            self._autopilot_mode               = ap.get("mode", "paper")
+            self._autopilot_capital_per_trade  = float(ap.get("capital_per_trade", 1000.0))
+            self._autopilot_max_trades         = int(ap.get("max_trades", 3))
+            self._autopilot_optimizer_method   = ap.get("optimizer_method", "confidence_weighted")
             if ap.get("last_run"):
                 try:
                     self._autopilot_last_run = datetime.fromisoformat(ap["last_run"])
@@ -509,32 +512,74 @@ class SwingTradeService:
             filters={"regime_filter": True, "rs_filter": True},
         )
 
-        executed = []
+        # ── Portfolio optimization: allocate capital optimally across signals ──
+        from backend.services.portfolio_optimizer import get_portfolio_optimizer
+
         eligible = [s for s in signals if s.symbol not in self._swing_positions]
-        for sig in eligible[:slots_free]:  # only fill empty slots, not always max_trades
-            qty = self._calculate_qty_by_capital(sig.entry_price, self._autopilot_capital_per_trade)
+        if not eligible:
+            logger.info("[SwingAutopilot] No eligible signals after filtering.")
+            self._autopilot_last_run = datetime.now(_IST)
+            self._autopilot_last_result = {
+                "run_time":       self._autopilot_last_run.isoformat(),
+                "signals_found":  len(signals),
+                "executed_count": 0,
+                "executed":       [],
+                "regime_warning": regime_info.get("warning", ""),
+                "nifty_bullish":  regime_info.get("bullish", True),
+            }
+            return self._autopilot_last_result
+
+        # Prepare signal dicts for optimizer
+        signal_dicts = [
+            {
+                "symbol": s.symbol,
+                "confidence": s.confidence,
+                "entry_price": s.entry_price,
+                "stop_loss": s.stop_loss,
+                "target1": s.target1,
+            }
+            for s in eligible[:slots_free]
+        ]
+
+        # Use configured optimizer method
+        optimizer = get_portfolio_optimizer(method=self._autopilot_optimizer_method)
+        total_budget = self._autopilot_capital_per_trade * slots_free
+        allocations = optimizer.optimize(signal_dicts, total_budget, max_positions=slots_free)
+
+        # Execute positions with optimized capital allocation
+        executed = []
+        for sig in eligible[:slots_free]:
+            if sig.symbol not in allocations:
+                continue
+
+            allocated_capital = allocations[sig.symbol]
+            qty = self._calculate_qty_by_capital(sig.entry_price, allocated_capital)
             if qty <= 0:
                 continue
+
             if self._autopilot_mode == "paper":
                 oid = self._open_paper_position(sig, qty)
             else:
                 oid = await self._place_live_order(sig, qty)
+
             if oid:
                 invested = round(qty * sig.entry_price, 2)
                 executed.append({
-                    "symbol":     sig.symbol,
-                    "order_id":   oid,
-                    "qty":        qty,
-                    "entry":      sig.entry_price,
-                    "sl":         sig.stop_loss,
-                    "target1":    sig.target1,
-                    "target2":    sig.target2,
-                    "invested":   invested,
-                    "confidence": sig.confidence,
+                    "symbol":         sig.symbol,
+                    "order_id":       oid,
+                    "qty":            qty,
+                    "entry":          sig.entry_price,
+                    "sl":             sig.stop_loss,
+                    "target1":        sig.target1,
+                    "target2":        sig.target2,
+                    "invested":       invested,
+                    "allocated":      round(allocated_capital, 2),
+                    "confidence":     sig.confidence,
                 })
                 logger.info(
-                    f"[SwingAutopilot] {sig.symbol}: qty={qty}, "
-                    f"entry=₹{sig.entry_price:.2f}, invested=₹{invested:.2f}"
+                    f"[SwingAutopilot] {sig.symbol}: allocated=₹{allocated_capital:.0f}, "
+                    f"qty={qty}, entry=₹{sig.entry_price:.2f}, invested=₹{invested:.2f} "
+                    f"(confidence={sig.confidence:.1%})"
                 )
 
         self._autopilot_last_run = datetime.now(_IST)
