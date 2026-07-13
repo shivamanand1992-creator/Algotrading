@@ -69,6 +69,9 @@ class StockSignal:
     ema21: float = 0.0
     ema50: float = 0.0
     rs_vs_nifty: float = 0.0   # stock 20d return minus Nifty 20d return (%)
+    momentum_10d: float = 0.0  # 10-day price momentum % (alpha factor)
+    distance_sma20: float = 0.0  # distance from 20-day SMA % (mean reversion alpha)
+    vwap_deviation: float = 0.0  # deviation from 5-day VWAP % (volume-weighted alpha)
     scan_time: datetime = field(default_factory=lambda: datetime.now(IST))
 
     def to_dict(self) -> dict:
@@ -93,11 +96,14 @@ class StockSignal:
             "atr":           round(self.atr, 2),
             "volume_ratio":  round(self.volume_ratio, 2),
             "macd_hist":     round(self.macd_hist, 4),
-            "ema9":          round(self.ema9, 2),
-            "ema21":         round(self.ema21, 2),
-            "ema50":         round(self.ema50, 2),
-            "rs_vs_nifty":   round(self.rs_vs_nifty, 2),
-            "scan_time":     self.scan_time.isoformat(),
+            "ema9":            round(self.ema9, 2),
+            "ema21":           round(self.ema21, 2),
+            "ema50":           round(self.ema50, 2),
+            "rs_vs_nifty":     round(self.rs_vs_nifty, 2),
+            "momentum_10d":    round(self.momentum_10d, 2),
+            "distance_sma20":  round(self.distance_sma20, 2),
+            "vwap_deviation":  round(self.vwap_deviation, 2),
+            "scan_time":       self.scan_time.isoformat(),
         }
 
 
@@ -248,17 +254,20 @@ class StockScreener:
 
     def _score_signal(self, stock: dict, df: pd.DataFrame, nifty_20d_ret: float = 0.0) -> StockSignal:
         """
-        Apply the 8-factor scoring model to the latest bar of *df*.
+        Apply the 10-factor scoring model to the latest bar of *df*.
         Returns a StockSignal (action may be "HOLD" if score < threshold).
 
-        Factors (total weight = 1.10 before normalisation):
+        Factors (total weight = 1.35 before normalisation):
           1. Trend alignment EMA9/21/50       — 0.35
           2. Trend strength ADX               — 0.15
           3. RSI momentum zone                — 0.15
           4. MACD histogram positive/rising   — 0.15
           5. Volume confirmation              — 0.10
           6. Bullish candlestick pattern      — 0.10
-          7. Relative strength vs Nifty       — 0.10 (NEW)
+          7. Relative strength vs Nifty       — 0.10
+          8. Price momentum (10-day velocity) — 0.10 (NEW - momentum alpha)
+          9. Mean reversion distance          — 0.05 (NEW - value alpha)
+         10. Volume-weighted momentum         — 0.10 (NEW - liquidity alpha)
         """
         row  = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else row
@@ -283,6 +292,23 @@ class StockScreener:
         if len(df) > 21:
             close_series = df["close"].dropna()
             stock_20d_ret = (float(close_series.iloc[-1]) / float(close_series.iloc[-21]) - 1) * 100
+
+        # ── Alpha factors: momentum, mean-reversion, volume-weighted ──
+        # Alpha 8: Price momentum (10-day velocity) — rate of change
+        price_momentum_10d = 0.0
+        if len(df) > 10:
+            price_momentum_10d = (close / float(df["close"].iloc[-11]) - 1) * 100
+
+        # Alpha 9: Mean reversion distance (distance from 20-day SMA)
+        sma20 = float(df["close"].rolling(20).mean().iloc[-1]) if len(df) >= 20 else close
+        distance_from_sma20 = ((close - sma20) / sma20 * 100) if sma20 > 0 else 0.0
+
+        # Alpha 10: Volume-weighted momentum (VWAP deviation over 5 days)
+        vwap_5d = 0.0
+        if len(df) >= 5:
+            recent = df.tail(5)
+            vwap_5d = (recent["close"] * recent["volume"]).sum() / recent["volume"].sum()
+        vwap_deviation = ((close - vwap_5d) / vwap_5d * 100) if vwap_5d > 0 else 0.0
 
         score   = 0.0
         reasons = []
@@ -351,6 +377,34 @@ class StockScreener:
             score -= 0.05
             reasons.append(f"RS vs Nifty: {rs_diff:.1f}% (lagging index)")
 
+        # ── 8. Price momentum (10-day velocity) — Alpha factor (10%) ─
+        # Stocks with strong recent momentum tend to continue (momentum effect)
+        if price_momentum_10d >= 5.0:
+            score += 0.10
+            reasons.append(f"Strong 10-day momentum: +{price_momentum_10d:.1f}%")
+        elif price_momentum_10d >= 2.0:
+            score += 0.05
+            reasons.append(f"Positive 10-day momentum: +{price_momentum_10d:.1f}%")
+
+        # ── 9. Mean reversion distance (5%) — Alpha factor ───────────
+        # Stocks slightly above SMA20 (1-3%) have room to run without being overbought
+        if 1.0 <= distance_from_sma20 <= 3.0:
+            score += 0.05
+            reasons.append(f"Healthy above SMA20: +{distance_from_sma20:.1f}%")
+        elif distance_from_sma20 > 5.0:
+            # Too extended above mean — risky
+            score -= 0.03
+            reasons.append(f"Extended above SMA20: +{distance_from_sma20:.1f}% (overbought risk)")
+
+        # ── 10. Volume-weighted momentum (VWAP deviation) — Alpha (10%)
+        # Trading above VWAP with volume support indicates institutional buying
+        if vwap_deviation >= 0.5:
+            score += 0.10
+            reasons.append(f"Above 5-day VWAP: +{vwap_deviation:.1f}% (institutional support)")
+        elif vwap_deviation >= 0.1:
+            score += 0.05
+            reasons.append(f"Above 5-day VWAP: +{vwap_deviation:.1f}%")
+
         # ── Regime label ─────────────────────────────────────────────
         if ema9 > ema21 > ema50 and adx > 20:
             regime = "uptrend"
@@ -371,28 +425,31 @@ class StockScreener:
         sl_pct   = round(sl_dist / entry * 100, 2)
 
         return StockSignal(
-            symbol      = stock["symbol"],
-            name        = stock["name"],
-            sector      = stock["sector"],
-            yf_ticker   = stock["yf"],
-            action      = action,
-            close       = entry,
-            entry_price = entry,
-            stop_loss   = sl,
-            target1     = target1,
-            target2     = target2,
-            sl_pct      = sl_pct,
-            risk_reward = 2.0,
-            confidence  = round(min(max(score, 0.0), 1.0), 4),
-            regime      = regime,
-            reasons     = reasons,
-            rsi         = rsi,
-            adx         = adx,
-            atr         = round(atr14, 2),
-            volume_ratio= round(vol_ratio, 2),
-            macd_hist   = round(macd_h, 4),
-            ema9        = round(ema9, 2),
-            ema21       = round(ema21, 2),
-            ema50       = round(ema50, 2),
-            rs_vs_nifty = round(stock_20d_ret - nifty_20d_ret, 2),
+            symbol          = stock["symbol"],
+            name            = stock["name"],
+            sector          = stock["sector"],
+            yf_ticker       = stock["yf"],
+            action          = action,
+            close           = entry,
+            entry_price     = entry,
+            stop_loss       = sl,
+            target1         = target1,
+            target2         = target2,
+            sl_pct          = sl_pct,
+            risk_reward     = 2.0,
+            confidence      = round(min(max(score, 0.0), 1.0), 4),
+            regime          = regime,
+            reasons         = reasons,
+            rsi             = rsi,
+            adx             = adx,
+            atr             = round(atr14, 2),
+            volume_ratio    = round(vol_ratio, 2),
+            macd_hist       = round(macd_h, 4),
+            ema9            = round(ema9, 2),
+            ema21           = round(ema21, 2),
+            ema50           = round(ema50, 2),
+            rs_vs_nifty     = round(stock_20d_ret - nifty_20d_ret, 2),
+            momentum_10d    = round(price_momentum_10d, 2),
+            distance_sma20  = round(distance_from_sma20, 2),
+            vwap_deviation  = round(vwap_deviation, 2),
         )
