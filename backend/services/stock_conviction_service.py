@@ -242,12 +242,28 @@ def _generate_conviction(symbol: str, sd: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import anthropic
 
+        # Market regime context — helps Claude understand current trading conditions
+        regime_ctx = ""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            from backend.services.regime_service import detect_market_regime
+            regime = loop.run_until_complete(detect_market_regime())
+            regime_ctx = f"""
+MARKET REGIME: {regime['regime'].upper()} (confidence {regime.get('confidence', 0.5)*100:.0f}%)
+Momentum Win Rate: {regime.get('momentum_winrate', 0.55)*100:.0f}%
+Recommendation: {regime.get('recommendation', 'N/A')}
+"""
+        except Exception:
+            pass
+
         prompt = f"""You are a senior Indian equity research analyst. Analyse this NSE stock and return a COMPREHENSIVE conviction JSON.
 
 STOCK: {symbol} ({sd.get('full_name', symbol)})
 Sector: {sd.get('sector', 'N/A')} — {sd.get('industry', 'N/A')}
 Current Price: ₹{sd.get('current_price', 'N/A')}
 Market Cap: {sd.get('market_cap_fmt', 'N/A')}
+{regime_ctx}
 
 TECHNICAL:
 - RSI(14): {sd.get('rsi', 'N/A')} [{sd.get('rsi_signal', 'N/A')}]

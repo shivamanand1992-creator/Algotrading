@@ -264,6 +264,12 @@ def _format_context(ctx: dict) -> str:
         lines.append(f"RSI(14): {ctx['rsi']:.1f}")
     if ctx.get("regime"):
         lines.append(f"Market regime: {ctx['regime']} ({ctx.get('regime_conf', 0.5)*100:.0f}% confidence)")
+        if ctx.get("regime_recommendation"):
+            lines.append(f"⚠️ REGIME ALERT: {ctx['regime_recommendation']}")
+        if ctx.get("momentum_winrate"):
+            lines.append(f"Historical momentum win rate in this regime: {ctx['momentum_winrate']*100:.0f}%")
+        if not ctx.get("should_trade", True):
+            lines.append("🛑 AUTOPILOT RECOMMENDATION: PAUSE trading until regime improves")
 
     if ctx.get("global_cues"):
         # Extract USD/INR for converting commodity prices

@@ -454,6 +454,31 @@ class SwingTradeService:
         if not self._autopilot_enabled:
             return {"skipped": True, "reason": "autopilot disabled"}
 
+        # Regime gate — pause trading in unfavorable market conditions
+        try:
+            from backend.services.regime_service import detect_market_regime
+            regime = await detect_market_regime()
+            if not regime.get("should_trade", True):
+                logger.warning(
+                    f"[SwingAutopilot] PAUSED — {regime['regime']} regime "
+                    f"(confidence {regime.get('confidence', 0):.0%}, "
+                    f"momentum win rate {regime.get('momentum_winrate', 0):.0%})"
+                )
+                self._autopilot_last_run = datetime.now(_IST)
+                self._autopilot_last_result = {
+                    "run_time":       self._autopilot_last_run.isoformat(),
+                    "signals_found":  0,
+                    "executed_count": 0,
+                    "executed":       [],
+                    "skipped_reason": f"Regime gate: {regime['regime']} ({regime.get('confidence', 0):.0%} conf)",
+                    "regime_warning": regime.get("recommendation", "Trading paused due to unfavorable regime"),
+                    "regime": regime,
+                    "nifty_bullish":  regime["regime"] == "trending_up",
+                }
+                return self._autopilot_last_result
+        except Exception as exc:
+            logger.error(f"[SwingAutopilot] Regime check failed: {exc} — proceeding with scan")
+
         logger.info(
             f"[SwingAutopilot] Starting — mode={self._autopilot_mode}, "
             f"₹{self._autopilot_capital_per_trade:.0f} × {self._autopilot_max_trades} trades"

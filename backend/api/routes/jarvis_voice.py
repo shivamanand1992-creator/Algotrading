@@ -180,16 +180,17 @@ async def _build_context(topic: str) -> dict:
         except Exception:
             pass
 
-    # Regime
+    # Regime — NEW: use Vibe-Trading regime detection for accuracy boost
     if topic in ("market_summary", "full_briefing"):
         try:
-            from backend.dependencies import get_market_service
-            mkt = get_market_service()
-            if mkt:
-                r = await _safe(mkt.get_market_regime())
-                if r:
-                    ctx["regime"]      = r.current_regime
-                    ctx["regime_conf"] = r.confidence
+            from backend.services.regime_service import detect_market_regime
+            regime = await _safe(detect_market_regime())
+            if regime:
+                ctx["regime"] = regime.get("regime")
+                ctx["regime_conf"] = regime.get("confidence")
+                ctx["regime_recommendation"] = regime.get("recommendation")
+                ctx["should_trade"] = regime.get("should_trade", True)
+                ctx["momentum_winrate"] = regime.get("momentum_winrate", 0.55)
         except Exception:
             pass
 
