@@ -24,7 +24,7 @@ torchvision==0.19.1
 
 # Monitoring & Dashboard
 rich==13.7.0
-streamlit==1.29.0
+streamlit>=1.40.0
 plotly==5.18.0
 
 # Alerts
