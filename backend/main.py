@@ -34,7 +34,7 @@ from backend.api.routes import jarvis_voice
 from backend.api.routes import portfolio as portfolio_routes
 from backend.api.routes import conviction as conviction_routes
 from backend.api.routes import support_resistance as sr_routes
-from backend.api.routes import intraday_signals
+# from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
@@ -879,7 +879,7 @@ app.include_router(jarvis_voice.router)
 app.include_router(portfolio_routes.router)
 app.include_router(conviction_routes.router)
 app.include_router(sr_routes.router)
-app.include_router(intraday_signals.router)
+# app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
 
 
 @app.get("/health")
