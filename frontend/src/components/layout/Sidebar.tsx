@@ -9,8 +9,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
-  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡', section: 'EQUITY' },
+  { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },
   { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
+  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡' },
   { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
   { id: 'news',       label: 'Market News',     icon: '≡' },

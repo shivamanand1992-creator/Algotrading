@@ -11,6 +11,7 @@ import { SectorAnalysisView } from './components/sectors/SectorAnalysisView';
 import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { StockConvictionView } from './components/conviction/StockConvictionView';
+import { IntradayDashboard } from './components/intraday/IntradayDashboard';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -56,6 +57,7 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
+      case 'intraday':   return <IntradayDashboard />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;

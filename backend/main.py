@@ -33,6 +33,8 @@ from backend.api.routes import etf_holdings
 from backend.api.routes import jarvis_voice
 from backend.api.routes import portfolio as portfolio_routes
 from backend.api.routes import conviction as conviction_routes
+from backend.api.routes import support_resistance as sr_routes
+from backend.api.routes import intraday_signals
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
 from backend.websocket_manager import ws_manager
@@ -749,6 +751,44 @@ async def _startup_init_services() -> None:
                 await asyncio.sleep(3)
 
 
+async def _sr_refresh_loop() -> None:
+    """
+    Daily Support/Resistance level refresh at 9:00 AM IST.
+    Recalculates S/R levels for tracked symbols using last 3 days OHLC.
+    """
+    last_refresh_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (9, 0)
+            not_done_today = last_refresh_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_refresh_date = today
+                logger.info("[SRRefresh] Daily 9:00 AM refresh starting…")
+
+                try:
+                    from backend.dependencies import get_sr_service
+                    sr_service = get_sr_service()
+                    # Refresh Nifty by default; add more symbols as needed
+                    result = await sr_service.refresh_daily(["NIFTY"])
+                    logger.info(
+                        f"[SRRefresh] Complete — {result['refreshed']} symbol(s) updated "
+                        f"at {result['timestamp']}"
+                    )
+                except Exception as exc:
+                    logger.error(f"[SRRefresh] Daily refresh error: {exc}")
+
+        except Exception as exc:
+            logger.error(f"_sr_refresh_loop unexpected error: {exc}")
+
+        await asyncio.sleep(60)  # check every minute
+
+
 async def _startup_telegram_ping() -> None:
     """Send a Telegram message on every startup so you know the bot is working."""
     await asyncio.sleep(10)  # let all services initialise first
@@ -795,6 +835,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
     asyncio.create_task(_morning_news_loop())
+    asyncio.create_task(_sr_refresh_loop())
     asyncio.create_task(_startup_telegram_ping())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()
@@ -837,6 +878,8 @@ app.include_router(etf_holdings.router)
 app.include_router(jarvis_voice.router)
 app.include_router(portfolio_routes.router)
 app.include_router(conviction_routes.router)
+app.include_router(sr_routes.router)
+app.include_router(intraday_signals.router)
 
 
 @app.get("/health")

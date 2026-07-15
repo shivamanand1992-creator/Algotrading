@@ -28,6 +28,7 @@ _signal_generator = None
 _price_predictor = None
 _regime_classifier = None
 _options_analyzer = None
+_sr_service = None
 
 
 def get_angel_client():
@@ -157,6 +158,16 @@ def get_options_analyzer():
         angel_client = get_angel_client()
         _options_analyzer = OptionsChainAnalyzer()
     return _options_analyzer
+
+
+def get_sr_service():
+    """Get singleton Support/Resistance service instance."""
+    global _sr_service
+    if _sr_service is None:
+        from backend.services.support_resistance_service import get_sr_service as _get_sr
+        angel_client = get_angel_client()
+        _sr_service = _get_sr(angel_client)
+    return _sr_service
 
 
 # Clean up on shutdown

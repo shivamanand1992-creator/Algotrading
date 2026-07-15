@@ -7,6 +7,7 @@ import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'DASHBOARD',    icon: '◈' },
+  { id: 'intraday',  label: 'INTRADAY',     icon: '⚡' },
   { id: 'niftybees', label: 'NIFTYBEES',    icon: '⬡' },
   { id: 'stocks',    label: 'EQUITY',       icon: '↗' },
   { id: 'market',    label: 'MARKET',       icon: '⊕' },
