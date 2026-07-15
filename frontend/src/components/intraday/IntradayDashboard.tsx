@@ -91,7 +91,7 @@ export function IntradayDashboard() {
       {error && (
         <Card
           title="Error"
-          style={{ marginBottom: 20, borderLeft: '3px solid #ff5252' }}
+          className="mb-5 border-l-2 border-red-500"
         >
           <p style={{ color: '#ff5252', fontSize: 14 }}>{error}</p>
         </Card>
@@ -119,9 +119,7 @@ export function IntradayDashboard() {
             <Card
               key={`${signal.symbol}-${idx}`}
               title={signal.symbol}
-              style={{
-                borderLeft: `3px solid ${getSignalColor(signal.signal_type)}`,
-              }}
+              className="border-l-2"
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {/* Signal Type */}
