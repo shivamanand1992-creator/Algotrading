@@ -103,9 +103,9 @@ class SwingTradeService:
         self._total_capital      = default_cap
 
         # Autopilot settings (controlled via API / UI)
-        self._autopilot_enabled            = False
-        self._autopilot_mode               = "paper"
-        self._autopilot_capital_per_trade  = 1000.0   # ₹ to invest per trade
+        self._autopilot_enabled            = True     # Default ON for automatic trading
+        self._autopilot_mode               = "paper"  # Start in paper mode (safe)
+        self._autopilot_capital_per_trade  = 10000.0  # ₹ to invest per trade
         self._autopilot_max_trades         = 3
         self._autopilot_optimizer_method   = "confidence_weighted"  # equal_weight | risk_parity | kelly | confidence_weighted
         self._autopilot_last_run: Optional[datetime] = None
