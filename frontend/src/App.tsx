@@ -12,6 +12,7 @@ import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { StockConvictionView } from './components/conviction/StockConvictionView';
 import { IntradayDashboard } from './components/intraday/IntradayDashboard';
+import { HermesDashboard } from './components/hermes/HermesDashboard';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -58,6 +59,7 @@ function App() {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
       case 'intraday':   return <IntradayDashboard />;
+      case 'hermes':     return <HermesDashboard />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;
