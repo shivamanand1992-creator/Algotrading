@@ -180,3 +180,14 @@ logging:
   file: "logs/trading.log"
   rotation: "1 day"
   retention: "30 days"
+
+# =============================================================================
+# Hermes AI Agent - Intraday Automated Trading
+# =============================================================================
+hermes:
+  enabled: false  # Enable/disable Hermes intraday trading
+  instrument: "NIFTYBEES"  # Stock symbol to trade
+  capital_per_trade: 10000  # ₹10,000 per trade
+  max_trades_per_day: 4  # Maximum 4 trades per day
+  min_confidence: 0.7  # Minimum AI confidence to execute (0.0-1.0)
+  check_interval_seconds: 30  # Analyze market every 30 seconds
