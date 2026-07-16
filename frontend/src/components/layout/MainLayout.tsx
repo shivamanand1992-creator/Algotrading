@@ -1,6 +1,7 @@
 import React, { ReactNode, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
+import { Sidebar } from './Sidebar';
 import { ParticleCanvas } from '../ui/ParticleCanvas';
 import { CityBackground } from '../ui/CityBackground';
 import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
@@ -8,6 +9,7 @@ import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'DASHBOARD',    icon: '◈' },
   { id: 'intraday',  label: 'INTRADAY',     icon: '⚡' },
+  { id: 'hermes',    label: 'HERMES AI',    icon: '🤖' },
   { id: 'niftybees', label: 'NIFTYBEES',    icon: '⬡' },
   { id: 'stocks',    label: 'EQUITY',       icon: '↗' },
   { id: 'market',    label: 'MARKET',       icon: '⊕' },
@@ -214,12 +216,17 @@ export function MainLayout({ children, activeView, onNavigate, onLogout }: MainL
       <CityBackground />
       <ParticleCanvas />
 
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <Header onLogout={onLogout} onHamburger={() => setMenuOpen(true)} />
-        <TopNav activeView={activeView} onNavigate={onNavigate} />
-        <main style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {children}
-        </main>
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', minHeight: '100vh' }}>
+        {/* Left sidebar navigation */}
+        <Sidebar activeView={activeView} onNavigate={onNavigate} />
+
+        {/* Main content area */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Header onLogout={onLogout} onHamburger={() => setMenuOpen(true)} />
+          <main style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+            {children}
+          </main>
+        </div>
       </div>
 
       {/* Mobile slide-in nav drawer */}
