@@ -34,6 +34,7 @@ from backend.api.routes import jarvis_voice
 from backend.api.routes import portfolio as portfolio_routes
 from backend.api.routes import conviction as conviction_routes
 from backend.api.routes import support_resistance as sr_routes
+from backend.api.routes import hermes as hermes_routes
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
@@ -831,6 +832,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
+    asyncio.create_task(_hermes_intraday_loop())
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
@@ -879,6 +881,7 @@ app.include_router(jarvis_voice.router)
 app.include_router(portfolio_routes.router)
 app.include_router(conviction_routes.router)
 app.include_router(sr_routes.router)
+app.include_router(hermes_routes.router)
 # app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
 
 
@@ -925,3 +928,37 @@ else:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="0.0.0.0", port=int(__import__("os").getenv("PORT", 8000)), log_level="info")
+
+
+# ---------------------------------------------------------------------------
+# Hermes AI Agent - Intraday Trading Loop
+# ---------------------------------------------------------------------------
+
+async def _hermes_intraday_loop() -> None:
+    """Background task: Hermes AI agent intraday trading every 30s"""
+    from backend.services.hermes_intraday_service import HermesIntradayService
+    from backend.dependencies import get_angel_client
+    
+    await asyncio.sleep(15)  # Wait for startup
+    
+    angel = get_angel_client()
+    hermes_svc = HermesIntradayService(config.trading_config, angel)
+    
+    logger.info("[HermesLoop] Starting Hermes intraday trading loop")
+    
+    while True:
+        try:
+            if hermes_svc.enabled and hermes_svc.is_trading_hours():
+                result = await hermes_svc.run_analysis_cycle()
+                logger.debug(f"[HermesLoop] Cycle: {result.get('status')}")
+            
+            elif hermes_svc.enabled and hermes_svc.is_market_closed():
+                await hermes_svc.force_exit_all()
+                logger.info("[HermesLoop] Market closed - positions exited")
+            
+            interval = config.trading_config.get("hermes", {}).get("check_interval_seconds", 30)
+            await asyncio.sleep(interval)
+            
+        except Exception as e:
+            logger.error(f"[HermesLoop] Error: {e}")
+            await asyncio.sleep(60)
