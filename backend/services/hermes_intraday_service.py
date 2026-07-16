@@ -118,6 +118,21 @@ class HermesIntradayService:
             # Fetch current market data
             market_data = await self._fetch_market_data()
 
+            # PRIORITY: Monitor existing position for SL/Target hits
+            if self.position:
+                ltp = market_data["price"]
+                position_result = await self._monitor_position(ltp)
+                if position_result.get("action") == "exit":
+                    self.last_analysis_time = datetime.now(_IST)
+                    self._save_state()
+                    return {
+                        "status": "success",
+                        "decision": {"action": "MONITORING_POSITION"},
+                        "execution": position_result,
+                        "position": None,
+                        "daily_pnl": self.daily_pnl,
+                    }
+
             # Get Hermes decision
             decision = await self.agent.analyze_market(market_data)
 
@@ -141,6 +156,39 @@ class HermesIntradayService:
         except Exception as e:
             logger.error(f"[Hermes] Analysis cycle failed: {e}")
             return {"status": "error", "error": str(e)}
+
+    async def _monitor_position(self, ltp: float) -> Dict:
+        """
+        Monitor open position for target/SL hits
+
+        Args:
+            ltp: Last traded price
+
+        Returns:
+            Dict with action taken
+        """
+        if not self.position:
+            return {"action": "no_position"}
+
+        entry = self.position["entry_price"]
+        sl = self.position["stop_loss"]
+        target = self.position["target"]
+
+        # Check if target hit
+        if ltp >= target:
+            logger.info(f"[Hermes] TARGET HIT: LTP ₹{ltp:.2f} >= Target ₹{target:.2f}")
+            market_data = {"price": ltp}
+            return await self._exit_position(market_data, reason="target_hit")
+
+        # Check if stop loss hit (backup - broker SL should trigger first)
+        if ltp <= sl:
+            logger.warning(f"[Hermes] STOP LOSS HIT: LTP ₹{ltp:.2f} <= SL ₹{sl:.2f}")
+            market_data = {"price": ltp}
+            return await self._exit_position(market_data, reason="stop_loss_hit")
+
+        # Position still open
+        pnl = (ltp - entry) * self.position["qty"]
+        return {"action": "monitoring", "unrealized_pnl": pnl}
 
     async def _fetch_market_data(self) -> Dict:
         """Fetch real-time market data for analysis"""
@@ -249,7 +297,9 @@ class HermesIntradayService:
         if self.angel_client:
             try:
                 token = self.angel_client.search_scrip("NSE", self.instrument)
-                order_id = self.angel_client.place_order(
+
+                # 1. Place BUY order (entry)
+                entry_order_id = self.angel_client.place_order(
                     variety="NORMAL",
                     exchange="NSE",
                     symbol=f"{self.instrument}-EQ",
@@ -260,8 +310,31 @@ class HermesIntradayService:
                     product="INTRADAY",  # MIS
                 )
 
+                logger.info(f"[Hermes] Entry order placed: {entry_order_id}")
+                await asyncio.sleep(2)  # Wait for order execution
+
+                # 2. Place STOP-LOSS order (protection)
+                try:
+                    sl_order_id = self.angel_client.place_order(
+                        variety="STOPLOSS",
+                        exchange="NSE",
+                        symbol=f"{self.instrument}-EQ",
+                        token=token,
+                        qty=qty,
+                        order_type="STOPLOSS_LIMIT",
+                        transaction_type="SELL",
+                        product="INTRADAY",
+                        price=stop_loss,  # Limit price
+                        trigger_price=stop_loss,  # Trigger price
+                    )
+                    logger.success(f"[Hermes] SL order placed @ ₹{stop_loss:.2f}: {sl_order_id}")
+                except Exception as sl_err:
+                    logger.error(f"[Hermes] SL order failed (position unprotected!): {sl_err}")
+                    sl_order_id = None
+
                 self.position = {
-                    "order_id": order_id,
+                    "order_id": entry_order_id,
+                    "sl_order_id": sl_order_id,
                     "symbol": self.instrument,
                     "entry_price": entry_price,
                     "entry_time": datetime.now(_IST).isoformat(),
@@ -272,20 +345,20 @@ class HermesIntradayService:
                     "mode": "live",
                 }
 
-                logger.success(f"[Hermes] ENTRY: {self.instrument} {qty}qty @ ₹{entry_price:.2f}")
+                logger.success(f"[Hermes] ENTRY: {self.instrument} {qty}qty @ ₹{entry_price:.2f} | SL @ ₹{stop_loss:.2f}")
                 await self._send_telegram_alert(
                     f"🟢 HERMES ENTRY\n"
                     f"Stock: {self.instrument}\n"
                     f"Qty: {qty}\n"
                     f"Entry: ₹{entry_price:.2f}\n"
-                    f"SL: ₹{stop_loss:.2f}\n"
+                    f"SL: ₹{stop_loss:.2f} {'✅' if sl_order_id else '⚠️ FAILED'}\n"
                     f"Target: ₹{target:.2f}\n"
                     f"Setup: {decision.get('setup_type', 'N/A')}\n"
                     f"Confidence: {decision['confidence']:.0%}"
                 )
 
                 self._save_state()
-                return {"action": "entry", "order_id": order_id, "qty": qty}
+                return {"action": "entry", "order_id": entry_order_id, "sl_order_id": sl_order_id, "qty": qty}
 
             except Exception as e:
                 logger.error(f"[Hermes] Order placement failed: {e}")
@@ -321,6 +394,17 @@ class HermesIntradayService:
         if self.angel_client and self.position["mode"] == "live":
             try:
                 token = self.angel_client.search_scrip("NSE", self.instrument)
+
+                # 1. Cancel SL order if it exists (to avoid double exit)
+                sl_order_id = self.position.get("sl_order_id")
+                if sl_order_id:
+                    try:
+                        self.angel_client.cancel_order(variety="STOPLOSS", order_id=sl_order_id)
+                        logger.info(f"[Hermes] Cancelled SL order: {sl_order_id}")
+                    except Exception as cancel_err:
+                        logger.warning(f"[Hermes] SL cancel failed (may already be executed): {cancel_err}")
+
+                # 2. Place MARKET SELL order
                 order_id = self.angel_client.place_order(
                     variety="NORMAL",
                     exchange="NSE",
