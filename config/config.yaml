@@ -185,7 +185,7 @@ logging:
 # Hermes AI Agent - Intraday Automated Trading
 # =============================================================================
 hermes:
-  enabled: false  # Enable/disable Hermes intraday trading
+  enabled: true  # Enable/disable Hermes intraday trading
   instrument: "NIFTYBEES"  # Stock symbol to trade
   capital_per_trade: 10000  # ₹10,000 per trade
   max_trades_per_day: 4  # Maximum 4 trades per day
