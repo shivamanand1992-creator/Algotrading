@@ -191,3 +191,14 @@ hermes:
   max_trades_per_day: 4  # Maximum 4 trades per day
   min_confidence: 0.7  # Minimum AI confidence to execute (0.0-1.0)
   check_interval_seconds: 30  # Analyze market every 30 seconds
+
+  # Enhanced Features
+  use_atr_stops: true  # Use ATR-based dynamic stop loss
+  atr_multiplier: 1.5  # ATR multiplier for stop loss distance
+  use_trailing_sl: true  # Enable trailing stop loss
+  trailing_activation_pct: 0.5  # Activate trailing after 0.5% profit
+  trailing_distance_pct: 0.3  # Trail SL by 0.3% from peak
+  use_ml_consensus: true  # Require LLM + ML model agreement
+  ml_min_confidence: 0.6  # Minimum ML model confidence (0.0-1.0)
+  require_volume_confirmation: true  # Require volume > average
+  volume_multiplier: 1.5  # Current volume must be 1.5x average

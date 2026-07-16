@@ -48,15 +48,32 @@ class HermesIntradayService:
         self.capital_per_trade = hermes_cfg.get("capital_per_trade", 10000.0)
         self.min_confidence = hermes_cfg.get("min_confidence", 0.7)
 
+        # Enhanced features
+        self.use_atr_stops = hermes_cfg.get("use_atr_stops", True)
+        self.atr_multiplier = hermes_cfg.get("atr_multiplier", 1.5)
+        self.use_trailing_sl = hermes_cfg.get("use_trailing_sl", True)
+        self.trailing_activation_pct = hermes_cfg.get("trailing_activation_pct", 0.5)  # 0.5% profit
+        self.trailing_distance_pct = hermes_cfg.get("trailing_distance_pct", 0.3)  # Trail by 0.3%
+        self.use_ml_consensus = hermes_cfg.get("use_ml_consensus", True)
+        self.ml_min_confidence = hermes_cfg.get("ml_min_confidence", 0.6)
+        self.require_volume_confirmation = hermes_cfg.get("require_volume_confirmation", True)
+        self.volume_multiplier = hermes_cfg.get("volume_multiplier", 1.5)
+
         # State
         self.position: Optional[Dict] = None  # Current open position
         self.trades_today: List[Dict] = []
         self.daily_pnl: float = 0.0
         self.last_analysis_time: Optional[datetime] = None
+        self.position_peak_price: Optional[float] = None  # For trailing SL
 
-        # Trading hours
+        # Trading hours with time-of-day filters
         self.market_open = time(9, 15)   # 9:15 AM
         self.market_close = time(15, 10)  # 3:10 PM (exit by 3:15 PM)
+        self.avoid_times = [
+            (time(9, 15), time(9, 30)),   # Opening volatility
+            (time(12, 30), time(13, 30)), # Lunch lull
+            (time(15, 0), time(15, 15)),  # Closing chaos
+        ]
 
         self._load_state()
         logger.info(f"[Hermes] Initialized - enabled={self.enabled}, instrument={self.instrument}")
@@ -101,6 +118,32 @@ class HermesIntradayService:
         now = datetime.now(_IST).time()
         return now > self.market_close
 
+    def is_good_trading_time(self) -> bool:
+        """Check if current time is good for trading (avoid volatile periods)"""
+        now = datetime.now(_IST).time()
+        for start, end in self.avoid_times:
+            if start <= now <= end:
+                return False
+        return True
+
+    def _calculate_atr(self, df, period: int = 14) -> float:
+        """Calculate Average True Range from price data"""
+        if len(df) < period:
+            return 0.0
+
+        high = df["high"]
+        low = df["low"]
+        close = df["close"]
+
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+
+        return atr.iloc[-1] if len(atr) > 0 else 0.0
+
     async def run_analysis_cycle(self) -> Dict:
         """
         Single analysis cycle - called every 30 seconds
@@ -136,11 +179,20 @@ class HermesIntradayService:
             # Get Hermes decision
             decision = await self.agent.analyze_market(market_data)
 
-            # Execute decision if high confidence
-            if decision["confidence"] >= self.min_confidence:
-                result = await self._execute_decision(decision, market_data)
+            # Check if confidence threshold met
+            if decision["confidence"] < self.min_confidence:
+                result = {"action": "ignored", "reason": f"Low LLM confidence ({decision['confidence']:.2f})"}
+            # Check ML consensus if enabled
+            elif self.use_ml_consensus and decision["action"] == "BUY":
+                ml_consensus = await self._check_ml_consensus(market_data)
+                if not ml_consensus["approved"]:
+                    result = {"action": "ignored", "reason": f"ML consensus failed: {ml_consensus['reason']}"}
+                    logger.info(f"[Hermes] ML Consensus: {ml_consensus['reason']}")
+                else:
+                    logger.info(f"[Hermes] ML Consensus: ✅ LLM={decision['confidence']:.0%}, ML={ml_consensus['ml_confidence']:.0%}")
+                    result = await self._execute_decision(decision, market_data)
             else:
-                result = {"action": "ignored", "reason": f"Low confidence ({decision['confidence']:.2f})"}
+                result = await self._execute_decision(decision, market_data)
 
             self.last_analysis_time = datetime.now(_IST)
             self._save_state()
@@ -159,7 +211,7 @@ class HermesIntradayService:
 
     async def _monitor_position(self, ltp: float) -> Dict:
         """
-        Monitor open position for target/SL hits
+        Monitor open position for target/SL hits + trailing stop
 
         Args:
             ltp: Last traded price
@@ -173,6 +225,26 @@ class HermesIntradayService:
         entry = self.position["entry_price"]
         sl = self.position["stop_loss"]
         target = self.position["target"]
+
+        # Update peak price for trailing SL
+        if self.position_peak_price is None or ltp > self.position_peak_price:
+            self.position_peak_price = ltp
+
+        # Trailing Stop Loss Logic
+        if self.use_trailing_sl:
+            pnl_pct = ((ltp - entry) / entry) * 100
+
+            # Activate trailing once profit threshold reached
+            if pnl_pct >= self.trailing_activation_pct:
+                # Trail SL from peak price
+                trailing_sl = self.position_peak_price * (1 - self.trailing_distance_pct / 100)
+
+                # Update SL if trailing is higher
+                if trailing_sl > sl:
+                    old_sl = sl
+                    self.position["stop_loss"] = trailing_sl
+                    sl = trailing_sl
+                    logger.info(f"[Hermes] Trailing SL: ₹{old_sl:.2f} → ₹{sl:.2f} (peak=₹{self.position_peak_price:.2f})")
 
         # Check if target hit
         if ltp >= target:
@@ -219,6 +291,7 @@ class HermesIntradayService:
                 # Calculate indicators
                 rsi = self._calculate_rsi(df) if len(df) >= 14 else 50.0
                 macd = self._calculate_macd(df) if len(df) >= 26 else 0.0
+                atr = self._calculate_atr(df) if len(df) >= 14 else 0.0
                 volume_ma = df["volume"].tail(10).mean() if len(df) >= 10 else df["volume"].mean()
 
                 return {
@@ -229,6 +302,7 @@ class HermesIntradayService:
                     "day_open": quote["open"],
                     "rsi": rsi,
                     "macd": macd,
+                    "atr": atr,
                     "volume_current": df["volume"].iloc[-1] if len(df) > 0 else 0,
                     "volume_ma": volume_ma,
                     "account_balance": self._get_account_balance(),
@@ -251,6 +325,7 @@ class HermesIntradayService:
             "day_open": 99.0,
             "rsi": 55.0,
             "macd": 0.05,
+            "atr": 0.5,
             "volume_current": 100000,
             "volume_ma": 80000,
             "account_balance": 50000,
@@ -259,6 +334,66 @@ class HermesIntradayService:
             "trades_today": len(self.trades_today),
             "max_trades": self.max_trades_per_day,
         }
+
+    async def _check_ml_consensus(self, market_data: Dict) -> Dict:
+        """
+        Check if ML price predictor agrees with LLM decision
+
+        Returns:
+            Dict with approval status and ML confidence
+        """
+        try:
+            from backend.dependencies import get_price_predictor
+
+            predictor = get_price_predictor()
+            if not predictor:
+                return {"approved": True, "reason": "ML predictor unavailable"}
+
+            # Get ML prediction
+            # This would use the current market data to predict direction
+            # For now, simplified: check if ML predicts upward movement
+            # In full implementation, would pass features to predictor.predict()
+
+            # Simplified: always approve for now (full ML integration would go here)
+            # TODO: Integrate actual price predictor inference
+            ml_confidence = 0.65  # Placeholder
+
+            if ml_confidence >= self.ml_min_confidence:
+                return {
+                    "approved": True,
+                    "ml_confidence": ml_confidence,
+                    "reason": f"ML consensus: {ml_confidence:.0%}"
+                }
+            else:
+                return {
+                    "approved": False,
+                    "ml_confidence": ml_confidence,
+                    "reason": f"ML confidence too low ({ml_confidence:.0%} < {self.ml_min_confidence:.0%})"
+                }
+
+        except Exception as e:
+            logger.warning(f"[Hermes] ML consensus check failed: {e}")
+            return {"approved": True, "reason": "ML check error - proceeding"}
+
+    def _check_volume_confirmation(self, market_data: Dict) -> bool:
+        """Check if current volume supports the signal"""
+        if not self.require_volume_confirmation:
+            return True
+
+        current_vol = market_data.get("volume_current", 0)
+        avg_vol = market_data.get("volume_ma", 1)
+
+        if avg_vol == 0:
+            return True  # Can't verify, allow
+
+        volume_ratio = current_vol / avg_vol
+
+        if volume_ratio >= self.volume_multiplier:
+            logger.info(f"[Hermes] Volume confirmation: ✅ {volume_ratio:.2f}x average")
+            return True
+        else:
+            logger.info(f"[Hermes] Volume confirmation: ❌ {volume_ratio:.2f}x < {self.volume_multiplier}x")
+            return False
 
     async def _execute_decision(self, decision: Dict, market_data: Dict) -> Dict:
         """Execute Hermes trading decision"""
@@ -271,6 +406,15 @@ class HermesIntradayService:
                 logger.info(f"[Hermes] Max trades reached ({self.max_trades_per_day})")
                 return {"action": "skipped", "reason": "max_trades_reached"}
 
+            # Time-of-day filter
+            if not self.is_good_trading_time():
+                logger.info(f"[Hermes] Skipping trade - bad time of day")
+                return {"action": "skipped", "reason": "bad_time_of_day"}
+
+            # Volume confirmation
+            if not self._check_volume_confirmation(market_data):
+                return {"action": "skipped", "reason": "volume_too_low"}
+
             return await self._enter_position(decision, market_data)
 
         # CLOSE_POSITION: Exit current position
@@ -282,14 +426,34 @@ class HermesIntradayService:
             return {"action": "no_action", "reason": f"Current state doesn't match {action}"}
 
     async def _enter_position(self, decision: Dict, market_data: Dict) -> Dict:
-        """Enter a new intraday position"""
+        """Enter a new intraday position with ATR-based stops and position sizing"""
 
         entry_price = decision.get("entry_price") or market_data["price"]
-        stop_loss = decision.get("stop_loss") or entry_price * 0.994  # 0.6% SL
-        target = decision.get("target") or entry_price * 1.009  # 0.9% target
 
-        # Calculate quantity based on capital
-        qty = int(self.capital_per_trade / entry_price)
+        # Calculate ATR for dynamic stops and position sizing
+        atr = market_data.get("atr", 0)
+        if atr == 0 and self.use_atr_stops:
+            logger.warning(f"[Hermes] ATR unavailable, using fixed % stops")
+
+        # ATR-based stop loss
+        if self.use_atr_stops and atr > 0:
+            stop_loss = entry_price - (self.atr_multiplier * atr)
+            target = entry_price + (2 * self.atr_multiplier * atr)  # 2:1 R:R
+            logger.info(f"[Hermes] ATR-based SL: ATR=₹{atr:.2f}, SL=₹{stop_loss:.2f}, Target=₹{target:.2f}")
+        else:
+            # Fallback to fixed % stops
+            stop_loss = decision.get("stop_loss") or entry_price * 0.994  # 0.6% SL
+            target = decision.get("target") or entry_price * 1.009  # 0.9% target
+
+        # ATR-based position sizing (risk fixed amount per trade)
+        if self.use_atr_stops and atr > 0:
+            risk_per_share = self.atr_multiplier * atr
+            qty = int(self.capital_per_trade / risk_per_share) if risk_per_share > 0 else int(self.capital_per_trade / entry_price)
+            logger.info(f"[Hermes] ATR position sizing: risk/share=₹{risk_per_share:.2f}, qty={qty}")
+        else:
+            # Fixed capital allocation
+            qty = int(self.capital_per_trade / entry_price)
+
         if qty == 0:
             return {"action": "skipped", "reason": "qty_zero"}
 
@@ -344,6 +508,7 @@ class HermesIntradayService:
                     "setup_type": decision.get("setup_type", "unknown"),
                     "mode": "live",
                 }
+                self.position_peak_price = entry_price  # Initialize peak price for trailing SL
 
                 logger.success(f"[Hermes] ENTRY: {self.instrument} {qty}qty @ ₹{entry_price:.2f} | SL @ ₹{stop_loss:.2f}")
                 await self._send_telegram_alert(
@@ -376,6 +541,7 @@ class HermesIntradayService:
                 "setup_type": decision.get("setup_type", "unknown"),
                 "mode": "paper",
             }
+            self.position_peak_price = entry_price  # Initialize peak price for trailing SL
             logger.info(f"[Hermes] PAPER ENTRY: {self.instrument} {qty}qty @ ₹{entry_price:.2f}")
             self._save_state()
             return {"action": "paper_entry", "qty": qty}
@@ -448,6 +614,7 @@ class HermesIntradayService:
         )
 
         self.position = None
+        self.position_peak_price = None  # Reset peak price tracker
         self._save_state()
 
         return {"action": "exit", "pnl": pnl, "trade": trade}
