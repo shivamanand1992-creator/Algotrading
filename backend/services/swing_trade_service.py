@@ -547,8 +547,18 @@ class SwingTradeService:
         allocations = optimizer.optimize(signal_dicts, total_budget, max_positions=slots_free)
 
         # Execute positions with optimized capital allocation
+        # Keep trying stocks until we fill all slots or run out of candidates
         executed = []
-        for sig in eligible[:slots_free]:
+        candidate_idx = 0
+        max_attempts = min(len(eligible), slots_free * 3)  # Try up to 3x the target to handle restrictions
+
+        while len(executed) < slots_free and candidate_idx < max_attempts:
+            if candidate_idx >= len(eligible):
+                break  # Ran out of candidates
+
+            sig = eligible[candidate_idx]
+            candidate_idx += 1
+
             if sig.symbol not in allocations:
                 continue
 
@@ -581,6 +591,8 @@ class SwingTradeService:
                     f"qty={qty}, entry=₹{sig.entry_price:.2f}, invested=₹{invested:.2f} "
                     f"(confidence={sig.confidence:.1%})"
                 )
+            else:
+                logger.info(f"[SwingAutopilot] {sig.symbol}: skipped (order failed) — trying next candidate")
 
         self._autopilot_last_run = datetime.now(_IST)
         self._autopilot_last_result = {
