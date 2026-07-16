@@ -30,6 +30,12 @@ export function HermesDashboard() {
   const [trades, setTrades] = useState<HermesTrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState({
+    capital_per_trade: 10000,
+    max_trades_per_day: 4,
+    min_confidence: 0.7,
+  });
 
   useEffect(() => {
     fetchStatus();
@@ -46,6 +52,11 @@ export function HermesDashboard() {
       const response = await api.get('/api/hermes/status');
       setStatus(response.data);
       setEnabled(response.data.enabled);
+      setSettings({
+        capital_per_trade: response.data.capital_per_trade || 10000,
+        max_trades_per_day: response.data.max_trades_per_day || 4,
+        min_confidence: response.data.min_confidence || 0.7,
+      });
       setLoading(false);
     } catch (err) {
       console.error('Failed to fetch Hermes status:', err);
@@ -69,6 +80,22 @@ export function HermesDashboard() {
       fetchStatus();
     } catch (err) {
       console.error('Failed to toggle Hermes:', err);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      await api.post('/api/hermes/config', {
+        enabled,
+        capital_per_trade: settings.capital_per_trade,
+        max_trades_per_day: settings.max_trades_per_day,
+        min_confidence: settings.min_confidence,
+      });
+      setShowSettings(false);
+      fetchStatus();
+      alert('Settings saved successfully!');
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to save settings');
     }
   };
 
@@ -177,7 +204,116 @@ export function HermesDashboard() {
               🚪 FORCE EXIT
             </button>
           )}
+
+          {/* Settings Button */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="px-4 py-2 text-xs font-bold rounded-lg transition-all ml-auto"
+            style={{
+              background: 'rgba(0,229,255,0.1)',
+              border: '1px solid rgba(0,229,255,0.3)',
+              color: '#00e5ff',
+            }}
+          >
+            ⚙️ SETTINGS
+          </button>
         </div>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <h3 className="text-sm font-bold text-jarvis-primary mb-4">⚙️ Configuration</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Capital Per Trade */}
+              <div>
+                <label className="block text-xs text-jarvis-text-secondary mb-2">
+                  Capital Per Trade (₹)
+                </label>
+                <input
+                  type="number"
+                  value={settings.capital_per_trade}
+                  onChange={(e) => setSettings({ ...settings, capital_per_trade: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                  style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(0,229,255,0.2)',
+                    color: '#fff',
+                  }}
+                  min="1000"
+                  max="100000"
+                  step="1000"
+                />
+              </div>
+
+              {/* Max Trades Per Day */}
+              <div>
+                <label className="block text-xs text-jarvis-text-secondary mb-2">
+                  Max Trades Per Day
+                </label>
+                <input
+                  type="number"
+                  value={settings.max_trades_per_day}
+                  onChange={(e) => setSettings({ ...settings, max_trades_per_day: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                  style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(0,229,255,0.2)',
+                    color: '#fff',
+                  }}
+                  min="1"
+                  max="10"
+                />
+              </div>
+
+              {/* Min Confidence */}
+              <div>
+                <label className="block text-xs text-jarvis-text-secondary mb-2">
+                  Min AI Confidence (%)
+                </label>
+                <input
+                  type="number"
+                  value={Math.round(settings.min_confidence * 100)}
+                  onChange={(e) => setSettings({ ...settings, min_confidence: parseInt(e.target.value) / 100 })}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                  style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(0,229,255,0.2)',
+                    color: '#fff',
+                  }}
+                  min="50"
+                  max="95"
+                  step="5"
+                />
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={handleSaveSettings}
+                className="px-6 py-2 text-sm font-bold rounded-lg transition-all"
+                style={{
+                  background: 'rgba(0,230,118,0.2)',
+                  border: '1px solid #00e676',
+                  color: '#00e676',
+                }}
+              >
+                💾 SAVE SETTINGS
+              </button>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="px-6 py-2 text-sm font-bold rounded-lg transition-all"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: 'rgba(255,255,255,0.6)',
+                }}
+              >
+                CANCEL
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Current Position */}

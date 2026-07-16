@@ -467,6 +467,9 @@ class HermesIntradayService:
             "trades_today": len(self.trades_today),
             "daily_pnl": self.daily_pnl,
             "last_analysis": self.last_analysis_time.isoformat() if self.last_analysis_time else None,
+            "capital_per_trade": self.capital_per_trade,
+            "max_trades_per_day": self.max_trades_per_day,
+            "min_confidence": self.min_confidence,
         }
 
     def _calculate_rsi(self, df) -> float:
