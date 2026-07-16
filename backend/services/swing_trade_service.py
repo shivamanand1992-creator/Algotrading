@@ -1354,6 +1354,17 @@ class SwingTradeService:
                 return order_id
         except Exception as exc:
             err_str = str(exc)
+            # Cautionary stock under exchange restriction → skip permanently
+            if "cautionary listings" in err_str.lower() or "surveillance" in err_str.lower():
+                logger.warning(
+                    f"[SwingService] {sig.symbol} is under exchange cautionary listing/surveillance. "
+                    f"Skipping this stock — cannot place orders until restriction is removed by NSE/BSE. "
+                    f"Error: {err_str}"
+                )
+                # Mark signal as failed so it's not retried
+                sig.status = "failed"
+                sig.failure_reason = "Exchange restriction: cautionary listing"
+                return None
             # AG8001 = Angel One "Invalid Token" → session expired; reconnect and retry once
             if "AG8001" in err_str or "Invalid Token" in err_str:
                 logger.warning(
