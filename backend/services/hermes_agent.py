@@ -1,6 +1,6 @@
 """
 Hermes Agent - AI-powered intraday trading decision engine
-Uses LLM reasoning to analyze market conditions and make trading decisions
+Uses Claude AI to analyze market conditions and make trading decisions
 """
 
 import os
@@ -14,23 +14,23 @@ logger = logging.getLogger(__name__)
 
 
 class HermesAgent:
-    """AI trading agent using Groq/LLM for market analysis"""
+    """AI trading agent using Claude (Anthropic) for market analysis"""
 
-    def __init__(self, api_key: Optional[str] = None, api_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize Hermes Agent
 
         Args:
-            api_key: Groq API key (from GROQ_API_KEY env var if not provided)
-            api_url: LLM API endpoint (defaults to Groq)
+            api_key: Anthropic API key (from ANTHROPIC_API_KEY env var if not provided)
         """
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        self.api_url = api_url or "https://api.groq.com/openai/v1/chat/completions"
-        self.model = "mixtral-8x7b-32768"  # Fast Groq model
-        self.timeout = 15.0
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.api_url = "https://api.anthropic.com/v1/messages"
+        self.model = "claude-3-5-haiku-20241022"  # Fast, cheap Claude model (80% cheaper than Sonnet)
+        self.timeout = 30.0
+        self.max_tokens = 1024
 
         if not self.api_key:
-            logger.warning("[Hermes] No GROQ_API_KEY found - agent will not work")
+            logger.warning("[Hermes] No ANTHROPIC_API_KEY found - agent will not work")
 
     async def analyze_market(self, market_data: Dict) -> Dict:
         """
@@ -123,30 +123,31 @@ Analyze the current market state and respond with a JSON decision:
 Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met."""
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call Groq LLM API"""
+        """Call Anthropic Claude API"""
 
         if not self.api_key:
-            raise ValueError("No GROQ_API_KEY configured")
+            raise ValueError("No ANTHROPIC_API_KEY configured")
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 self.api_url,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
                 },
                 json={
                     "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": self.max_tokens,
                     "temperature": 0.3,  # Low temperature for consistent decisions
-                    "max_tokens": 500,
+                    "messages": [{"role": "user", "content": prompt}],
                 },
                 timeout=self.timeout,
             )
 
             response.raise_for_status()
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+            return result["content"][0]["text"]
 
     def _parse_decision(self, response_text: str) -> Dict:
         """Parse LLM JSON response"""
