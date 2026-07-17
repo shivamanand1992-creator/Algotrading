@@ -39,12 +39,13 @@ async def get_version():
             pass
 
     return {
-        "version": "1.0.0",
+        "version": "1.0.1",
         "commit": commit,
         "branch": branch,
         "deployed_at": datetime.now().isoformat(),
-        "frontend_build": "hermes-monitor-v3",
+        "frontend_build": "hermes-monitor-v4-websocket-fix",
         "hermes_monitor_enabled": True,
         "frontend_status": frontend_status,
+        "frontend_js_bundle": "main.f1145f73.js",
         "cwd": os.getcwd(),
     }
