@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir 'setuptools<68' && \
 
 # Copy backend code
 COPY backend/ ./backend/
+COPY config/ ./config/
 COPY data/ ./data/
 COPY execution/ ./execution/
 COPY features/ ./features/
