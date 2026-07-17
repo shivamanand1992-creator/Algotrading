@@ -1,7 +1,7 @@
-# Last updated: 2026-07-17 13:10 IST - Force frontend rebuild
+# Last updated: 2026-07-17 13:15 IST - Use build script for reliable frontend builds
 [build]
 builder = "nixpacks"
-buildCommand = "pip install 'setuptools<68' && pip install -r requirements.txt && cd frontend && rm -rf node_modules/.cache && npm install && npm run build && cd .."
+buildCommand = "bash build.sh"
 
 [deploy]
 startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
