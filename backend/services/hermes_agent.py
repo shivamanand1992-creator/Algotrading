@@ -25,7 +25,7 @@ class HermesAgent:
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
-        self.model = "claude-3-5-haiku-20250110"  # Fast, affordable Claude 3.5 Haiku
+        self.model = "claude-haiku-4-5"  # Fast, affordable Claude Haiku 4.5
         self.timeout = 30.0
         self.max_tokens = 1024
 
