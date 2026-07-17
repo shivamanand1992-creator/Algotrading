@@ -7,7 +7,7 @@ import os
 import json
 import logging
 from typing import Dict, Optional
-import httpx
+from anthropic import AsyncAnthropic
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class HermesAgent:
             api_key: Anthropic API key (from ANTHROPIC_API_KEY env var if not provided)
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.api_url = "https://api.anthropic.com/v1/messages"
+        self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
         self.model = "claude-3-5-haiku-20241022"  # Fast, cheap Claude model (80% cheaper than Sonnet)
         self.timeout = 30.0
         self.max_tokens = 1024
@@ -123,36 +123,25 @@ Analyze the current market state and respond with a JSON decision:
 Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met."""
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call Anthropic Claude API"""
+        """Call Anthropic Claude API using official SDK"""
 
-        if not self.api_key:
+        if not self.client:
             raise ValueError("No ANTHROPIC_API_KEY configured")
 
-        async with httpx.AsyncClient(follow_redirects=False) as client:
-            try:
-                response = await client.post(
-                    self.api_url,
-                    headers={
-                        "x-api-key": self.api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "max_tokens": self.max_tokens,
-                        "temperature": 0.3,  # Low temperature for consistent decisions
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                    timeout=self.timeout,
-                )
+        try:
+            message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=0.3,  # Low temperature for consistent decisions
+                messages=[{"role": "user", "content": prompt}],
+            )
 
-                response.raise_for_status()
-                result = response.json()
-                return result["content"][0]["text"]
+            # Extract text from response
+            return message.content[0].text
 
-            except httpx.HTTPStatusError as e:
-                logger.error(f"[Hermes] API error: {e.response.status_code} - {e.response.text[:500]}")
-                raise
+        except Exception as e:
+            logger.error(f"[Hermes] Anthropic API error: {e}")
+            raise
 
     def _parse_decision(self, response_text: str) -> Dict:
         """Parse LLM JSON response"""
