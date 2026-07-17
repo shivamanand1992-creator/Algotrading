@@ -1,3 +1,0 @@
-# Railway should NOT ignore these folders even if they're in .gitignore
-!frontend/build/
-!frontend/build/**
