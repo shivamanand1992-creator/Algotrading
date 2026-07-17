@@ -1,36 +1,36 @@
 """
 Hermes Agent - AI-powered intraday trading decision engine
-Uses Claude AI to analyze market conditions and make trading decisions
+Uses Groq LLM to analyze market conditions and make trading decisions
 """
 
 import os
 import json
 import logging
 from typing import Dict, Optional
-from anthropic import AsyncAnthropic
+from groq import AsyncGroq
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 class HermesAgent:
-    """AI trading agent using Claude (Anthropic) for market analysis"""
+    """AI trading agent using Groq LLM for market analysis"""
 
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize Hermes Agent
 
         Args:
-            api_key: Anthropic API key (from ANTHROPIC_API_KEY env var if not provided)
+            api_key: Groq API key (from GROQ_API_KEY env var if not provided)
         """
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
-        self.model = "claude-3-5-haiku-20241022"  # Fast, cheap Claude model (80% cheaper than Sonnet)
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        self.client = AsyncGroq(api_key=self.api_key) if self.api_key else None
+        self.model = "mixtral-8x7b-32768"  # Fast, FREE Groq model (14,400 requests/day free tier)
         self.timeout = 30.0
         self.max_tokens = 1024
 
         if not self.api_key:
-            logger.warning("[Hermes] No ANTHROPIC_API_KEY found - agent will not work")
+            logger.warning("[Hermes] No GROQ_API_KEY found - agent will not work")
 
     async def analyze_market(self, market_data: Dict) -> Dict:
         """
@@ -123,24 +123,24 @@ Analyze the current market state and respond with a JSON decision:
 Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met."""
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call Anthropic Claude API using official SDK"""
+        """Call Groq API using official SDK"""
 
         if not self.client:
-            raise ValueError("No ANTHROPIC_API_KEY configured")
+            raise ValueError("No GROQ_API_KEY configured")
 
         try:
-            message = await self.client.messages.create(
+            completion = await self.client.chat.completions.create(
                 model=self.model,
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=self.max_tokens,
                 temperature=0.3,  # Low temperature for consistent decisions
-                messages=[{"role": "user", "content": prompt}],
             )
 
             # Extract text from response
-            return message.content[0].text
+            return completion.choices[0].message.content
 
         except Exception as e:
-            logger.error(f"[Hermes] Anthropic API error: {e}")
+            logger.error(f"[Hermes] Groq API error: {e}")
             raise
 
     def _parse_decision(self, response_text: str) -> Dict:
