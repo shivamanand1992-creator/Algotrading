@@ -194,6 +194,40 @@ async def _build_context(topic: str) -> dict:
         except Exception:
             pass
 
+    # Hermes AI Agent Status — for Vaayu questions about Hermes
+    try:
+        from backend.dependencies import get_config
+        from pathlib import Path
+        import json
+
+        state_file = Path(__file__).parent.parent.parent.parent / "logs" / "hermes_intraday_state.json"
+        hermes_cfg = get_config().get("hermes", {})
+
+        hermes_data = {
+            "enabled": hermes_cfg.get("enabled", False),
+            "instrument": hermes_cfg.get("instrument", "NIFTYBEES"),
+            "trades_today": 0,
+            "daily_pnl": 0.0,
+            "position": None,
+        }
+
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text())
+                from datetime import datetime
+                import pytz
+                today = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+                if state.get("date") == today:
+                    hermes_data["trades_today"] = len(state.get("trades_today", []))
+                    hermes_data["daily_pnl"] = state.get("daily_pnl", 0.0)
+                    hermes_data["position"] = state.get("position")
+            except Exception:
+                pass
+
+        ctx["hermes"] = hermes_data
+    except Exception:
+        pass
+
     # Global cues
     if topic in ("global_cues", "market_summary", "full_briefing"):
         try:
