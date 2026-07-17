@@ -681,6 +681,7 @@ _PUBLIC_API_PATHS = {
     "/api/auth/login",
     "/api/system/status",  # Railway health check
     "/api/system/telegram/test",  # safe to expose — only sends to the configured chat ID
+    "/api/version",  # Deployment verification — public for troubleshooting
     "/health",
 }
 
