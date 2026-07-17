@@ -71,7 +71,7 @@ class HermesIntradayService:
         self.market_close = time(15, 10)  # 3:10 PM (exit by 3:15 PM)
         self.avoid_times = [
             (time(9, 15), time(9, 30)),   # Opening volatility
-            (time(12, 30), time(13, 30)), # Lunch lull
+            # (time(12, 30), time(13, 30)), # Lunch lull - DISABLED for testing
             (time(15, 0), time(15, 15)),  # Closing chaos
         ]
 
