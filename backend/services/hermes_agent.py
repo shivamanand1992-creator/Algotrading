@@ -25,7 +25,7 @@ class HermesAgent:
         """
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         self.client = AsyncGroq(api_key=self.api_key) if self.api_key else None
-        self.model = "mixtral-8x7b-32768"  # Fast, FREE Groq model (14,400 requests/day free tier)
+        self.model = "llama-3.1-8b-instant"  # Fast, FREE Groq model (14,400 requests/day free tier)
         self.timeout = 30.0
         self.max_tokens = 1024
 
