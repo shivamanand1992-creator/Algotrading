@@ -143,9 +143,22 @@ await ws_manager.broadcast({
 
 ### Access the Monitor
 
+**Option 1: Manual Navigation**
 1. **Login** to the trading dashboard
 2. Click **👁️ Hermes Monitor** in the sidebar
 3. Watch the real-time activity log populate
+
+**Option 2: Voice Command via Vaayu** 🎤
+1. Click the **VAAYU** button (purple hexagon)
+2. Say: *"Show me Hermes monitor"* or *"Open Hermes"*
+3. Or ask: *"How is Hermes doing today?"*
+
+**Vaayu Voice Commands for Hermes:**
+- 🎤 *"What trades has Hermes taken?"*
+- 🎤 *"Is Hermes trading right now?"*
+- 🎤 *"Show me Hermes status"*
+- 🎤 *"How much has Hermes made today?"*
+- 🎤 *"Does Hermes have any open positions?"*
 
 ### What You'll See
 
