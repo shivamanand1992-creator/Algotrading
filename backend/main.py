@@ -35,6 +35,7 @@ from backend.api.routes import portfolio as portfolio_routes
 from backend.api.routes import conviction as conviction_routes
 from backend.api.routes import support_resistance as sr_routes
 from backend.api.routes import hermes as hermes_routes
+from backend.api.routes import version as version_routes
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
@@ -882,6 +883,7 @@ app.include_router(portfolio_routes.router)
 app.include_router(conviction_routes.router)
 app.include_router(sr_routes.router)
 app.include_router(hermes_routes.router)
+app.include_router(version_routes.router)
 # app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
 
 
@@ -917,7 +919,11 @@ if _frontend_build.exists():
     async def serve_frontend(full_path: str):
         return FileResponse(
             str(_frontend_build / "index.html"),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
         )
 else:
     @app.get("/")
