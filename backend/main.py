@@ -938,27 +938,85 @@ async def _hermes_intraday_loop() -> None:
     """Background task: Hermes AI agent intraday trading every 30s"""
     from backend.services.hermes_intraday_service import HermesIntradayService
     from backend.dependencies import get_angel_client
-    
+
     await asyncio.sleep(15)  # Wait for startup
-    
+
     angel = get_angel_client()
     hermes_svc = HermesIntradayService(config.trading_config, angel)
-    
+
     logger.info("[HermesLoop] Starting Hermes intraday trading loop")
-    
+
     while True:
         try:
             if hermes_svc.enabled and hermes_svc.is_trading_hours():
+                # Broadcast analyzing status
+                await ws_manager.broadcast({
+                    "type": "hermes_activity",
+                    "action": "Market Analysis",
+                    "details": f"Analyzing {hermes_svc.instrument} for trading opportunities",
+                    "status": "analyzing"
+                })
+
                 result = await hermes_svc.run_analysis_cycle()
                 logger.debug(f"[HermesLoop] Cycle: {result.get('status')}")
-            
+
+                # Broadcast result
+                if result.get("status") == "success" and result.get("decision"):
+                    decision = result["decision"]
+                    execution = result.get("execution", {})
+
+                    if decision["action"] in ["BUY", "CLOSE_POSITION"]:
+                        await ws_manager.broadcast({
+                            "type": "hermes_activity",
+                            "action": f"{decision['action']} Signal",
+                            "details": decision.get("reasoning", "No reason provided"),
+                            "status": "executing" if execution.get("action") != "ignored" else "waiting",
+                            "confidence": decision.get("confidence", 0),
+                            "decision": decision
+                        })
+                    elif decision.get("confidence", 0) < hermes_svc.min_confidence:
+                        await ws_manager.broadcast({
+                            "type": "hermes_activity",
+                            "action": "Low Confidence",
+                            "details": f"Setup confidence {decision.get('confidence', 0):.0%} below threshold {hermes_svc.min_confidence:.0%}",
+                            "status": "waiting",
+                            "confidence": decision.get("confidence", 0)
+                        })
+                    elif result.get("position"):
+                        await ws_manager.broadcast({
+                            "type": "hermes_activity",
+                            "action": "Position Monitoring",
+                            "details": f"Monitoring {hermes_svc.instrument} position",
+                            "status": "monitoring"
+                        })
+                    else:
+                        await ws_manager.broadcast({
+                            "type": "hermes_activity",
+                            "action": decision["action"],
+                            "details": decision.get("reasoning", "Waiting for setup"),
+                            "status": "waiting",
+                            "confidence": decision.get("confidence", 0)
+                        })
+
             elif hermes_svc.enabled and hermes_svc.is_market_closed():
                 await hermes_svc.force_exit_all()
                 logger.info("[HermesLoop] Market closed - positions exited")
-            
+                await ws_manager.broadcast({
+                    "type": "hermes_activity",
+                    "action": "Market Closed",
+                    "details": "Force-exiting all positions - market closed",
+                    "status": "executing"
+                })
+
             interval = config.trading_config.get("hermes", {}).get("check_interval_seconds", 30)
             await asyncio.sleep(interval)
-            
+
         except Exception as e:
             logger.error(f"[HermesLoop] Error: {e}")
+            await ws_manager.broadcast({
+                "type": "hermes_activity",
+                "action": "Error",
+                "details": str(e),
+                "status": "error"
+            })
             await asyncio.sleep(60)

@@ -10,7 +10,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
   { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },
-  { id: 'hermes',     label: 'Hermes AI Agent', icon: '🤖' },
+  { id: 'hermes',     label: 'Hermes Control', icon: '🤖' },
+  { id: 'hermes-monitor', label: 'Hermes Monitor', icon: '👁️' },
   { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
   { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡' },
   { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
