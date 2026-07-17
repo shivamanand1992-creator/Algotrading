@@ -57,7 +57,9 @@ export function HermesAgentMonitor() {
   const connectWebSocket = () => {
     // Connect to live feed for real-time updates
     const token = localStorage.getItem('token');
-    const ws = new WebSocket(`ws://localhost:8000/ws/live?token=${token}`);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const ws = new WebSocket(`${protocol}//${host}/ws/live?token=${token}`);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
