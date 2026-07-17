@@ -128,26 +128,31 @@ Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met.
         if not self.api_key:
             raise ValueError("No ANTHROPIC_API_KEY configured")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.api_url,
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": self.max_tokens,
-                    "temperature": 0.3,  # Low temperature for consistent decisions
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=self.timeout,
-            )
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            try:
+                response = await client.post(
+                    self.api_url,
+                    headers={
+                        "x-api-key": self.api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": self.max_tokens,
+                        "temperature": 0.3,  # Low temperature for consistent decisions
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                    timeout=self.timeout,
+                )
 
-            response.raise_for_status()
-            result = response.json()
-            return result["content"][0]["text"]
+                response.raise_for_status()
+                result = response.json()
+                return result["content"][0]["text"]
+
+            except httpx.HTTPStatusError as e:
+                logger.error(f"[Hermes] API error: {e.response.status_code} - {e.response.text[:500]}")
+                raise
 
     def _parse_decision(self, response_text: str) -> Dict:
         """Parse LLM JSON response"""
