@@ -7,6 +7,7 @@ interface NavItem {
   section?: string;
 }
 
+// Navigation items - updated 2026-07-17 to include Hermes Monitor
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
   { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },

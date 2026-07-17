@@ -1,0 +1,19 @@
+[phases.setup]
+nixPkgs = ["nodejs", "python310"]
+
+[phases.install]
+cmds = [
+    "pip install 'setuptools<68'",
+    "pip install -r requirements.txt",
+    "cd frontend && npm install"
+]
+
+[phases.build]
+cmds = [
+    "cd frontend && rm -rf build node_modules/.cache",
+    "cd frontend && GENERATE_SOURCEMAP=false npm run build",
+    "ls -la frontend/build/ || echo 'BUILD FAILED'"
+]
+
+[start]
+cmd = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
