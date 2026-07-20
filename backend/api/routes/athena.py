@@ -9,10 +9,10 @@ from typing import List, Optional
 from datetime import datetime
 
 from backend.services.athena_options_service import AthenaOptionsService
-from data.angel_client import AngelOneClient
+from backend.dependencies import get_angel_client
 from loguru import logger
 
-router = APIRouter(prefix="/athena", tags=["Athena Options"])
+router = APIRouter(prefix="/api/athena", tags=["Athena Options"])
 
 # Dependency to get service instance
 _service_instance: Optional[AthenaOptionsService] = None
@@ -24,7 +24,7 @@ def get_athena_service() -> AthenaOptionsService:
 
     if _service_instance is None:
         try:
-            angel_client = AngelOneClient()
+            angel_client = get_angel_client()
             _service_instance = AthenaOptionsService(angel_client)
             logger.info("[Athena API] Service initialized")
         except Exception as e:
