@@ -823,9 +823,10 @@ async def lifespan(app: FastAPI):
     from backend.api.routes.positions import get_position_service
     from backend.api.routes.market_data import get_market_service
     from backend.api.routes.strategies import get_strategy_service
-    asyncio.create_task(
-        ws_manager.start_periodic_updates(get_position_service(), get_market_service())
-    )
+    # DISABLED: periodic updates break WebSocket connection for Hermes
+    # asyncio.create_task(
+    #     ws_manager.start_periodic_updates(get_position_service(), get_market_service())
+    # )
     asyncio.create_task(_eod_squareoff_loop())
     asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_session_refresh_loop())
