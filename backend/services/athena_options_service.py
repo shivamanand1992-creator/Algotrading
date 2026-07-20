@@ -116,20 +116,20 @@ class AthenaOptionsService:
             }
         """
         if not self.config['enabled']:
-            return {'action': 'HOLD', 'reason': 'Athena disabled'}
+            return {'action': 'HOLD', 'strategy': None, 'confidence': None, 'details': None, 'reason': 'Athena disabled'}
 
         # Check position limits
         if len(self.positions) >= self.config['max_positions']:
-            return {'action': 'HOLD', 'reason': 'Max positions reached'}
+            return {'action': 'HOLD', 'strategy': None, 'confidence': None, 'details': None, 'reason': 'Max positions reached'}
 
         if self.trades_this_week >= self.config['max_positions']:
-            return {'action': 'HOLD', 'reason': 'Weekly trade limit reached'}
+            return {'action': 'HOLD', 'strategy': None, 'confidence': None, 'details': None, 'reason': 'Weekly trade limit reached'}
 
         # Fetch market data
         market_data = await self._fetch_market_data()
 
         if not market_data:
-            return {'action': 'HOLD', 'reason': 'Market data unavailable'}
+            return {'action': 'HOLD', 'strategy': None, 'confidence': None, 'details': None, 'reason': 'Market data unavailable'}
 
         # Get AI recommendation
         logger.info("[Athena] 🤖 Calling Claude AI for options analysis...")
