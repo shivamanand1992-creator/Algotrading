@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../../config';
+import { api } from '../../api/client';
 import './AthenaDashboard.css';
 
 interface AthenaStatus {
@@ -69,7 +68,7 @@ const AthenaDashboard: React.FC = () => {
 
   const fetchStatus = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/athena/status`);
+      const res = await api.get('/api/athena/status');
       setStatus(res.data);
     } catch (err) {
       console.error('[Athena] Failed to fetch status:', err);
@@ -78,7 +77,7 @@ const AthenaDashboard: React.FC = () => {
 
   const fetchPositions = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/athena/positions`);
+      const res = await api.get('/api/athena/positions');
       setPositions(res.data);
     } catch (err) {
       console.error('[Athena] Failed to fetch positions:', err);
@@ -88,7 +87,7 @@ const AthenaDashboard: React.FC = () => {
   const handleEnable = async (mode: 'paper' | 'live') => {
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/api/athena/enable`, { mode });
+      await api.post('/api/athena/enable', { mode });
       await fetchStatus();
       alert(`Athena enabled in ${mode.toUpperCase()} mode`);
     } catch (err: any) {
@@ -101,7 +100,7 @@ const AthenaDashboard: React.FC = () => {
   const handleDisable = async () => {
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/api/athena/disable`);
+      await api.post('/api/athena/disable');
       await fetchStatus();
       alert('Athena disabled');
     } catch (err: any) {
@@ -115,7 +114,7 @@ const AthenaDashboard: React.FC = () => {
     setAnalyzing(true);
     setAnalysisResult(null);
     try {
-      const res = await axios.post(`${API_BASE_URL}/api/athena/analyze`);
+      const res = await api.post('/api/athena/analyze');
       setAnalysisResult(res.data);
       await fetchPositions();
     } catch (err: any) {
