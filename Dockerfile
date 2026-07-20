@@ -4,6 +4,11 @@ FROM node:18-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --prefer-offline
+
+# Bust cache to ensure fresh frontend code deployment
+ARG CACHEBUST=1
+RUN echo "Frontend cache bust: $CACHEBUST"
+
 COPY frontend/ ./
 RUN npm run build
 
