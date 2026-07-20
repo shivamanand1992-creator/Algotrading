@@ -47,6 +47,10 @@ class WebSocketManager:
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients"""
+        msg_type = message.get("type", "unknown")
+        msg_action = message.get("action", message.get("data", {}).get("type", "N/A"))
+        print(f"📡 Broadcasting: type={msg_type}, action={msg_action}, clients={len(self.active_connections)}")
+
         disconnected = []
         json_str = json.dumps(message, default=str)
         for connection in self.active_connections:
