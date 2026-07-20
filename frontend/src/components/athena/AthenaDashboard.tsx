@@ -78,9 +78,11 @@ const AthenaDashboard: React.FC = () => {
   const fetchPositions = async () => {
     try {
       const res = await api.get('/api/athena/positions');
-      setPositions(res.data);
+      // Ensure positions is always an array
+      setPositions(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('[Athena] Failed to fetch positions:', err);
+      setPositions([]); // Set empty array on error
     }
   };
 
@@ -291,7 +293,7 @@ const AthenaDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {positions.map((pos, idx) => (
+                {(positions || []).map((pos, idx) => (
                   <tr key={pos.id || idx}>
                     <td>
                       <div className="position-strategy">
@@ -302,10 +304,10 @@ const AthenaDashboard: React.FC = () => {
                     <td className="text-small">{formatDate(pos.entry_date)}</td>
                     <td className="strikes-cell">
                       <div className="strikes-info">
-                        {pos.strikes.sell_strike && <span>S: {pos.strikes.sell_strike}</span>}
-                        {pos.strikes.buy_strike && <span>B: {pos.strikes.buy_strike}</span>}
-                        {pos.strikes.sell_strike_2 && <span>S2: {pos.strikes.sell_strike_2}</span>}
-                        {pos.strikes.buy_strike_2 && <span>B2: {pos.strikes.buy_strike_2}</span>}
+                        {pos.strikes?.sell_strike && <span>S: {pos.strikes.sell_strike}</span>}
+                        {pos.strikes?.buy_strike && <span>B: {pos.strikes.buy_strike}</span>}
+                        {pos.strikes?.sell_strike_2 && <span>S2: {pos.strikes.sell_strike_2}</span>}
+                        {pos.strikes?.buy_strike_2 && <span>B2: {pos.strikes.buy_strike_2}</span>}
                       </div>
                     </td>
                     <td className="positive">{formatCurrency(pos.premium_received)}</td>
