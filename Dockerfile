@@ -17,6 +17,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir 'setuptools<68' && \
     pip install --no-cache-dir -r requirements.txt
 
+# Bust cache to ensure fresh backend code deployment
+ARG CACHEBUST=1
+RUN echo "Cache bust: $CACHEBUST"
+
 # Copy backend code
 COPY backend/ ./backend/
 COPY config/ ./config/
