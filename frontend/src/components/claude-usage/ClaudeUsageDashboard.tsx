@@ -102,11 +102,11 @@ export function ClaudeUsageDashboard() {
   const { usage, yesterday, billing, period } = report;
 
   // Handle both API billing and local tracking
-  const hasBillingData = billing && billing.credits_limit && billing.credits_remaining;
-  const creditsUsed = hasBillingData
+  const hasBillingData = billing && billing.credits_limit !== undefined && billing.credits_remaining !== undefined;
+  const creditsUsed = hasBillingData && billing.credits_limit !== undefined && billing.credits_remaining !== undefined
     ? billing.credits_limit - billing.credits_remaining
     : 0;
-  const usagePercent = hasBillingData
+  const usagePercent = hasBillingData && billing.credits_limit !== undefined
     ? (creditsUsed / billing.credits_limit) * 100
     : 0;
 
