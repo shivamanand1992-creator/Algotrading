@@ -7,8 +7,12 @@ import asyncio
 from datetime import datetime, timezone, timedelta, time
 from typing import Dict, List, Optional
 from loguru import logger
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+import os
 
 from backend.services.athena_options_agent import AthenaOptionsAgent
+from backend.models.options_position import OptionsPosition, Base
 from data.angel_client import AngelOneClient
 
 
@@ -30,6 +34,13 @@ class AthenaOptionsService:
         self.angel = angel_client
         self.agent = AthenaOptionsAgent()
 
+        # Database setup
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./backend/data/athena.db")
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        self._engine = create_engine(db_url, pool_pre_ping=True)
+        self._init_db()
+
         # Configuration
         self.config = {
             'enabled': False,  # Manual enable required
@@ -48,6 +59,14 @@ class AthenaOptionsService:
         self.weekly_pnl = 0.0
 
         logger.info("[Athena] Options service initialized")
+
+    def _init_db(self):
+        """Initialize database tables"""
+        try:
+            Base.metadata.create_all(self._engine, checkfirst=True)
+            logger.info("[Athena] Database initialized")
+        except Exception as e:
+            logger.error(f"[Athena] Database init failed: {e}")
 
     async def run_analysis_cycle(self) -> Dict:
         """
@@ -107,36 +126,41 @@ class AthenaOptionsService:
                 'decision': decision
             }
 
-        # Execute trade (if in live mode)
-        if self.config['mode'] == 'live':
-            result = await self._execute_spread(decision)
-            if result['success']:
-                self.positions.append(result['position'])
-                self.trades_this_week += 1
-                return {
-                    'action': 'ENTER',
-                    'strategy': decision['strategy'],
-                    'confidence': decision['confidence'],
-                    'details': result
-                }
-            else:
-                return {
-                    'action': 'HOLD',
-                    'reason': f"Execution failed: {result['error']}",
-                    'decision': decision
-                }
-        else:
-            # Paper trading - log only
+        # Save position to database
+        try:
+            position = self._save_position(decision)
+            self.positions.append(position.to_dict())
+            self.trades_this_week += 1
+
+            # Send Telegram notification
+            self._send_entry_notification(decision)
+
+            # Execute trade (if in live mode)
+            if self.config['mode'] == 'live':
+                result = await self._execute_spread(decision)
+                if not result['success']:
+                    logger.error(f"[Athena] Live execution failed: {result['error']}")
+                    # Position is already saved in paper mode - can attempt execution later
+
             logger.info(
-                f"[Athena] 📝 PAPER TRADE: {decision['strategy']} - "
-                f"{decision['reasoning']}"
+                f"[Athena] {'🔴 LIVE' if self.config['mode'] == 'live' else '📝 PAPER'} ENTRY: "
+                f"{decision['strategy']} - {decision['reasoning']}"
             )
+
             return {
                 'action': 'ENTER',
                 'strategy': decision['strategy'],
                 'confidence': decision['confidence'],
-                'mode': 'paper',
+                'mode': self.config['mode'],
                 'details': decision
+            }
+
+        except Exception as e:
+            logger.error(f"[Athena] Failed to process entry: {e}")
+            return {
+                'action': 'HOLD',
+                'reason': f"Database error: {e}",
+                'decision': decision
             }
 
     async def _fetch_market_data(self) -> Optional[Dict]:
@@ -298,3 +322,67 @@ class AthenaOptionsService:
         """Disable Athena trading"""
         self.config['enabled'] = False
         logger.info("[Athena] Disabled")
+
+    def _save_position(self, decision: Dict) -> OptionsPosition:
+        """Save position to database"""
+        try:
+            position = OptionsPosition(
+                strategy=decision['strategy'],
+                symbol=self.config['symbol'],
+                entry_date=datetime.now(_IST),
+                expiry_date=None,  # TODO: Calculate from options data
+                strikes=decision['strikes'],
+                premium_received=decision['premium'],
+                max_loss=decision['max_loss'],
+                confidence=decision['confidence'],
+                probability_of_profit=decision['probability_of_profit'],
+                status='OPEN',
+                mode=self.config['mode'],
+                reasoning=decision.get('reasoning', ''),
+                risk_factors=decision.get('risk_factors', []),
+            )
+
+            with Session(self._engine) as session:
+                session.add(position)
+                session.commit()
+                session.refresh(position)
+
+            logger.info(f"[Athena] Position saved: {position.id}")
+            return position
+
+        except Exception as e:
+            logger.error(f"[Athena] Failed to save position: {e}")
+            raise
+
+    def _send_entry_notification(self, decision: Dict):
+        """Send Telegram notification for trade entry"""
+        try:
+            from backend.services import telegram_service
+            telegram_service.send_athena_entry(
+                strategy=decision['strategy'],
+                symbol=self.config['symbol'],
+                strikes=decision['strikes'],
+                premium=decision['premium'],
+                max_loss=decision['max_loss'],
+                confidence=decision['confidence'],
+                pop=decision['probability_of_profit'],
+                mode=self.config['mode'],
+                reasoning=decision.get('reasoning', '')
+            )
+        except Exception as e:
+            logger.warning(f"[Athena] Telegram notification failed: {e}")
+
+    def _send_exit_notification(self, position: OptionsPosition):
+        """Send Telegram notification for trade exit"""
+        try:
+            from backend.services import telegram_service
+            telegram_service.send_athena_exit(
+                strategy=position.strategy,
+                symbol=position.symbol,
+                exit_reason=position.exit_reason or 'UNKNOWN',
+                premium=position.premium_received,
+                realized_pnl=position.realized_pnl,
+                mode=position.mode
+            )
+        except Exception as e:
+            logger.warning(f"[Athena] Telegram notification failed: {e}")

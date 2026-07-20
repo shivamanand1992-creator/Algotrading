@@ -197,3 +197,80 @@ def send_trade_notification(action: str, symbol: str, qty: int, price: float,
     if reason:
         lines.append(f"• Reason: {reason}")
     return send("\n".join(lines))
+
+
+def send_athena_entry(strategy: str, symbol: str, strikes: dict, premium: float,
+                      max_loss: float, confidence: float, pop: float,
+                      mode: str, reasoning: str = "") -> bool:
+    """Send Athena options entry notification"""
+    mode_label = "📝 PAPER" if mode == "paper" else "🔴 LIVE"
+    strategy_labels = {
+        "BULL_PUT_SPREAD": "Bull Put Spread",
+        "BEAR_CALL_SPREAD": "Bear Call Spread",
+        "IRON_CONDOR": "Iron Condor"
+    }
+    strategy_name = strategy_labels.get(strategy, strategy)
+
+    lines = [
+        f"🏛️ *ATHENA ENTRY* — {mode_label}",
+        f"• Strategy: *{strategy_name}*",
+        f"• Symbol: {symbol}",
+        f"",
+        "*Strikes:*"
+    ]
+
+    # Add strikes based on strategy
+    if strikes.get("sell_strike"):
+        lines.append(f"• Sell: {strikes['sell_strike']}")
+    if strikes.get("buy_strike"):
+        lines.append(f"• Buy: {strikes['buy_strike']}")
+    if strikes.get("sell_strike_2"):
+        lines.append(f"• Sell 2: {strikes['sell_strike_2']}")
+    if strikes.get("buy_strike_2"):
+        lines.append(f"• Buy 2: {strikes['buy_strike_2']}")
+
+    lines += [
+        "",
+        f"• Premium: ₹{premium:,.0f}",
+        f"• Max Loss: ₹{max_loss:,.0f}",
+        f"• Confidence: {confidence*100:.0f}%",
+        f"• Probability of Profit: {pop*100:.0f}%",
+    ]
+
+    if reasoning:
+        lines.append(f"\n_{reasoning}_")
+
+    return send("\n".join(lines))
+
+
+def send_athena_exit(strategy: str, symbol: str, exit_reason: str,
+                     premium: float, realized_pnl: float, mode: str) -> bool:
+    """Send Athena options exit notification"""
+    mode_label = "📝 PAPER" if mode == "paper" else "🔴 LIVE"
+    strategy_labels = {
+        "BULL_PUT_SPREAD": "Bull Put Spread",
+        "BEAR_CALL_SPREAD": "Bear Call Spread",
+        "IRON_CONDOR": "Iron Condor"
+    }
+    strategy_name = strategy_labels.get(strategy, strategy)
+
+    emoji = "🟢" if realized_pnl >= 0 else "🔴"
+    exit_labels = {
+        "TARGET": "🎯 Target Hit",
+        "STOP_LOSS": "🛑 Stop Loss",
+        "EXPIRY": "📅 Expired",
+        "MANUAL": "🔧 Manual Exit"
+    }
+    exit_label = exit_labels.get(exit_reason, exit_reason)
+
+    lines = [
+        f"🏛️ *ATHENA EXIT* — {mode_label}",
+        f"• Strategy: *{strategy_name}*",
+        f"• Symbol: {symbol}",
+        f"• Exit: {exit_label}",
+        f"",
+        f"• Premium Received: ₹{premium:,.0f}",
+        f"• Realized P&L: {emoji} ₹{realized_pnl:,.0f}",
+    ]
+
+    return send("\n".join(lines))
