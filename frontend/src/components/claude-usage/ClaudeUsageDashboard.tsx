@@ -140,7 +140,7 @@ export function ClaudeUsageDashboard() {
           💳 Account Balance
         </h2>
         <div className="space-y-4">
-          {hasBillingData ? (
+          {hasBillingData && billing.credits_limit !== undefined && billing.credits_remaining !== undefined ? (
             <>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Credits Used</span>
@@ -163,7 +163,7 @@ export function ClaudeUsageDashboard() {
                 <span className={`font-semibold ${
                   usagePercent > 90 ? 'text-red-400' : 'text-green-400'
                 }`}>
-                  ${billing.credits_remaining?.toFixed(2)} ({(100 - usagePercent).toFixed(1)}%)
+                  ${billing.credits_remaining.toFixed(2)} ({(100 - usagePercent).toFixed(1)}%)
                 </span>
               </div>
             </>
