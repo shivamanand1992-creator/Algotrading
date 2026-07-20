@@ -19,7 +19,7 @@ interface Position {
   symbol: string;
   entry_date: string;
   expiry_date?: string;
-  strikes: {
+  strikes?: {
     sell_strike?: number;
     buy_strike?: number;
     sell_strike_2?: number;
@@ -69,17 +69,21 @@ const AthenaDashboard: React.FC = () => {
   const fetchStatus = async () => {
     try {
       const res = await api.get('/api/athena/status');
+      console.log('[Athena] Status response:', res.data);
       setStatus(res.data);
     } catch (err) {
       console.error('[Athena] Failed to fetch status:', err);
+      setStatus(null);
     }
   };
 
   const fetchPositions = async () => {
     try {
       const res = await api.get('/api/athena/positions');
+      console.log('[Athena] Positions response:', res.data, 'isArray:', Array.isArray(res.data));
       // Ensure positions is always an array
-      setPositions(Array.isArray(res.data) ? res.data : []);
+      const posData = Array.isArray(res.data) ? res.data : [];
+      setPositions(posData);
     } catch (err) {
       console.error('[Athena] Failed to fetch positions:', err);
       setPositions([]); // Set empty array on error
