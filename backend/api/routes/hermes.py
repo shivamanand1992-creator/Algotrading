@@ -10,6 +10,7 @@ from loguru import logger
 
 from backend.config import config, DEMO_MODE
 from backend.dependencies import get_angel_client
+from backend.websocket_manager import ws_manager
 
 
 router = APIRouter(prefix="/api/hermes", tags=["Hermes Agent"])
@@ -125,3 +126,24 @@ async def run_single_analysis(svc = Depends(_get_hermes)):
 
     result = await svc.run_analysis_cycle()
     return result
+
+
+@router.post("/test-broadcast")
+async def test_broadcast():
+    """Send a test broadcast to verify WebSocket connectivity"""
+    test_message = {
+        "type": "hermes_activity",
+        "action": "TEST BROADCAST",
+        "details": "This is a manual test broadcast to verify WebSocket delivery",
+        "status": "waiting",
+        "confidence": 100,
+    }
+
+    await ws_manager.broadcast(test_message)
+
+    return {
+        "success": True,
+        "message": "Test broadcast sent",
+        "active_connections": len(ws_manager.active_connections),
+        "test_payload": test_message,
+    }
