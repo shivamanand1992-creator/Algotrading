@@ -61,11 +61,17 @@ export function HermesAgentMonitor() {
     const host = window.location.host;
     const ws = new WebSocket(`${protocol}//${host}/ws/live?token=${token}`);
 
+    ws.onopen = () => {
+      console.log('[Hermes] WebSocket connected');
+    };
+
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log('[Hermes] WebSocket message:', data.type, data);
 
       // Filter for Hermes-related updates
       if (data.type === 'hermes_activity') {
+        console.log('[Hermes] 🎯 Activity received:', data.action, data.details);
         addActivity({
           timestamp: new Date().toISOString(),
           action: data.action,
@@ -81,6 +87,15 @@ export function HermesAgentMonitor() {
           setTimeout(() => setIsAnalyzing(false), 3000);
         }
       }
+    };
+
+    ws.onerror = (error) => {
+      console.error('[Hermes] WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('[Hermes] WebSocket disconnected, reconnecting in 3s...');
+      setTimeout(connectWebSocket, 3000);
     };
 
     wsRef.current = ws;
