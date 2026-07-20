@@ -49,15 +49,20 @@ class WebSocketManager:
         """Broadcast message to all connected clients"""
         msg_type = message.get("type", "unknown")
         msg_action = message.get("action", message.get("data", {}).get("type", "N/A"))
-        print(f"📡 Broadcasting: type={msg_type}, action={msg_action}, clients={len(self.active_connections)}")
 
         disconnected = []
-        json_str = json.dumps(message, default=str)
+        try:
+            json_str = json.dumps(message, default=str)
+            print(f"📡 Broadcasting: type={msg_type}, action={msg_action}, clients={len(self.active_connections)}, size={len(json_str)} bytes")
+        except Exception as e:
+            print(f"❌ JSON serialization failed for {msg_type}: {e}")
+            return  # Don't try to send if JSON serialization fails
+
         for connection in self.active_connections:
             try:
                 await connection.send_text(json_str)
             except Exception as e:
-                print(f"Error broadcasting to client: {e}")
+                print(f"❌ Error broadcasting {msg_type} to client: {type(e).__name__}: {e}")
                 disconnected.append(connection)
 
         # Clean up disconnected clients
