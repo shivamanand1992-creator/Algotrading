@@ -36,7 +36,7 @@ class HermesAgent:
         self.timeout = 30.0
         self.max_tokens = 1024
 
-        logger.info(f"[Hermes] Agent initialized with model={self.model}")
+        logger.info(f"[Hermes] ✅ Agent initialized successfully with model={self.model}, api_key={'set' if self.api_key else 'MISSING'}")
 
     async def analyze_market(self, market_data: Dict) -> Dict:
         """
