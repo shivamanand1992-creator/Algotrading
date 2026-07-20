@@ -58,6 +58,9 @@ class AthenaOptionsService:
         self.trades_this_week = 0
         self.weekly_pnl = 0.0
 
+        # Load existing positions from database
+        self._load_positions()
+
         logger.info("[Athena] Options service initialized")
 
     def _init_db(self):
@@ -67,6 +70,38 @@ class AthenaOptionsService:
             logger.info("[Athena] Database initialized")
         except Exception as e:
             logger.error(f"[Athena] Database init failed: {e}")
+
+    def _load_positions(self):
+        """Load open positions from database"""
+        try:
+            with Session(self._engine) as session:
+                # Load all open positions
+                open_positions = session.query(OptionsPosition).filter(
+                    OptionsPosition.status == 'OPEN'
+                ).all()
+
+                self.positions = [pos.to_dict() for pos in open_positions]
+
+                # Count trades this week
+                from datetime import datetime, timedelta
+                week_start = datetime.now(_IST) - timedelta(days=7)
+                week_positions = session.query(OptionsPosition).filter(
+                    OptionsPosition.entry_date >= week_start
+                ).all()
+
+                self.trades_this_week = len(week_positions)
+
+                # Calculate weekly P&L
+                self.weekly_pnl = sum(pos.realized_pnl for pos in week_positions)
+
+                logger.info(
+                    f"[Athena] Loaded {len(self.positions)} open positions, "
+                    f"{self.trades_this_week} trades this week, "
+                    f"weekly P&L: ₹{self.weekly_pnl:,.0f}"
+                )
+
+        except Exception as e:
+            logger.error(f"[Athena] Failed to load positions: {e}")
 
     async def run_analysis_cycle(self) -> Dict:
         """
@@ -220,19 +255,47 @@ class AthenaOptionsService:
 
     async def _get_spot_price(self, symbol: str) -> Optional[Dict]:
         """Get current spot price and indicators"""
-        # TODO: Implement using Angel One API
-        # Placeholder for now
-        return {
-            'ltp': 52000.0,
-            'atr': 780.0,
-            'rsi': 55.0,
-            'macd': 0.002
-        }
+        try:
+            from data.angel_client import get_banknifty_spot_price
+
+            # Get spot price from Angel One
+            spot = await asyncio.get_event_loop().run_in_executor(
+                None,
+                get_banknifty_spot_price,
+                self.angel
+            )
+
+            # Calculate ATR (simplified - 1.5% of spot)
+            atr = spot * 0.015
+
+            # TODO: Calculate real RSI and MACD from historical data
+            # For now, return spot with estimated indicators
+            return {
+                'ltp': spot,
+                'atr': atr,
+                'rsi': 55.0,  # Neutral default
+                'macd': 0.002  # Slight positive bias
+            }
+
+        except Exception as e:
+            logger.error(f"[Athena] Failed to get spot price: {e}")
+            return None
 
     async def _get_vix(self) -> float:
         """Get current India VIX value"""
-        # TODO: Fetch from Angel One
-        return 16.5
+        try:
+            from data.angel_client import get_india_vix
+
+            vix = await asyncio.get_event_loop().run_in_executor(
+                None,
+                get_india_vix,
+                self.angel
+            )
+            return vix
+
+        except Exception as e:
+            logger.error(f"[Athena] Failed to get VIX: {e}")
+            return 16.5  # Default fallback
 
     async def _determine_trend(self) -> str:
         """Determine market trend (uptrend/downtrend/ranging)"""
@@ -252,13 +315,123 @@ class AthenaOptionsService:
             }
         """
         try:
-            # TODO: Implement actual options order execution
-            # For now, return paper trade
+            from data.angel_client import (
+                get_next_weekly_expiry,
+                place_option_order
+            )
 
-            logger.info(
-                f"[Athena] 🚀 Executing {decision['strategy']}: "
-                f"Sell {decision['strikes']['sell_strike']}, "
-                f"Buy {decision['strikes']['buy_strike']}"
+            strategy = decision['strategy']
+            strikes = decision['strikes']
+            symbol = self.config['symbol']
+
+            # Get next weekly expiry
+            expiry = get_next_weekly_expiry()
+            logger.info(f"[Athena] Using expiry: {expiry}")
+
+            # Determine option types based on strategy
+            if strategy == 'BULL_PUT_SPREAD':
+                # Sell Put at higher strike, Buy Put at lower strike
+                sell_strike = strikes['sell_strike']
+                buy_strike = strikes['buy_strike']
+                option_type = 'PE'
+
+                # Execute sell leg first (receives premium)
+                sell_order_id = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    place_option_order,
+                    self.angel,
+                    symbol,
+                    expiry,
+                    int(sell_strike),
+                    option_type,
+                    'SELL',
+                    1  # 1 lot
+                )
+                logger.info(f"[Athena] Sell order placed: {sell_order_id}")
+
+                # Execute buy leg (protection)
+                buy_order_id = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    place_option_order,
+                    self.angel,
+                    symbol,
+                    expiry,
+                    int(buy_strike),
+                    option_type,
+                    'BUY',
+                    1  # 1 lot
+                )
+                logger.info(f"[Athena] Buy order placed: {buy_order_id}")
+
+            elif strategy == 'BEAR_CALL_SPREAD':
+                # Sell Call at lower strike, Buy Call at higher strike
+                sell_strike = strikes['sell_strike']
+                buy_strike = strikes['buy_strike']
+                option_type = 'CE'
+
+                # Execute sell leg first
+                sell_order_id = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    place_option_order,
+                    self.angel,
+                    symbol,
+                    expiry,
+                    int(sell_strike),
+                    option_type,
+                    'SELL',
+                    1
+                )
+
+                # Execute buy leg
+                buy_order_id = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    place_option_order,
+                    self.angel,
+                    symbol,
+                    expiry,
+                    int(buy_strike),
+                    option_type,
+                    'BUY',
+                    1
+                )
+
+            elif strategy == 'IRON_CONDOR':
+                # 4-leg spread: Sell Put + Buy Put (lower), Sell Call + Buy Call (higher)
+                sell_put = strikes['sell_strike']
+                buy_put = strikes['buy_strike']
+                sell_call = strikes['sell_strike_2']
+                buy_call = strikes['buy_strike_2']
+
+                # Execute all 4 legs
+                order_ids = []
+
+                # Put spread
+                order_ids.append(await asyncio.get_event_loop().run_in_executor(
+                    None, place_option_order, self.angel, symbol, expiry,
+                    int(sell_put), 'PE', 'SELL', 1
+                ))
+                order_ids.append(await asyncio.get_event_loop().run_in_executor(
+                    None, place_option_order, self.angel, symbol, expiry,
+                    int(buy_put), 'PE', 'BUY', 1
+                ))
+
+                # Call spread
+                order_ids.append(await asyncio.get_event_loop().run_in_executor(
+                    None, place_option_order, self.angel, symbol, expiry,
+                    int(sell_call), 'CE', 'SELL', 1
+                ))
+                order_ids.append(await asyncio.get_event_loop().run_in_executor(
+                    None, place_option_order, self.angel, symbol, expiry,
+                    int(buy_call), 'CE', 'BUY', 1
+                ))
+
+                logger.info(f"[Athena] Iron Condor executed: {order_ids}")
+
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}")
+
+            logger.success(
+                f"[Athena] 🚀 {strategy} executed successfully on {symbol} {expiry}"
             )
 
             return {
@@ -266,6 +439,7 @@ class AthenaOptionsService:
                 'position': {
                     'strategy': decision['strategy'],
                     'entry_date': datetime.now(_IST),
+                    'expiry_date': expiry,
                     'strikes': decision['strikes'],
                     'premium_received': decision['premium'],
                     'max_loss': decision['max_loss'],
@@ -291,11 +465,56 @@ class AthenaOptionsService:
 
         updates = []
 
-        for pos in self.positions:
-            # TODO: Check current P&L
-            # Exit if 50% profit or 100% loss
+        try:
+            with Session(self._engine) as session:
+                for pos_dict in self.positions:
+                    try:
+                        # Load position from database
+                        position = session.query(OptionsPosition).filter(
+                            OptionsPosition.id == pos_dict.get('id')
+                        ).first()
 
-            pass
+                        if not position or position.status != 'OPEN':
+                            continue
+
+                        # TODO: Get current spread value from Angel One
+                        # For now, use simplified exit logic based on time
+
+                        # Check if expired
+                        if position.expiry_date and datetime.now(_IST) > position.expiry_date:
+                            position.status = 'CLOSED'
+                            position.exit_date = datetime.now(_IST)
+                            position.exit_reason = 'EXPIRY'
+                            position.realized_pnl = position.premium_received  # Expired worthless
+                            session.commit()
+
+                            self._send_exit_notification(position)
+
+                            updates.append({
+                                'id': position.id,
+                                'action': 'CLOSED',
+                                'reason': 'EXPIRY',
+                                'pnl': position.realized_pnl
+                            })
+
+                            logger.info(
+                                f"[Athena] Position {position.id} expired. "
+                                f"P&L: ₹{position.realized_pnl:,.0f}"
+                            )
+
+                        # TODO: Add target/stop loss monitoring
+                        # This requires fetching current option prices from Angel One
+                        # and calculating current spread value
+
+                    except Exception as pos_error:
+                        logger.error(f"[Athena] Error monitoring position: {pos_error}")
+
+                # Reload positions after updates
+                if updates:
+                    self._load_positions()
+
+        except Exception as e:
+            logger.error(f"[Athena] Position monitoring failed: {e}")
 
         return updates
 

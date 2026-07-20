@@ -713,3 +713,191 @@ def _assert_ok(response, api_name: str) -> None:
     if response.get("status") is False:
         msg = response.get("message", "No error message provided.")
         raise RuntimeError(f"{api_name} API error: {msg}")
+
+
+# ---------------------------------------------------------------------------
+# Options Trading Helper Methods (for Athena)
+# ---------------------------------------------------------------------------
+
+def get_nifty_spot_price(client: 'AngelOneClient') -> float:
+    """Get current NIFTY 50 spot price"""
+    token = client.get_instrument_token("NSE", "NIFTY")
+    if not token:
+        raise RuntimeError("Could not find NIFTY token")
+    return client.get_ltp("NSE", "NIFTY 50", token)
+
+
+def get_banknifty_spot_price(client: 'AngelOneClient') -> float:
+    """Get current BANK NIFTY spot price"""
+    token = client.get_instrument_token("NSE", "BANKNIFTY")
+    if not token:
+        raise RuntimeError("Could not find BANKNIFTY token")
+    return client.get_ltp("NSE", "NIFTY BANK", token)
+
+
+def get_india_vix(client: 'AngelOneClient') -> float:
+    """Get current India VIX value"""
+    try:
+        token = client.get_instrument_token("NSE", "INDIAVIX")
+        if not token:
+            logger.warning("Could not find India VIX token, using default 16.0")
+            return 16.0
+        return client.get_ltp("NSE", "INDIA VIX", token)
+    except Exception as e:
+        logger.warning(f"Failed to fetch India VIX: {e}, using default 16.0")
+        return 16.0
+
+
+def get_next_weekly_expiry() -> str:
+    """
+    Get next Thursday expiry date for Bank Nifty weekly options
+
+    Returns:
+        str: Expiry date in format "DD-MMM-YYYY" (e.g., "25-JAN-2024")
+    """
+    from datetime import datetime, timedelta
+    import pytz
+
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+
+    # Find next Thursday
+    days_until_thursday = (3 - now.weekday()) % 7  # Thursday = 3
+    if days_until_thursday == 0 and now.time().hour >= 15:
+        # After 3 PM on Thursday, roll to next week
+        days_until_thursday = 7
+
+    if days_until_thursday == 0:
+        expiry = now
+    else:
+        expiry = now + timedelta(days=days_until_thursday)
+
+    # Format as DD-MMM-YYYY (e.g., "25-JAN-2024")
+    return expiry.strftime("%d-%b-%Y").upper()
+
+
+def get_option_symbol(symbol: str, expiry: str, strike: int, option_type: str) -> str:
+    """
+    Construct option trading symbol for Angel One
+
+    Args:
+        symbol: "NIFTY" or "BANKNIFTY"
+        expiry: "DD-MMM-YYYY" format (e.g., "25-JAN-2024")
+        strike: Strike price as integer (e.g., 52000)
+        option_type: "CE" or "PE"
+
+    Returns:
+        str: Trading symbol (e.g., "BANKNIFTY25JAN2452000CE")
+    """
+    from datetime import datetime
+
+    # Parse expiry date
+    exp_date = datetime.strptime(expiry, "%d-%b-%Y")
+
+    # Format: BANKNIFTY25JAN2452000CE
+    exp_str = exp_date.strftime("%d%b%y").upper()  # 25JAN24
+
+    return f"{symbol}{exp_str}{strike}{option_type}"
+
+
+def find_option_token(client: 'AngelOneClient', symbol: str, expiry: str,
+                      strike: int, option_type: str) -> Optional[str]:
+    """
+    Find instrument token for an option contract
+
+    Args:
+        client: AngelOneClient instance
+        symbol: "NIFTY" or "BANKNIFTY"
+        expiry: "DD-MMM-YYYY" format
+        strike: Strike price
+        option_type: "CE" or "PE"
+
+    Returns:
+        str: Instrument token or None if not found
+    """
+    trading_symbol = get_option_symbol(symbol, expiry, strike, option_type)
+
+    try:
+        # Search for the option contract
+        result = client._smart.searchScrip("NFO", trading_symbol)
+
+        if not isinstance(result, dict) or not result.get("status"):
+            logger.warning(f"Option not found: {trading_symbol}")
+            return None
+
+        data = result.get("data", [])
+        if not data:
+            return None
+
+        # Return first match token
+        token = data[0].get("symboltoken") or data[0].get("token")
+        if token:
+            logger.debug(f"Found option: {trading_symbol} → token={token}")
+            return str(token)
+
+    except Exception as e:
+        logger.error(f"Error finding option token for {trading_symbol}: {e}")
+
+    return None
+
+
+def place_option_order(
+    client: 'AngelOneClient',
+    symbol: str,
+    expiry: str,
+    strike: int,
+    option_type: str,
+    transaction_type: str,
+    quantity: int,
+    price: float = 0.0,
+    order_type: str = "MARKET"
+) -> str:
+    """
+    Place an options order
+
+    Args:
+        client: AngelOneClient instance
+        symbol: "NIFTY" or "BANKNIFTY"
+        expiry: "DD-MMM-YYYY" format
+        strike: Strike price
+        option_type: "CE" or "PE"
+        transaction_type: "BUY" or "SELL"
+        quantity: Number of lots (1 lot BANKNIFTY = 15 qty, NIFTY = 25 qty)
+        price: Limit price (0 for MARKET order)
+        order_type: "MARKET" or "LIMIT"
+
+    Returns:
+        str: Order ID
+    """
+    trading_symbol = get_option_symbol(symbol, expiry, strike, option_type)
+    token = find_option_token(client, symbol, expiry, strike, option_type)
+
+    if not token:
+        raise RuntimeError(f"Could not find token for {trading_symbol}")
+
+    # Adjust quantity for lot size
+    if symbol == "BANKNIFTY":
+        lot_size = 15
+    elif symbol == "NIFTY":
+        lot_size = 25
+    else:
+        lot_size = 1
+
+    actual_qty = quantity * lot_size
+
+    logger.info(
+        f"Placing option order: {transaction_type} {quantity} lots "
+        f"({actual_qty} qty) of {trading_symbol}"
+    )
+
+    return client.place_order(
+        variety="NORMAL",
+        exchange="NFO",
+        symbol=trading_symbol,
+        token=token,
+        qty=actual_qty,
+        order_type=order_type,
+        transaction_type=transaction_type,
+        price=price,
+        product="INTRADAY"  # MIS/NRML for intraday
+    )
