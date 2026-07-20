@@ -25,13 +25,36 @@ interface HermesMetrics {
   market_status?: string;
 }
 
+const ACTIVITY_STORAGE_KEY = 'hermes_activity_log';
+const MAX_STORED_ACTIVITIES = 100;
+
 export function HermesAgentMonitor() {
   const [metrics, setMetrics] = useState<HermesMetrics | null>(null);
-  const [activityLog, setActivityLog] = useState<AgentActivity[]>([]);
+
+  // Load activity log from localStorage on mount
+  const [activityLog, setActivityLog] = useState<AgentActivity[]>(() => {
+    try {
+      const stored = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      console.error('[Hermes] Failed to load activity log from localStorage:', e);
+      return [];
+    }
+  });
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pulseActive, setPulseActive] = useState(false);
   const activityEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Save activity log to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(activityLog.slice(-MAX_STORED_ACTIVITIES)));
+    } catch (e) {
+      console.error('[Hermes] Failed to save activity log to localStorage:', e);
+    }
+  }, [activityLog]);
 
   useEffect(() => {
     fetchMetrics();

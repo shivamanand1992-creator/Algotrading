@@ -7,13 +7,12 @@ interface NavItem {
   section?: string;
 }
 
-// Navigation items - updated 2026-07-17 to include Hermes Monitor
+// Navigation items - Claude Usage moved to bottom
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
   { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },
   { id: 'hermes',     label: 'Hermes Control', icon: '🤖' },
   { id: 'hermes-monitor', label: 'Hermes Monitor', icon: '👁️' },
-  { id: 'claude-usage', label: 'Claude API Usage', icon: '📊', section: 'SYSTEM' },
   { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
   { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡' },
   { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
@@ -21,6 +20,7 @@ const navItems: NavItem[] = [
   { id: 'news',       label: 'Market News',     icon: '≡' },
   { id: 'holdings',   label: 'ETF Holdings',    icon: '⊞', section: 'PORTFOLIO' },
   { id: 'portfolio',  label: 'Portfolio',        icon: '◫' },
+  { id: 'claude-usage', label: 'Claude API Usage', icon: '📊', section: 'SYSTEM' },
 ];
 
 const bottomNavItems: NavItem[] = [
