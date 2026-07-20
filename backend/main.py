@@ -36,6 +36,7 @@ from backend.api.routes import conviction as conviction_routes
 from backend.api.routes import support_resistance as sr_routes
 from backend.api.routes import hermes as hermes_routes
 from backend.api.routes import version as version_routes
+from backend.api.routes import claude_usage
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
@@ -886,6 +887,7 @@ app.include_router(conviction_routes.router)
 app.include_router(sr_routes.router)
 app.include_router(hermes_routes.router)
 app.include_router(version_routes.router)
+app.include_router(claude_usage.router)
 # app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
 
 

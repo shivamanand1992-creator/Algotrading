@@ -14,6 +14,7 @@ import { StockConvictionView } from './components/conviction/StockConvictionView
 import { IntradayDashboard } from './components/intraday/IntradayDashboard';
 import { HermesDashboard } from './components/hermes/HermesDashboard';
 import { HermesAgentMonitor } from './components/hermes/HermesAgentMonitor';
+import { ClaudeUsageDashboard } from './components/claude-usage/ClaudeUsageDashboard';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -62,6 +63,7 @@ function App() {
       case 'intraday':   return <IntradayDashboard />;
       case 'hermes':     return <HermesDashboard />;
       case 'hermes-monitor': return <HermesAgentMonitor />;
+      case 'claude-usage': return <ClaudeUsageDashboard />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;

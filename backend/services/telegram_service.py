@@ -130,6 +130,45 @@ def send_eod_report(nb_service, swing_positions: list, balance: dict) -> bool:
         else:
             lines.append(f"✅ Sufficient funds for {int(avail // chunk)} more DCA chunk(s)")
 
+    # ── Claude API Usage (if available) ────────────────────────────────
+    try:
+        from backend.services import claude_usage_service
+        if claude_usage_service.is_configured():
+            report = claude_usage_service.get_comprehensive_report()
+            if report:
+                usage = report.get("usage", {})
+                yesterday = report.get("yesterday", {})
+                billing = report.get("billing", {})
+
+                lines.append("*🤖 Claude API Usage*")
+
+                # Yesterday's usage
+                if yesterday.get("total_tokens", 0) > 0:
+                    lines.append(
+                        f"• Yesterday: {yesterday.get('total_tokens', 0):,} tokens "
+                        f"(${yesterday.get('total_cost', 0):.2f})"
+                    )
+
+                # Month so far
+                lines.append(
+                    f"• This Month: {usage.get('total_tokens', 0):,} tokens "
+                    f"(${usage.get('total_cost', 0):.2f})"
+                )
+
+                # Balance
+                if billing:
+                    credits_remaining = billing.get("credits_remaining", 0)
+                    lines.append(f"• Balance: ${credits_remaining:,.2f}")
+
+                # Top model
+                top = usage.get("top_consumer")
+                if top:
+                    lines.append(f"• Top Model: {top}")
+
+                lines.append("")
+    except Exception as e:
+        logger.warning(f"[EOD] Claude usage fetch failed: {e}")
+
     lines.append("\n_Good night! JARVIS signing off._ 🌙")
     return send("\n".join(lines))
 

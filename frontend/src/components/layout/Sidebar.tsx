@@ -13,6 +13,7 @@ const navItems: NavItem[] = [
   { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },
   { id: 'hermes',     label: 'Hermes Control', icon: '🤖' },
   { id: 'hermes-monitor', label: 'Hermes Monitor', icon: '👁️' },
+  { id: 'claude-usage', label: 'Claude API Usage', icon: '📊', section: 'SYSTEM' },
   { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
   { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡' },
   { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
