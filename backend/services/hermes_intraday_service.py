@@ -157,9 +157,12 @@ class HermesIntradayService:
             Dict with cycle results
         """
         if not self.enabled:
+            logger.warning("[Hermes] ⚠️  Cycle skipped - agent is DISABLED")
             return {"status": "disabled"}
 
         if not self.is_trading_hours():
+            now = datetime.now(_IST).time()
+            logger.debug(f"[Hermes] ⏰ Cycle skipped - outside trading hours (current: {now}, market: {self.market_open}-{self.market_close})")
             return {"status": "outside_trading_hours"}
 
         try:
@@ -182,7 +185,9 @@ class HermesIntradayService:
                     }
 
             # Get Hermes decision
+            logger.info(f"[Hermes] 🤖 Calling Claude AI for market analysis (price=₹{market_data.get('price', 0):.2f})...")
             decision = await self.agent.analyze_market(market_data)
+            logger.info(f"[Hermes] 📊 Claude decision received: {decision.get('action')} (confidence={decision.get('confidence', 0):.0%})")
 
             # Check if confidence threshold met
             if decision["confidence"] < self.min_confidence:
