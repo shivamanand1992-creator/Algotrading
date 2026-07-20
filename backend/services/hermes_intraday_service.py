@@ -66,6 +66,11 @@ class HermesIntradayService:
         self.last_analysis_time: Optional[datetime] = None
         self.position_peak_price: Optional[float] = None  # For trailing SL
 
+        # Cache for historical data (avoid rate limits)
+        self._last_historical_fetch: Optional[datetime] = None
+        self._cached_historical_data: Optional[pd.DataFrame] = None
+        self._historical_cache_ttl_seconds = 300  # Cache for 5 minutes
+
         # Trading hours with time-of-day filters
         self.market_open = time(9, 15)   # 9:15 AM
         self.market_close = time(15, 10)  # 3:10 PM (exit by 3:15 PM)
@@ -276,17 +281,34 @@ class HermesIntradayService:
                 # Get LTP + OHLC
                 quote = self.angel_client.get_quote("NSE", self.instrument, token)
 
-                # Get recent candles for indicators (last 20 candles of 5min)
-                from_date = (datetime.now(_IST) - pd.Timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
-                to_date = datetime.now(_IST).strftime("%Y-%m-%d %H:%M")
-
-                df = self.angel_client.get_historical_data(
-                    exchange="NSE",
-                    symbol_token=token,
-                    interval="FIVE_MINUTE",
-                    from_date=from_date,
-                    to_date=to_date,
+                # Get recent candles for indicators (cached to avoid rate limits)
+                now = datetime.now(_IST)
+                cache_expired = (
+                    self._last_historical_fetch is None
+                    or (now - self._last_historical_fetch).total_seconds() > self._historical_cache_ttl_seconds
                 )
+
+                if cache_expired:
+                    # Fetch fresh historical data
+                    from_date = (now - pd.Timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+                    to_date = now.strftime("%Y-%m-%d %H:%M")
+
+                    df = self.angel_client.get_historical_data(
+                        exchange="NSE",
+                        symbol_token=token,
+                        interval="FIVE_MINUTE",
+                        from_date=from_date,
+                        to_date=to_date,
+                    )
+
+                    # Cache it
+                    self._cached_historical_data = df
+                    self._last_historical_fetch = now
+                    logger.debug(f"[Hermes] Historical data fetched and cached ({len(df)} candles)")
+                else:
+                    # Use cached data
+                    df = self._cached_historical_data
+                    logger.debug(f"[Hermes] Using cached historical data ({len(df)} candles)")
 
                 # Calculate indicators
                 rsi = self._calculate_rsi(df) if len(df) >= 14 else 50.0

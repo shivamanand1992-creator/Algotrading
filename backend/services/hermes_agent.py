@@ -24,13 +24,19 @@ class HermesAgent:
             api_key: Anthropic API key (from ANTHROPIC_API_KEY env var if not provided)
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
+
+        if not self.api_key:
+            raise ValueError(
+                "[Hermes] CRITICAL: ANTHROPIC_API_KEY environment variable is required but not set! "
+                "Add ANTHROPIC_API_KEY=sk-ant-... to your .env file or Railway environment variables."
+            )
+
+        self.client = AsyncAnthropic(api_key=self.api_key)
         self.model = "claude-haiku-4-5"  # Fast, affordable Claude Haiku 4.5
         self.timeout = 30.0
         self.max_tokens = 1024
 
-        if not self.api_key:
-            logger.warning("[Hermes] No ANTHROPIC_API_KEY found - agent will not work")
+        logger.info(f"[Hermes] Agent initialized with model={self.model}")
 
     async def analyze_market(self, market_data: Dict) -> Dict:
         """
