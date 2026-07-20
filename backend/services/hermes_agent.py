@@ -142,6 +142,18 @@ Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met.
                 messages=[{"role": "user", "content": prompt}],
             )
 
+            # Track usage locally
+            try:
+                from backend.services import claude_usage_service
+                usage = message.usage
+                claude_usage_service.track_usage(
+                    model=self.model,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens
+                )
+            except Exception as track_err:
+                logger.warning(f"[Hermes] Failed to track usage: {track_err}")
+
             # Extract text from response
             return message.content[0].text
 

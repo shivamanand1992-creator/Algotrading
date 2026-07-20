@@ -140,32 +140,33 @@ def send_eod_report(nb_service, swing_positions: list, balance: dict) -> bool:
                 yesterday = report.get("yesterday", {})
                 billing = report.get("billing", {})
 
-                lines.append("*🤖 Claude API Usage*")
+                # Only add section if there's actual usage data
+                if usage.get("total_tokens", 0) > 0 or yesterday.get("total_tokens", 0) > 0:
+                    lines.append("*🤖 Claude API Usage*")
 
-                # Yesterday's usage
-                if yesterday.get("total_tokens", 0) > 0:
-                    lines.append(
-                        f"• Yesterday: {yesterday.get('total_tokens', 0):,} tokens "
-                        f"(${yesterday.get('total_cost', 0):.2f})"
-                    )
+                    # Yesterday's usage
+                    if yesterday.get("total_tokens", 0) > 0:
+                        lines.append(
+                            f"• Yesterday: {yesterday.get('total_tokens', 0):,} tokens "
+                            f"(${yesterday.get('total_cost', 0):.2f})"
+                        )
 
-                # Month so far
-                lines.append(
-                    f"• This Month: {usage.get('total_tokens', 0):,} tokens "
-                    f"(${usage.get('total_cost', 0):.2f})"
-                )
+                    # Month so far
+                    if usage.get("total_tokens", 0) > 0:
+                        lines.append(
+                            f"• This Month: {usage.get('total_tokens', 0):,} tokens "
+                            f"(${usage.get('total_cost', 0):.2f})"
+                        )
 
-                # Balance
-                if billing:
-                    credits_remaining = billing.get("credits_remaining", 0)
-                    lines.append(f"• Balance: ${credits_remaining:,.2f}")
+                        # Top model
+                        top = usage.get("top_consumer")
+                        if top:
+                            lines.append(f"• Top Model: {top}")
 
-                # Top model
-                top = usage.get("top_consumer")
-                if top:
-                    lines.append(f"• Top Model: {top}")
+                    # Note about checking balance
+                    lines.append("• Balance: Check console.anthropic.com")
 
-                lines.append("")
+                    lines.append("")
     except Exception as e:
         logger.warning(f"[EOD] Claude usage fetch failed: {e}")
 

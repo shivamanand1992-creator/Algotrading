@@ -1,25 +1,41 @@
 """
-Claude API Usage Monitoring Service
+Claude API Usage Monitoring Service - LOCAL TRACKING
 
-Fetches usage data from Claude API and provides analytics:
-- Daily/monthly token consumption
-- Cost breakdown by model
-- API balance tracking
-- Usage trends
+Since Anthropic API doesn't expose usage/billing endpoints via REST API,
+this service tracks usage locally by intercepting Claude API calls.
 
-API Reference: https://platform.claude.com/docs/en/manage-claude/usage-cost-api
+Features:
+- Local token usage tracking per request
+- Cost calculation based on model pricing
+- Daily/monthly aggregation
+- Model-wise breakdown
+
+Note: Billing balance must be checked manually on https://console.anthropic.com/
 """
 import os
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
+from pathlib import Path
 from loguru import logger
-import urllib.request
-import urllib.error
 
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+
+# Local usage tracking file
+_USAGE_FILE = Path(__file__).parent.parent / "data" / "claude_usage.json"
+_USAGE_FILE.parent.mkdir(exist_ok=True)
+
+# Model pricing (USD per 1M tokens) - Updated 2026-07-20
+_PRICING = {
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-5": {"input": 2.00, "output": 10.00},  # Intro pricing
+    "claude-opus-4-6": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-7": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
+}
 
 
 def is_configured() -> bool:
@@ -27,80 +43,97 @@ def is_configured() -> bool:
     return bool(_ANTHROPIC_API_KEY)
 
 
-def _make_api_request(endpoint: str) -> Optional[Dict]:
-    """Make authenticated request to Claude API"""
-    if not is_configured():
-        logger.warning("[ClaudeUsage] ANTHROPIC_API_KEY not configured")
-        return None
+def _load_usage_data() -> Dict:
+    """Load usage data from local file"""
+    if not _USAGE_FILE.exists():
+        return {"records": []}
 
     try:
-        headers = {
-            "x-api-key": _ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-
-        req = urllib.request.Request(
-            f"https://api.anthropic.com/v1/{endpoint}",
-            headers=headers
-        )
-
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status == 200:
-                data = json.loads(resp.read().decode())
-                return data
-            else:
-                logger.error(f"[ClaudeUsage] API returned status {resp.status}")
-                return None
-
-    except urllib.error.HTTPError as e:
-        try:
-            error_body = e.read().decode()
-            logger.error(f"[ClaudeUsage] HTTP {e.code}: {error_body}")
-        except:
-            logger.error(f"[ClaudeUsage] HTTP {e.code}")
-        return None
+        with open(_USAGE_FILE, "r") as f:
+            return json.load(f)
     except Exception as e:
-        logger.error(f"[ClaudeUsage] Request failed: {e}")
-        return None
+        logger.error(f"[ClaudeUsage] Failed to load usage data: {e}")
+        return {"records": []}
+
+
+def _save_usage_data(data: Dict):
+    """Save usage data to local file"""
+    try:
+        with open(_USAGE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.error(f"[ClaudeUsage] Failed to save usage data: {e}")
+
+
+def track_usage(model: str, input_tokens: int, output_tokens: int):
+    """
+    Track a Claude API call
+
+    Args:
+        model: Model identifier (e.g. "claude-haiku-4-5")
+        input_tokens: Input tokens consumed
+        output_tokens: Output tokens consumed
+    """
+    pricing = _PRICING.get(model, {"input": 0, "output": 0})
+    cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+    record = {
+        "timestamp": datetime.now(_IST).isoformat(),
+        "date": datetime.now(_IST).strftime("%Y-%m-%d"),
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_usd": round(cost, 4)
+    }
+
+    data = _load_usage_data()
+    data["records"].append(record)
+    _save_usage_data(data)
+
+    logger.debug(f"[ClaudeUsage] Tracked: {model} {input_tokens+output_tokens:,} tokens ${cost:.4f}")
 
 
 def get_usage_summary(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Optional[Dict]:
     """
-    Get usage summary from Claude API
+    Get usage summary from local tracking data
 
     Args:
         start_date: ISO format date (YYYY-MM-DD), defaults to beginning of current month
         end_date: ISO format date (YYYY-MM-DD), defaults to today
 
     Returns:
-        Dict with usage data or None if failed
+        Dict with usage data compatible with analyze_usage()
     """
-    # Default to current month if not specified
     now = datetime.now(_IST)
     if not start_date:
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
     if not end_date:
         end_date = now.strftime("%Y-%m-%d")
 
-    endpoint = f"organization/usage?start_date={start_date}&end_date={end_date}"
-    logger.info(f"[ClaudeUsage] Fetching usage from {start_date} to {end_date}")
+    logger.info(f"[ClaudeUsage] Fetching local usage from {start_date} to {end_date}")
 
-    return _make_api_request(endpoint)
+    data = _load_usage_data()
+    filtered = [
+        r for r in data.get("records", [])
+        if start_date <= r.get("date", "") <= end_date
+    ]
+
+    return {"data": filtered}
 
 
 def get_billing_info() -> Optional[Dict]:
     """
-    Get billing and balance information
+    Get billing placeholder - actual balance must be checked on console.anthropic.com
 
     Returns:
-        Dict with billing data including:
-        - credits_remaining
-        - credits_limit
-        - next_billing_date
+        Dict with placeholder message
     """
-    logger.info("[ClaudeUsage] Fetching billing info")
-    return _make_api_request("organization/billing")
+    logger.info("[ClaudeUsage] Billing info not available via API")
+    return {
+        "message": "Billing balance must be checked manually on https://console.anthropic.com/settings/billing",
+        "note": "Anthropic API does not expose billing endpoints"
+    }
 
 
 def analyze_usage(usage_data: Dict) -> Dict:
@@ -195,39 +228,78 @@ def analyze_usage(usage_data: Dict) -> Dict:
 
 def get_comprehensive_report() -> Dict:
     """
-    Get comprehensive usage report including billing and analytics
+    Get comprehensive usage report including local usage analytics
 
     Returns:
         Dict with:
         - usage: Current month usage analytics
-        - billing: Account balance and limits
+        - yesterday: Yesterday's usage
+        - billing: Placeholder message (check console.anthropic.com manually)
         - generated_at: Report timestamp
     """
-    logger.info("[ClaudeUsage] Generating comprehensive report")
+    logger.info("[ClaudeUsage] Generating comprehensive report from local data")
 
-    # Get current month usage
-    usage_data = get_usage_summary()
-    usage_analytics = analyze_usage(usage_data) if usage_data else {}
-
-    # Get billing info
-    billing_data = get_billing_info()
-
-    # Get yesterday's usage for daily tracking
-    yesterday = (datetime.now(_IST) - timedelta(days=1)).strftime("%Y-%m-%d")
-    today = datetime.now(_IST).strftime("%Y-%m-%d")
-    yesterday_data = get_usage_summary(start_date=yesterday, end_date=yesterday)
-    yesterday_analytics = analyze_usage(yesterday_data) if yesterday_data else {}
-
-    return {
-        "usage": usage_analytics,
-        "yesterday": yesterday_analytics,
-        "billing": billing_data or {},
-        "generated_at": datetime.now(_IST).isoformat(),
-        "period": {
-            "start": datetime.now(_IST).replace(day=1).strftime("%Y-%m-%d"),
-            "end": today
+    try:
+        # Get current month usage
+        usage_data = get_usage_summary()
+        usage_analytics = analyze_usage(usage_data) if usage_data else {
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_model": {},
+            "by_day": [],
+            "top_consumer": None
         }
-    }
+
+        # Get yesterday's usage for daily tracking
+        yesterday = (datetime.now(_IST) - timedelta(days=1)).strftime("%Y-%m-%d")
+        today = datetime.now(_IST).strftime("%Y-%m-%d")
+        yesterday_data = get_usage_summary(start_date=yesterday, end_date=yesterday)
+        yesterday_analytics = analyze_usage(yesterday_data) if yesterday_data else {
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_model": {},
+            "by_day": [],
+            "top_consumer": None
+        }
+
+        # Get billing placeholder
+        billing_data = get_billing_info()
+
+        return {
+            "usage": usage_analytics,
+            "yesterday": yesterday_analytics,
+            "billing": billing_data or {},
+            "generated_at": datetime.now(_IST).isoformat(),
+            "period": {
+                "start": datetime.now(_IST).replace(day=1).strftime("%Y-%m-%d"),
+                "end": today
+            }
+        }
+    except Exception as e:
+        logger.error(f"[ClaudeUsage] Failed to generate report: {e}")
+        # Return safe default structure
+        return {
+            "usage": {
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "by_model": {},
+                "by_day": [],
+                "top_consumer": None
+            },
+            "yesterday": {
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "by_model": {},
+                "by_day": [],
+                "top_consumer": None
+            },
+            "billing": {},
+            "generated_at": datetime.now(_IST).isoformat(),
+            "period": {
+                "start": datetime.now(_IST).replace(day=1).strftime("%Y-%m-%d"),
+                "end": datetime.now(_IST).strftime("%Y-%m-%d")
+            }
+        }
 
 
 def format_telegram_report(report: Dict) -> str:
