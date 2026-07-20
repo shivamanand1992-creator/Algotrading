@@ -894,6 +894,36 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.websocket("/ws/hermes")
+async def hermes_websocket_endpoint(websocket: WebSocket):
+    """Dedicated WebSocket endpoint for Hermes activity updates"""
+    await websocket.accept()
+    ws_manager.active_connections.append(websocket)
+    print(f"[Hermes WS] Client connected. Total: {len(ws_manager.active_connections)}")
+
+    try:
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to Hermes activity feed",
+            "timestamp": datetime.now(_IST).isoformat()
+        })
+
+        # Keep connection alive
+        while True:
+            # Wait for client messages (ping/pong) to keep connection alive
+            try:
+                await websocket.receive_text()
+            except:
+                break
+    except Exception as e:
+        print(f"[Hermes WS] Connection error: {e}")
+    finally:
+        if websocket in ws_manager.active_connections:
+            ws_manager.active_connections.remove(websocket)
+        print(f"[Hermes WS] Client disconnected. Total: {len(ws_manager.active_connections)}")
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket, token: str = ""):
     # Validate token passed as query param: /ws/live?token=<jwt>
