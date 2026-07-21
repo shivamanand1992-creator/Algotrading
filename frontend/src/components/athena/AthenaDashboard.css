@@ -1,32 +1,74 @@
+/* =========================================================
+   ATHENA OPTIONS TRADING — JARVIS CYBERPUNK THEME
+   ========================================================= */
+
 .athena-dashboard {
   padding: 2rem;
   max-width: 1400px;
   margin: 0 auto;
 }
 
+/* Header */
 .athena-header {
   margin-bottom: 2rem;
 }
 
 .athena-header h1 {
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--jarvis-text-primary);
   margin-bottom: 0.5rem;
+  text-shadow: 0 0 20px rgba(0,229,255,0.3);
 }
 
 .athena-subtitle {
-  color: #94a3b8;
+  color: var(--jarvis-text-secondary);
   font-size: 0.95rem;
+  letter-spacing: 0.05em;
 }
 
+/* Glass Panel Card — matches JARVIS style */
 .athena-card {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  border: 1px solid #334155;
-  border-radius: 12px;
+  background: rgba(4, 14, 26, 0.75);
+  backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid rgba(0, 229, 255, 0.12);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(0,229,255,0.04),
+    0 8px 32px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(0,229,255,0.08),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+  position: relative;
+  overflow: hidden;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Diagonal inner highlight */
+.athena-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(0,229,255,0.05) 0%,
+    transparent 45%,
+    transparent 55%,
+    rgba(29,233,182,0.03) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.athena-card:hover {
+  border-color: rgba(0,229,255,0.28);
+  box-shadow:
+    0 0 0 1px rgba(0,229,255,0.08),
+    0 12px 48px rgba(0,0,0,0.6),
+    0 0 32px rgba(0,229,255,0.06),
+    inset 0 1px 0 rgba(0,229,255,0.15);
 }
 
 .athena-card-header {
@@ -34,40 +76,55 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  position: relative;
+  z-index: 1;
 }
 
 .athena-card h2 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #f8fafc;
+  color: var(--jarvis-primary);
   margin: 0 0 1rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 12px rgba(0,229,255,0.4);
+  position: relative;
+  z-index: 1;
 }
 
+/* Status Badge — JARVIS style */
 .status-badge {
-  padding: 0.4rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  padding: 0.5rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
 }
 
 .status-badge.active {
-  background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
-  border: 1px solid #22c55e;
+  background: rgba(0,230,118,0.12);
+  color: var(--jarvis-green);
+  border: 1px solid rgba(0,230,118,0.35);
+  box-shadow: 0 0 16px rgba(0,230,118,0.25);
 }
 
 .status-badge.inactive {
-  background: rgba(100, 116, 139, 0.2);
-  color: #94a3b8;
-  border: 1px solid #475569;
+  background: rgba(100,116,139,0.12);
+  color: #64748b;
+  border: 1px solid rgba(100,116,139,0.35);
 }
 
+/* Stats Grid */
 .athena-stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1.5rem;
   margin-bottom: 1.5rem;
+  position: relative;
+  z-index: 1;
 }
 
 .stat-item {
@@ -77,94 +134,133 @@
 }
 
 .stat-label {
-  color: #94a3b8;
-  font-size: 0.85rem;
+  color: var(--jarvis-text-secondary);
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
 }
 
 .stat-value {
-  color: #f8fafc;
-  font-size: 1.5rem;
-  font-weight: 600;
+  color: var(--jarvis-text-primary);
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-family: 'Roboto Mono', 'Courier New', monospace;
 }
 
 .stat-value.positive {
-  color: #22c55e;
+  color: var(--jarvis-green);
+  text-shadow: 0 0 12px rgba(0,230,118,0.4);
 }
 
 .stat-value.negative {
-  color: #ef4444;
+  color: var(--jarvis-red);
+  text-shadow: 0 0 12px rgba(255,23,68,0.4);
 }
 
+/* Controls — JARVIS Button Styles */
 .athena-controls {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
   border: none;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  filter: grayscale(1);
 }
 
+/* Primary Button (Paper Trading) — JARVIS Cyan Gradient */
 .btn-primary {
-  background: #3b82f6;
-  color: white;
+  background: linear-gradient(135deg, var(--jarvis-primary), var(--jarvis-accent));
+  color: #03060c;
+  box-shadow: 0 4px 18px rgba(0,229,255,0.4), 0 0 40px rgba(0,229,255,0.1);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #2563eb;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0,229,255,0.6), 0 0 60px rgba(0,229,255,0.2);
 }
 
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Live Trading Button — Red Gradient */
 .btn-live {
-  background: #ef4444;
+  background: linear-gradient(135deg, #ff1744, #f50057);
   color: white;
+  box-shadow: 0 4px 18px rgba(255,23,68,0.4), 0 0 40px rgba(255,23,68,0.1);
 }
 
 .btn-live:hover:not(:disabled) {
-  background: #dc2626;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(255,23,68,0.6), 0 0 60px rgba(255,23,68,0.2);
 }
 
+.btn-live:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Secondary Button (Disable) — Outline Style */
 .btn-secondary {
-  background: #475569;
-  color: white;
+  background: transparent;
+  border: 1px solid var(--jarvis-text-secondary);
+  color: var(--jarvis-text-secondary);
+  padding: 9px 22px;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #334155;
+  background: rgba(0,229,255,0.08);
+  border-color: var(--jarvis-primary);
+  color: var(--jarvis-primary);
+  box-shadow: 0 0 20px rgba(0,229,255,0.25), inset 0 0 20px rgba(0,229,255,0.04);
 }
 
+/* Analyze Button — Green Gradient */
 .btn-analyze {
-  background: #8b5cf6;
-  color: white;
+  background: linear-gradient(135deg, var(--jarvis-secondary), var(--jarvis-green));
+  color: #03060c;
+  box-shadow: 0 4px 18px rgba(29,233,182,0.4), 0 0 40px rgba(29,233,182,0.1);
 }
 
 .btn-analyze:hover:not(:disabled) {
-  background: #7c3aed;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(29,233,182,0.6), 0 0 60px rgba(29,233,182,0.2);
+}
+
+.btn-analyze:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 /* Analysis Result */
 .analysis-result {
-  border-left: 4px solid #3b82f6;
+  border-left: 3px solid var(--jarvis-primary);
+  position: relative;
+  z-index: 1;
 }
 
 .analysis-result.enter {
-  border-left-color: #22c55e;
+  border-left-color: var(--jarvis-green);
 }
 
 .analysis-result.hold {
-  border-left-color: #64748b;
+  border-left-color: var(--jarvis-text-secondary);
 }
 
 .analysis-content {
@@ -180,22 +276,27 @@
 }
 
 .analysis-label {
-  color: #94a3b8;
-  font-size: 0.9rem;
+  color: var(--jarvis-text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
   min-width: 120px;
 }
 
 .analysis-value {
-  color: #f8fafc;
-  font-weight: 500;
+  color: var(--jarvis-text-primary);
+  font-weight: 600;
   flex: 1;
 }
 
-/* Positions Table */
+/* Positions Table — JARVIS Data Table Style */
 .empty-state {
   text-align: center;
   padding: 3rem 1rem;
-  color: #94a3b8;
+  color: var(--jarvis-text-secondary);
+  position: relative;
+  z-index: 1;
 }
 
 .empty-state p {
@@ -204,39 +305,61 @@
 
 .empty-hint {
   font-size: 0.9rem;
-  color: #64748b;
+  color: var(--jarvis-text-secondary);
+  opacity: 0.7;
 }
 
 .positions-table-container {
   overflow-x: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .positions-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
-.positions-table th {
-  background: #0f172a;
-  color: #94a3b8;
-  font-weight: 600;
-  text-align: left;
-  padding: 0.75rem;
-  border-bottom: 2px solid #334155;
-  font-size: 0.85rem;
+.positions-table thead th {
+  color: var(--jarvis-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.12em;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid rgba(0,229,255,0.12);
 }
 
-.positions-table td {
-  padding: 1rem 0.75rem;
-  border-bottom: 1px solid #1e293b;
-  color: #cbd5e1;
+.positions-table tbody tr {
+  transition: background 0.15s;
 }
 
 .positions-table tbody tr:hover {
-  background: rgba(59, 130, 246, 0.05);
+  background: rgba(0,229,255,0.05);
+}
+
+.positions-table tbody td {
+  padding: 12px 14px;
+  font-size: 0.875rem;
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  border-bottom: 1px solid rgba(0,229,255,0.04);
+  transition: border-color 0.15s;
+  color: var(--jarvis-text-primary);
+}
+
+.positions-table tbody tr:hover td {
+  border-bottom-color: rgba(0,229,255,0.1);
+}
+
+.positions-table tbody tr td:first-child {
+  border-left: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.positions-table tbody tr:hover td:first-child {
+  border-left-color: var(--jarvis-primary);
 }
 
 .position-strategy {
@@ -248,15 +371,17 @@
 .mode-badge {
   display: inline-block;
   padding: 0.2rem 0.5rem;
-  background: rgba(100, 116, 139, 0.3);
+  background: rgba(0,229,255,0.1);
+  border: 1px solid rgba(0,229,255,0.25);
   border-radius: 4px;
-  font-size: 0.75rem;
-  color: #94a3b8;
+  font-size: 0.7rem;
+  color: var(--jarvis-primary);
   text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .strikes-cell {
-  font-family: 'Courier New', monospace;
+  font-family: 'Roboto Mono', 'Courier New', monospace;
 }
 
 .strikes-info {
@@ -266,44 +391,46 @@
 }
 
 .strikes-info span {
-  font-size: 0.85rem;
-  color: #cbd5e1;
+  font-size: 0.8rem;
+  color: var(--jarvis-text-primary);
 }
 
 .positive {
-  color: #22c55e !important;
+  color: var(--jarvis-green) !important;
+  text-shadow: 0 0 8px rgba(0,230,118,0.35);
 }
 
 .negative {
-  color: #ef4444 !important;
+  color: var(--jarvis-red) !important;
+  text-shadow: 0 0 8px rgba(255,23,68,0.35);
 }
 
 .text-small {
-  font-size: 0.85rem;
-  color: #94a3b8;
+  font-size: 0.8rem;
+  color: var(--jarvis-text-secondary);
 }
 
 .status-dot {
   display: inline-block;
   padding: 0.3rem 0.75rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
   text-transform: uppercase;
-  background: rgba(100, 116, 139, 0.2);
-  color: #cbd5e1;
+  letter-spacing: 0.05em;
+  background: rgba(0,229,255,0.1);
+  color: var(--jarvis-primary);
+  border: 1px solid rgba(0,229,255,0.25);
 }
 
 /* Info Card */
-.athena-info {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  border-color: #475569;
-}
-
 .athena-info h3 {
-  color: #f8fafc;
+  color: var(--jarvis-primary);
   font-size: 1.1rem;
   margin-bottom: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 12px rgba(0,229,255,0.3);
 }
 
 .athena-info ul {
@@ -313,25 +440,29 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  position: relative;
+  z-index: 1;
 }
 
 .athena-info li {
-  color: #cbd5e1;
+  color: var(--jarvis-text-primary);
   padding-left: 1.5rem;
   position: relative;
   line-height: 1.6;
+  font-size: 0.9rem;
 }
 
 .athena-info li::before {
-  content: '→';
+  content: '▸';
   position: absolute;
   left: 0;
-  color: #8b5cf6;
+  color: var(--jarvis-secondary);
   font-weight: bold;
 }
 
 .athena-info strong {
-  color: #f8fafc;
+  color: var(--jarvis-primary);
+  font-weight: 700;
 }
 
 /* Responsive */
