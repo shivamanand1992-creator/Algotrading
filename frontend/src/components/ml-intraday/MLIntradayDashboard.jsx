@@ -9,6 +9,8 @@ const MLIntradayDashboard = () => {
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [paperTrades, setPaperTrades] = useState(null);
+  const [actionMsg, setActionMsg] = useState(null);
 
   // Fetch system status
   useEffect(() => {
@@ -40,6 +42,21 @@ const MLIntradayDashboard = () => {
       setSignals(response.data.signals || []);
     } catch (error) {
       console.error('Failed to fetch top stocks:', error);
+    }
+    try {
+      const pt = await axios.get('/api/ml-intraday/paper-trades');
+      setPaperTrades(pt.data);
+    } catch (e) { /* noop */ }
+  };
+
+  const triggerAction = async (endpoint, label) => {
+    setActionMsg(`${label}...`);
+    try {
+      const res = await axios.post(`/api/ml-intraday/${endpoint}`);
+      setActionMsg(res.data.message || res.data.status || `${label} done`);
+      setTimeout(fetchSystemStatus, 2000);
+    } catch (error) {
+      setActionMsg(`${label} failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -104,6 +121,86 @@ const MLIntradayDashboard = () => {
       </div>
 
       <div className="ml-content">
+        {/* Setup Controls */}
+        <div className="ml-card">
+          <div className="card-header">
+            <h2>System Controls</h2>
+            {systemStatus?.tradeable === false && systemStatus?.model_loaded && (
+              <span className="status-value" style={{ color: '#ff9100' }}>
+                ⚠ Model expectancy not positive — PAPER ONLY
+              </span>
+            )}
+          </div>
+          <div className="ml-controls" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
+            <button className="btn-explain" onClick={() => triggerAction('import-data?days=30', 'Importing 30 days of data')}>
+              1. Import Data
+            </button>
+            <button className="btn-explain" onClick={() => triggerAction('train', 'Training model')}>
+              2. Train Model
+            </button>
+            <button className="btn-explain" onClick={() => triggerAction('run-cycle', 'Running scoring cycle')}>
+              3. Run Cycle Now
+            </button>
+          </div>
+          {actionMsg && (
+            <p style={{ marginTop: '1rem', color: 'var(--jarvis-text-secondary)', position: 'relative', zIndex: 1 }}>
+              {actionMsg}
+            </p>
+          )}
+          {systemStatus?.test_expectancy != null && (
+            <p style={{ marginTop: '0.5rem', color: 'var(--jarvis-text-primary)', position: 'relative', zIndex: 1 }}>
+              Out-of-sample expectancy: <strong style={{ color: systemStatus.test_expectancy > 0 ? '#00e676' : '#ff1744' }}>
+                {systemStatus.test_expectancy > 0 ? '+' : ''}{systemStatus.test_expectancy}% per trade
+              </strong>
+            </p>
+          )}
+        </div>
+
+        {/* Paper Trading P&L */}
+        {paperTrades && (paperTrades.open_positions?.length > 0 || paperTrades.closed_trades?.length > 0) && (
+          <div className="ml-card">
+            <div className="card-header">
+              <h2>Paper Trading</h2>
+              <span className={paperTrades.total_pnl_pct >= 0 ? 'positive' : 'negative'} style={{ fontWeight: 700, fontFamily: 'monospace' }}>
+                {paperTrades.total_pnl_pct >= 0 ? '+' : ''}{paperTrades.total_pnl_pct}%
+              </span>
+            </div>
+            <div className="signals-table-container">
+              <table className="signals-table">
+                <thead>
+                  <tr><th>Symbol</th><th>Entry</th><th>SL</th><th>Target</th><th>Exit</th><th>P&L</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {paperTrades.open_positions.map((p, i) => (
+                    <tr key={`o${i}`}>
+                      <td className="symbol-cell">{p.symbol}</td>
+                      <td className="price-cell">₹{p.entry}</td>
+                      <td className="price-cell negative">₹{p.stop_loss}</td>
+                      <td className="price-cell positive">₹{p.target}</td>
+                      <td>—</td>
+                      <td>—</td>
+                      <td><span className="rr-badge">OPEN</span></td>
+                    </tr>
+                  ))}
+                  {paperTrades.closed_trades.map((t, i) => (
+                    <tr key={`c${i}`}>
+                      <td className="symbol-cell">{t.symbol}</td>
+                      <td className="price-cell">₹{t.entry}</td>
+                      <td className="price-cell negative">₹{t.stop_loss}</td>
+                      <td className="price-cell positive">₹{t.target}</td>
+                      <td className="price-cell">₹{t.exit}</td>
+                      <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>
+                        {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct}%
+                      </td>
+                      <td className="time-cell">{t.exit_reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Top Stocks Panel */}
         <div className="ml-card">
           <div className="card-header">

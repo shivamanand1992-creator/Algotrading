@@ -839,6 +839,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
     asyncio.create_task(_hermes_intraday_loop())
+    asyncio.create_task(_ml_intraday_loop())
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
@@ -1064,3 +1065,50 @@ async def _hermes_intraday_loop() -> None:
                 "status": "error"
             })
             await asyncio.sleep(60)
+
+
+async def _ml_intraday_loop() -> None:
+    """Background task: ML scoring engine every 5 minutes during market hours"""
+    from backend.ml.scoring_service import MLScoringService
+
+    await asyncio.sleep(30)  # Wait for startup + angel connection
+
+    svc = MLScoringService.get_instance()
+    logger.info("[MLLoop] Starting ML intraday scoring loop (5-min cycle)")
+
+    while True:
+        try:
+            now = datetime.now(_IST)
+            in_hours = now.weekday() < 5 and "09:15" <= now.strftime("%H:%M") <= "15:30"
+
+            if svc.model is not None and in_hours:
+                await svc.update_live_candles()
+                result = await svc.run_cycle()
+
+                if result.get("status") == "ok" and svc.active_signals:
+                    await ws_manager.broadcast({
+                        "type": "ml_intraday_signals",
+                        "signals": svc.active_signals,
+                        "last_update": svc.last_update,
+                    })
+                    # Telegram alert for high-confidence signals
+                    try:
+                        from backend.services import telegram_service
+                        for sig in svc.active_signals:
+                            telegram_service.send(
+                                f"🎯 <b>ML SIGNAL: BUY {sig['symbol']}</b>\n"
+                                f"Score: {sig['score']} | P: {sig['probability']}%\n"
+                                f"Entry ₹{sig['entry']} | SL ₹{sig['stop_loss']} | "
+                                f"Target ₹{sig['target']} | R:R 1:{sig['reward_risk']}\n"
+                                f"Mode: PAPER"
+                            )
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(300)  # 5 minutes
+            else:
+                await asyncio.sleep(120)  # Check again in 2 min when closed/no model
+
+        except Exception as e:
+            logger.error(f"[MLLoop] Error: {e}")
+            await asyncio.sleep(300)
