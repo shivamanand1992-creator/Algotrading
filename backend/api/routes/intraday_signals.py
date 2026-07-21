@@ -570,7 +570,7 @@ async def get_live_setups(
     ),
 ):
     """
-    Get currently active trade setups.
+    Get currently active trade setups (REAL-TIME).
 
     Returns trade setups that are currently valid based on:
     - Price action near S/R levels
@@ -578,16 +578,14 @@ async def get_live_setups(
     - Trend alignment
     - Risk/reward ratio
 
-    **Parameters:**
-    - `symbol`: Filter by specific symbol (optional)
-    - `min_confidence`: Minimum confidence score (0-100)
+    **Detected Patterns:**
+    - `opening_breakout`: Breakout from opening range (ORB)
+    - `retest`: Support/resistance retest with rejection
+    - `consolidation_break`: Breakout from consolidation zone
 
-    **Setup Types:**
-    - `breakout`: Price breaking above resistance
-    - `breakdown`: Price breaking below support
-    - `support_bounce`: Bounce from support level
-    - `resistance_rejection`: Rejection at resistance
-    - `range_bound`: Trading within defined range
+    **Parameters:**
+    - `symbol`: Filter by specific symbol (NIFTY, BANKNIFTY; optional)
+    - `min_confidence`: Minimum confidence score (0-100)
 
     **Example:**
     ```
@@ -598,8 +596,8 @@ async def get_live_setups(
         now = datetime.now(IST)
         phase = get_market_phase(now)
 
-        if DEMO_MODE or phase not in [MarketPhase.REGULAR, MarketPhase.CLOSING]:
-            # Return demo/empty data
+        # Only return live setups during trading hours
+        if phase not in [MarketPhase.REGULAR, MarketPhase.CLOSING]:
             return LiveSetupsResponse(
                 setups=[],
                 count=0,
@@ -607,36 +605,76 @@ async def get_live_setups(
                 market_phase=phase,
             )
 
-        # TODO: Implement actual setup detection logic
-        # This would analyze current price action against S/R levels,
-        # volume patterns, and trend indicators to identify valid setups
+        # Get setup detector
+        from backend.services.intraday_setup_detector import IntradaySetupDetector
+        detector = IntradaySetupDetector.get_instance() if hasattr(IntradaySetupDetector, 'get_instance') else None
 
         setups = []
 
-        # Placeholder: Generate sample setup when market is open
-        if symbol is None or symbol == SYMBOL_NIFTY:
-            setups.append(
-                TradeSetup(
-                    setup_id=f"NIFTY_{now.timestamp()}",
-                    symbol=SYMBOL_NIFTY,
-                    setup_type=SetupType.SUPPORT_BOUNCE,
-                    signal_strength=SignalStrength.MODERATE,
-                    entry_price=24520.0,
-                    stop_loss=24480.0,
-                    target_1=24580.0,
-                    target_2=24620.0,
-                    target_3=24650.0,
-                    risk_reward=2.5,
-                    timeframe="5min",
-                    confidence=72.5,
-                    triggered_at=now.isoformat(),
-                    expires_at=(now + timedelta(minutes=30)).isoformat(),
-                    notes="Strong support bounce with volume confirmation",
-                )
-            )
+        if detector:
+            # Fetch active setups from detector
+            symbols_to_check = [symbol] if symbol else [SYMBOL_NIFTY, SYMBOL_BANKNIFTY]
 
-        # Filter by confidence
+            for sym in symbols_to_check:
+                try:
+                    active_setups = await detector.get_active_setups(sym)
+
+                    for setup_alert in active_setups:
+                        # Filter by confidence and active status
+                        if setup_alert.confidence * 100 < min_confidence or not setup_alert.active:
+                            continue
+
+                        # Map setup type
+                        setup_type_map = {
+                            "opening_breakout": SetupType.BREAKOUT,
+                            "retest": SetupType.SUPPORT_BOUNCE,  # Retest maps to bounce/rejection
+                            "consolidation_break": SetupType.RANGE_BOUND,
+                        }
+                        mapped_type = setup_type_map.get(setup_alert.setup_type.value, SetupType.RANGE_BOUND)
+
+                        # Map direction to signal strength
+                        signal_strength_map = {
+                            (0.60, 0.75): SignalStrength.WEAK,
+                            (0.75, 0.85): SignalStrength.MODERATE,
+                            (0.85, 1.0): SignalStrength.STRONG,
+                        }
+                        strength = SignalStrength.MODERATE
+                        for (min_conf, max_conf), level in signal_strength_map.items():
+                            if min_conf <= setup_alert.confidence < max_conf:
+                                strength = level
+                                break
+
+                        # Create setup response
+                        setup = TradeSetup(
+                            setup_id=setup_alert.setup_id,
+                            symbol=setup_alert.symbol,
+                            setup_type=mapped_type,
+                            signal_strength=strength,
+                            entry_price=setup_alert.entry_price,
+                            stop_loss=setup_alert.stop_loss,
+                            target_1=setup_alert.targets[0] if len(setup_alert.targets) > 0 else setup_alert.entry_price,
+                            target_2=setup_alert.targets[1] if len(setup_alert.targets) > 1 else None,
+                            target_3=setup_alert.targets[2] if len(setup_alert.targets) > 2 else None,
+                            risk_reward=setup_alert.risk_reward_ratio(),
+                            timeframe="5min",
+                            confidence=round(setup_alert.confidence * 100, 1),
+                            triggered_at=setup_alert.timestamp.isoformat(),
+                            expires_at=(setup_alert.timestamp + timedelta(minutes=60)).isoformat(),
+                            notes=f"{setup_alert.setup_type.value.replace('_', ' ').title()} | "
+                                  f"Volume Ratio: {setup_alert.volume_ratio:.2f}x | "
+                                  f"Risk:Reward {setup_alert.risk_reward_ratio():.2f}:1",
+                        )
+                        setups.append(setup)
+
+                except Exception as e:
+                    logger.warning(f"Error fetching setups for {sym}: {e}")
+                    continue
+
+        # Filter by confidence (already done above, but just to be sure)
         setups = [s for s in setups if s.confidence >= min_confidence]
+
+        # Sort by confidence descending
+        setups.sort(key=lambda s: s.confidence, reverse=True)
 
         return LiveSetupsResponse(
             setups=setups,
