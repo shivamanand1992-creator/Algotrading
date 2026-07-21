@@ -8,6 +8,7 @@ import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'DASHBOARD',    icon: '◈' },
+  { id: 'ml-intraday', label: 'ML INTRADAY', icon: '🎯' },
   { id: 'intraday',  label: 'INTRADAY',     icon: '⚡' },
   { id: 'hermes',    label: 'HERMES AI',    icon: '🤖' },
   { id: 'niftybees', label: 'NIFTYBEES',    icon: '⬡' },
