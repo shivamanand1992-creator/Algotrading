@@ -7,12 +7,14 @@ interface CycleInfo {
   phase: string;
   description: string;
   advice: string;
+  confidence: string;
   nifty_price: number;
-  nifty_ret_1m: number;
-  nifty_ret_3m: number;
-  nifty_ret_6m: number;
-  nifty_ret_12m: number;
+  nifty_ret_4w: number;
+  nifty_ret_12w: number;
+  nifty_ret_26w: number;
+  nifty_ret_52w: number;
   above_ema200: boolean;
+  weeks_above_ema200: number;
   ema200: number;
 }
 
@@ -28,16 +30,17 @@ interface SectorResult {
   momentum_score: number;
   technical_score: number;
   cycle_score: number;
-  ret_1m: number;
-  ret_3m: number;
-  ret_6m: number;
-  ret_1m_vs_nifty: number;
-  ret_3m_vs_nifty: number;
-  ret_6m_vs_nifty: number;
+  ret_4w: number;
+  ret_12w: number;
+  ret_26w: number;
+  ret_12w_vs_nifty: number;
+  ret_26w_vs_nifty: number;
   rsi: number;
   adx: number;
   macd_hist: number;
-  above_ema200: boolean;
+  above_e10: boolean;
+  above_e26: boolean;
+  above_e52: boolean;
   ema_aligned: boolean;
   reasons: string[];
   data_error: boolean;
@@ -116,9 +119,9 @@ function CycleCard({ cycle }: { cycle: CycleInfo }) {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { label: 'Nifty 50',  value: `₹${cycle.nifty_price.toLocaleString('en-IN')}` },
-            { label: '1M Return', value: pct(cycle.nifty_ret_1m),  colour: cycle.nifty_ret_1m  >= 0 ? 'text-green-400' : 'text-red-400' },
-            { label: '3M Return', value: pct(cycle.nifty_ret_3m),  colour: cycle.nifty_ret_3m  >= 0 ? 'text-green-400' : 'text-red-400' },
-            { label: '6M Return', value: pct(cycle.nifty_ret_6m),  colour: cycle.nifty_ret_6m  >= 0 ? 'text-green-400' : 'text-red-400' },
+            { label: '4W Return', value: pct(cycle.nifty_ret_4w),  colour: cycle.nifty_ret_4w  >= 0 ? 'text-green-400' : 'text-red-400' },
+            { label: '12W Return', value: pct(cycle.nifty_ret_12w),  colour: cycle.nifty_ret_12w  >= 0 ? 'text-green-400' : 'text-red-400' },
+            { label: '26W Return', value: pct(cycle.nifty_ret_26w),  colour: cycle.nifty_ret_26w  >= 0 ? 'text-green-400' : 'text-red-400' },
           ].map(item => (
             <div key={item.label} className="bg-jarvis-primary/5 rounded-lg p-3 text-center min-w-[80px]">
               <div className="text-[10px] text-jarvis-text-secondary uppercase tracking-wider">{item.label}</div>
@@ -128,14 +131,21 @@ function CycleCard({ cycle }: { cycle: CycleInfo }) {
         </div>
       </div>
 
-      {/* EMA indicator */}
-      <div className="mt-4 flex items-center gap-2 text-xs">
-        <div className={`w-2 h-2 rounded-full ${cycle.above_ema200 ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-jarvis-text-secondary">
-          Nifty is <span className={cycle.above_ema200 ? 'text-green-400' : 'text-red-400'}>
-            {cycle.above_ema200 ? 'above' : 'below'}
-          </span> 200-day EMA (₹{cycle.ema200.toLocaleString('en-IN')})
-        </span>
+      {/* EMA & Confirmation */}
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center gap-2 text-xs">
+          <div className={`w-2 h-2 rounded-full ${cycle.above_ema200 ? 'bg-green-400' : 'bg-red-400'}`} />
+          <span className="text-jarvis-text-secondary">
+            Nifty is <span className={cycle.above_ema200 ? 'text-green-400' : 'text-red-400'}>
+              {cycle.above_ema200 ? 'above' : 'below'}
+            </span> EMA200 ({cycle.weeks_above_ema200} weeks persistent)
+          </span>
+        </div>
+        <div className={`text-xs px-2 py-1 rounded inline-block ${
+          cycle.confidence === 'HIGH' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+        }`}>
+          Cycle Confidence: {cycle.confidence}
+        </div>
       </div>
     </div>
   );
@@ -243,8 +253,8 @@ function SectorCard({ sector, expanded, onToggle }: {
           {/* Quick stats */}
           <div className="flex gap-3 text-xs flex-wrap">
             <span>
-              3M: <span className={retColour(sector.ret_3m)}>{pct(sector.ret_3m)}</span>
-              {' '}(<span className={vsColour(sector.ret_3m_vs_nifty)}>{pct(sector.ret_3m_vs_nifty)} vs Nifty</span>)
+              12W: <span className={retColour(sector.ret_12w)}>{pct(sector.ret_12w)}</span>
+              {' '}(<span className={vsColour(sector.ret_12w_vs_nifty)}>{pct(sector.ret_12w_vs_nifty)} vs Nifty</span>)
             </span>
             <span className="text-jarvis-text-secondary">RSI: <span className="text-white">{sector.rsi}</span></span>
             <span className="text-jarvis-text-secondary">ADX: <span className="text-white">{sector.adx}</span></span>
@@ -259,45 +269,45 @@ function SectorCard({ sector, expanded, onToggle }: {
           <div>
             <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Score Breakdown</div>
             <div className="space-y-1.5">
-              <ScoreBar label="Momentum" score={sector.momentum_score / 0.40} colour="bg-cyan-400" />
-              <ScoreBar label="Technical" score={sector.technical_score / 0.35} colour="bg-blue-400" />
+              <ScoreBar label="Momentum" score={sector.momentum_score / 0.20} colour="bg-cyan-400" />
+              <ScoreBar label="Technical" score={sector.technical_score / 0.55} colour="bg-blue-400" />
               <ScoreBar label="Cycle Fit" score={sector.cycle_score / 0.25} colour="bg-purple-400" />
             </div>
           </div>
 
           {/* Returns table */}
           <div>
-            <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Returns vs Nifty</div>
+            <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Weekly Returns vs Nifty</div>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: '1 Month', abs: sector.ret_1m, vs: sector.ret_1m_vs_nifty },
-                { label: '3 Months', abs: sector.ret_3m, vs: sector.ret_3m_vs_nifty },
-                { label: '6 Months', abs: sector.ret_6m, vs: sector.ret_6m_vs_nifty },
+                { label: '4 Weeks', abs: sector.ret_4w, vs: 0 },
+                { label: '12 Weeks', abs: sector.ret_12w, vs: sector.ret_12w_vs_nifty },
+                { label: '26 Weeks', abs: sector.ret_26w, vs: sector.ret_26w_vs_nifty },
               ].map(r => (
                 <div key={r.label} className="bg-white/5 rounded-lg p-2 text-center">
                   <div className="text-[10px] text-jarvis-text-secondary">{r.label}</div>
                   <div className={`text-sm font-bold ${retColour(r.abs)}`}>{pct(r.abs)}</div>
-                  <div className={`text-[10px] ${vsColour(r.vs)}`}>{pct(r.vs)} vs N</div>
+                  {r.vs !== 0 && <div className={`text-[10px] ${vsColour(r.vs)}`}>{pct(r.vs)} vs N</div>}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Technical indicators */}
+          {/* Technical indicators (Weekly) */}
           <div>
-            <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Technical</div>
+            <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Weekly Technical</div>
             <div className="flex gap-3 flex-wrap text-xs">
               <span className={sector.ema_aligned ? 'text-green-400' : 'text-yellow-400'}>
-                {sector.ema_aligned ? '✓ EMA Aligned' : '○ EMA Partial'}
+                {sector.ema_aligned ? '✓ EMA Aligned (E10>E26>E52)' : '○ EMA Partial'}
               </span>
-              <span className={sector.above_ema200 ? 'text-green-400' : 'text-red-400'}>
-                {sector.above_ema200 ? '✓ Above EMA200' : '✗ Below EMA200'}
+              <span className={sector.above_e26 ? 'text-green-400' : 'text-red-400'}>
+                {sector.above_e26 ? '✓ Above EMA26' : '✗ Below EMA26'}
               </span>
               <span>RSI: <span className={
-                sector.rsi >= 50 && sector.rsi <= 70 ? 'text-green-400' :
-                sector.rsi > 75 ? 'text-red-400' : 'text-yellow-400'
+                sector.rsi >= 50 && sector.rsi <= 65 ? 'text-green-400' :
+                sector.rsi > 70 ? 'text-red-400' : 'text-yellow-400'
               }>{sector.rsi}</span></span>
-              <span>ADX: <span className={sector.adx > 25 ? 'text-green-400' : 'text-yellow-400'}>{sector.adx}</span></span>
+              <span>ADX: <span className={sector.adx > 22 ? 'text-green-400' : 'text-yellow-400'}>{sector.adx}</span></span>
               <span>MACD: <span className={sector.macd_hist > 0 ? 'text-green-400' : 'text-red-400'}>
                 {sector.macd_hist > 0 ? '▲ Positive' : '▼ Negative'}
               </span></span>
