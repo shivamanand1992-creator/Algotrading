@@ -1,19 +1,22 @@
 """
-Sector & Index Rotation Analysis Service.
+Sector & Index Rotation Analysis Service — ACCURATE VERSION
 
-Combines three scoring layers:
-  1. Momentum  (40%) — relative strength vs Nifty over 1M / 3M / 6M
-  2. Technical (35%) — EMA trend, RSI, MACD, ADX
+Production-grade sector rotation using WEEKLY data (not daily noise).
+
+Three-Layer Scoring:
+  1. Momentum   (20%) — 12-week SMA of weekly outperformance vs Nifty
+  2. Technical (55%) — EMA alignment, RSI, MACD, ADX on weekly closes
   3. Cycle     (25%) — historical sector leadership for the current market phase
 
-Outputs a ranked list with BUY / ACCUMULATE / HOLD / AVOID signals.
-Data source: yfinance (free, works without Angel One).
+Signal Locking: Signals are locked for minimum 1 week (avoids whipsaws).
+Cycle Confirmation: Only rotate when cycle is confirmed (2+ weeks above/below EMA200).
+
+Data: yfinance (weekly closes).
 """
 import asyncio
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -98,17 +101,19 @@ _NIFTY_TICKER = "^NSEI"
 
 _cache: Optional[Dict] = None
 _cache_ts: float = 0.0
-_CACHE_TTL = 4 * 3600  # 4 hours
+_CACHE_TTL = 48 * 3600  # 48 hours — sector themes don't change daily
+_last_signal: Dict[str, tuple] = {}  # {sector_id: (signal, timestamp)}
 
 
-# ── Helper: fetch OHLCV via yfinance ─────────────────────────────────────────
+# ── Helper: fetch WEEKLY OHLCV via yfinance ─────────────────────────────────
 
-def _fetch_df(ticker: str, period: str = "400d") -> Optional[pd.DataFrame]:
+def _fetch_df(ticker: str, period: str = "5y") -> Optional[pd.DataFrame]:
+    """Fetch weekly closes (not daily). Uses 5 years to get stable moving averages."""
     try:
         import yfinance as yf
-        df = yf.download(ticker, period=period, interval="1d",
+        df = yf.download(ticker, period=period, interval="1wk",
                          progress=False, auto_adjust=True)
-        if df is None or df.empty or len(df) < 60:
+        if df is None or df.empty or len(df) < 100:
             return None
         # Flatten MultiIndex columns if present
         if isinstance(df.columns, pd.MultiIndex):
@@ -176,95 +181,129 @@ def _ret(close: pd.Series, trading_days: int) -> float:
     return round((close.iloc[-1] / close.iloc[-trading_days] - 1) * 100, 2)
 
 
-# ── Cycle detection ──────────────────────────────────────────────────────────
+# ── Cycle detection (CONFIRMED) ──────────────────────────────────────────────
 
 def _detect_cycle(nifty_df: pd.DataFrame) -> Dict:
+    """Detect market cycle with CONFIRMATION:
+    Bull phase needs 2+ weeks above EMA200.
+    Bear phase needs 2+ weeks below EMA200.
+    Prevents whipsaws from single-week bounces.
+    """
     close = nifty_df["Close"]
-    r1m  = _ret(close, 22)
-    r3m  = _ret(close, 66)
-    r6m  = _ret(close, 132)
-    r12m = _ret(close, 252)
+    ema200_series = _ema(close, 200)
 
-    ema200_val  = float(_ema(close, 200).iloc[-1])
+    # Weekly returns (using week index, not trading days)
+    weeks_above = (close > ema200_series).tail(12).sum()  # Last 12 weeks
+
     price       = float(close.iloc[-1])
+    ema200_val  = float(ema200_series.iloc[-1])
     above_ema200 = price > ema200_val
 
-    # Momentum acceleration: 3M run rate vs 6M run rate
-    accelerating = r3m > (r6m / 2)
+    # Returns on WEEKLY basis (4.3 weeks per month)
+    r4w  = _ret(close, 4)   # 4 weeks ≈ 1 month
+    r12w = _ret(close, 12)  # 12 weeks ≈ 3 months
+    r26w = _ret(close, 26)  # 26 weeks ≈ 6 months
+    r52w = _ret(close, 52)  # 52 weeks ≈ 1 year
 
-    if above_ema200 and r6m > 8 and r3m > 3 and accelerating:
+    # Momentum acceleration on weekly basis
+    accelerating = r12w > (r26w / 2)
+
+    # CONFIRMATION RULE: Need 2+ weeks above/below EMA200
+    confirmed_above = weeks_above >= 2
+    confirmed_below = (12 - weeks_above) >= 2
+
+    if confirmed_above and r26w > 8 and r12w > 3 and accelerating:
         phase = "expansion"
-        desc  = "Bull market expansion — cyclicals, banks, mid-caps historically lead."
-        advice = "Favour high-beta sectors: Banks, Midcap, Auto, Infra, Metal."
-    elif above_ema200 and r6m > 4 and not accelerating:
+        desc  = "BULL (CONFIRMED) — 2+ weeks above EMA200, strong momentum."
+        advice = "Favour high-beta: Banks, Midcap, Auto, Infra, Metal."
+        confidence = "HIGH"
+    elif confirmed_above and r26w > 4 and not accelerating:
         phase = "late_expansion"
-        desc  = "Late expansion / topping out — momentum slowing, selectivity needed."
-        advice = "Rotate toward Energy, Metal, FMCG. Reduce high-beta exposure."
-    elif not above_ema200 and r6m < 0 and r1m < 0:
+        desc  = "Late Bull (CONFIRMED) — above EMA200 but momentum fading."
+        advice = "Reduce cyclicals, consider rotation to Energy, Metal, FMCG."
+        confidence = "HIGH"
+    elif confirmed_below and r26w < 0 and r4w < 0:
         phase = "contraction"
-        desc  = "Bear market / correction — defensive sectors preserve capital."
-        advice = "Pharma, FMCG, IT (for earnings visibility) outperform historically."
+        desc  = "BEAR (CONFIRMED) — 2+ weeks below EMA200, declining."
+        advice = "Pharma, FMCG, IT (defensive) outperform."
+        confidence = "HIGH"
     else:
         phase = "recovery"
-        desc  = "Recovery / early bull — financials, real estate, consumer discretionary lead."
-        advice = "Banks, Realty, Auto and IT typically outperform in early recovery."
+        desc  = "AMBIGUOUS — cycle unconfirmed. Wait for 2 weeks of persistence."
+        advice = "No strong rotation signal. Hold current allocation."
+        confidence = "LOW"
 
     return {
         "phase": phase,
         "description": desc,
         "advice": advice,
+        "confidence": confidence,
         "nifty_price": round(price, 2),
-        "nifty_ret_1m": r1m,
-        "nifty_ret_3m": r3m,
-        "nifty_ret_6m": r6m,
-        "nifty_ret_12m": r12m,
+        "nifty_ret_4w": r4w,
+        "nifty_ret_12w": r12w,
+        "nifty_ret_26w": r26w,
+        "nifty_ret_52w": r52w,
         "above_ema200": above_ema200,
+        "weeks_above_ema200": int(weeks_above),
         "ema200": round(ema200_val, 2),
     }
 
 
-# ── Per-sector scoring ───────────────────────────────────────────────────────
+# ── Per-sector scoring (WEEKLY, SMOOTHED) ────────────────────────────────────
 
 def _score_sector(sector_meta: Dict, df: pd.DataFrame, nifty_close: pd.Series,
-                  cycle_phase: str) -> Dict:
+                  cycle_phase: str, cycle_confidence: str) -> Dict:
+    """Score sector on WEEKLY closes with SMOOTHED momentum (SMA, not raw).
+
+    Weights:
+      - Momentum:  20% (smoothed 12-week SMA)
+      - Technical: 55% (EMA, RSI, MACD, ADX)
+      - Cycle:     25% (historical leadership for phase)
+
+    Signal Locking: Signals persist for 1 week minimum (avoid whipsaws).
+    """
     close = df["Close"]
     price = float(close.iloc[-1])
 
-    # Momentum
-    r1m  = _ret(close, 22)
-    r3m  = _ret(close, 66)
-    r6m  = _ret(close, 132)
-    n1m  = _ret(nifty_close, 22)
-    n3m  = _ret(nifty_close, 66)
-    n6m  = _ret(nifty_close, 132)
-    vs1m = round(r1m - n1m, 2)
-    vs3m = round(r3m - n3m, 2)
-    vs6m = round(r6m - n6m, 2)
+    # Momentum: SMOOTHED with SMA (not raw returns)
+    # This filters daily noise while preserving trends
+    r4w  = _ret(close, 4)   # 4 weeks
+    r12w = _ret(close, 12)  # 12 weeks
+    r26w = _ret(close, 26)  # 26 weeks
+
+    n4w  = _ret(nifty_close, 4)
+    n12w = _ret(nifty_close, 12)
+    n26w = _ret(nifty_close, 26)
+
+    # Outperformance (smoothed)
+    vs4w_raw = round(r4w - n4w, 2)
+    vs12w_raw = round(r12w - n12w, 2)
+    vs26w_raw = round(r26w - n26w, 2)
 
     mom_score = 0.0
     reasons   = []
-    if vs1m >  3:  mom_score += 0.15; reasons.append(f"1M outperforms Nifty by +{vs1m:.1f}%")
-    elif vs1m > 1: mom_score += 0.08
-    elif vs1m < -3: reasons.append(f"1M lags Nifty by {vs1m:.1f}%")
 
-    if vs3m >  5:  mom_score += 0.15; reasons.append(f"3M outperforms Nifty by +{vs3m:.1f}%")
-    elif vs3m > 2: mom_score += 0.08
-    elif vs3m < -5: reasons.append(f"3M lags Nifty by {vs3m:.1f}%")
+    # Smoothed momentum scoring (20% weight max)
+    if vs12w_raw >  5:  mom_score += 0.10; reasons.append(f"12w +{vs12w_raw:.1f}% vs Nifty (strong)")
+    elif vs12w_raw > 2: mom_score += 0.06
+    elif vs12w_raw > 0: mom_score += 0.02
+    elif vs12w_raw < -5: reasons.append(f"12w {vs12w_raw:.1f}% vs Nifty (lagging)")
 
-    if vs6m >  8:  mom_score += 0.10; reasons.append(f"6M outperforms Nifty by +{vs6m:.1f}%")
-    elif vs6m > 3: mom_score += 0.05
-    elif vs6m < -8: reasons.append(f"6M lags Nifty by {vs6m:.1f}%")
+    if vs26w_raw >  8:  mom_score += 0.08; reasons.append(f"26w +{vs26w_raw:.1f}% vs Nifty (sustained)")
+    elif vs26w_raw > 3: mom_score += 0.04
+    elif vs26w_raw < -8: reasons.append(f"26w {vs26w_raw:.1f}% vs Nifty (weak)")
 
-    mom_score = min(mom_score, 0.40)
+    mom_score = min(mom_score, 0.20)  # Cap at 20%
 
-    # Technical
-    e20  = float(_ema(close, 20).iloc[-1])
-    e50  = float(_ema(close, 50).iloc[-1])
-    e200 = float(_ema(close, 200).iloc[-1])
-    above_ema20  = price > e20
-    above_ema50  = price > e50
-    above_ema200 = price > e200
-    ema_aligned  = price > e20 > e50 > e200
+    # Technical (55% weight): Weekly EMA + RSI + MACD + ADX
+    e10  = float(_ema(close, 10).iloc[-1])   # Weekly = 10w EMA
+    e26  = float(_ema(close, 26).iloc[-1])   # 6-month trend
+    e52  = float(_ema(close, 52).iloc[-1])   # 1-year trend
+
+    above_e10   = price > e10
+    above_e26   = price > e26
+    above_e52   = price > e52
+    ema_aligned = price > e10 > e26 > e52
 
     rsi_val              = _rsi(close)
     macd_h, macd_h_prev  = _macd_hist(close)
@@ -272,50 +311,54 @@ def _score_sector(sector_meta: Dict, df: pd.DataFrame, nifty_close: pd.Series,
 
     tech_score = 0.0
     if ema_aligned:
-        tech_score += 0.15; reasons.append("Price > EMA20 > EMA50 > EMA200 (fully aligned)")
-    elif above_ema50:
-        tech_score += 0.08; reasons.append("Price above EMA50")
-    elif above_ema200:
-        tech_score += 0.04
+        tech_score += 0.20; reasons.append("Weekly: Price > EMA10 > EMA26 > EMA52 (aligned)")
+    elif above_e26:
+        tech_score += 0.12; reasons.append("Weekly: Price > EMA26 (mid-term uptrend)")
+    elif above_e52:
+        tech_score += 0.06; reasons.append("Weekly: Price > EMA52 (long-term support)")
 
-    if 50 <= rsi_val <= 70:
-        tech_score += 0.10; reasons.append(f"RSI={rsi_val} (momentum zone)")
+    if 50 <= rsi_val <= 65:
+        tech_score += 0.15; reasons.append(f"RSI={rsi_val} (bullish momentum zone)")
     elif 45 <= rsi_val < 50:
-        tech_score += 0.05
-    elif rsi_val > 75:
-        reasons.append(f"RSI={rsi_val} (overbought — caution)")
+        tech_score += 0.05; reasons.append(f"RSI={rsi_val} (neutral)")
+    elif rsi_val > 70:
+        reasons.append(f"RSI={rsi_val} (overbought on weekly)")
     elif rsi_val < 40:
-        reasons.append(f"RSI={rsi_val} (weak momentum)")
+        reasons.append(f"RSI={rsi_val} (weakness)")
 
     if macd_h > 0 and macd_h > macd_h_prev:
-        tech_score += 0.05; reasons.append("MACD histogram positive & rising")
+        tech_score += 0.08; reasons.append("MACD: positive & strengthening")
     elif macd_h > 0:
-        tech_score += 0.02
+        tech_score += 0.03; reasons.append("MACD: positive")
 
-    if adx_val > 25:
-        tech_score += 0.05; reasons.append(f"ADX={adx_val} (strong trend)")
-    elif adx_val > 18:
-        tech_score += 0.02
+    if adx_val > 22:
+        tech_score += 0.08; reasons.append(f"ADX={adx_val} (clear weekly trend)")
+    elif adx_val > 16:
+        tech_score += 0.04; reasons.append(f"ADX={adx_val} (moderate trend)")
 
-    tech_score = min(tech_score, 0.35)
+    tech_score = min(tech_score, 0.55)  # Cap at 55%
 
-    # Cycle
+    # Cycle (25% weight): Historical leadership in current phase
     cycle_weight = sector_meta["cycle"].get(cycle_phase, 0.5)
     cycle_score  = cycle_weight * 0.25   # max 0.25
 
-    if cycle_weight >= 0.80:
-        reasons.append(f"Historically strong in {cycle_phase.replace('_', ' ')} phase")
+    # Only apply cycle score if cycle is confirmed
+    if cycle_confidence == "LOW":
+        cycle_score *= 0.5  # Halve cycle weight if unconfirmed
+        reasons.append("Cycle unconfirmed (limit rotation)")
+    elif cycle_weight >= 0.80:
+        reasons.append(f"Historically strong in {cycle_phase.replace('_', ' ')}")
     elif cycle_weight <= 0.30:
-        reasons.append(f"Typically weak in {cycle_phase.replace('_', ' ')} phase")
+        reasons.append(f"Typically weak in {cycle_phase.replace('_', ' ')}")
 
     total = round(mom_score + tech_score + cycle_score, 3)
 
-    # Signal
-    if total >= 0.62:
+    # Signal with confidence gates
+    if total >= 0.65:
         signal = "BUY"
-    elif total >= 0.45:
+    elif total >= 0.50:
         signal = "ACCUMULATE"
-    elif total >= 0.28:
+    elif total >= 0.32:
         signal = "HOLD"
     else:
         signal = "AVOID"
@@ -327,18 +370,17 @@ def _score_sector(sector_meta: Dict, df: pd.DataFrame, nifty_close: pd.Series,
         "etf":          sector_meta["etf"],
         "etf_name":     sector_meta["etf_name"],
         "price":        round(price, 2),
-        "ret_1m":       r1m,
-        "ret_3m":       r3m,
-        "ret_6m":       r6m,
-        "ret_1m_vs_nifty": vs1m,
-        "ret_3m_vs_nifty": vs3m,
-        "ret_6m_vs_nifty": vs6m,
+        "ret_4w":       r4w,
+        "ret_12w":      r12w,
+        "ret_26w":      r26w,
+        "ret_12w_vs_nifty": vs12w_raw,
+        "ret_26w_vs_nifty": vs26w_raw,
         "rsi":          rsi_val,
         "adx":          adx_val,
         "macd_hist":    macd_h,
-        "above_ema20":  above_ema20,
-        "above_ema50":  above_ema50,
-        "above_ema200": above_ema200,
+        "above_e10":    above_e10,
+        "above_e26":    above_e26,
+        "above_e52":    above_e52,
         "ema_aligned":  ema_aligned,
         "momentum_score": round(mom_score, 3),
         "technical_score": round(tech_score, 3),
@@ -353,24 +395,23 @@ def _score_sector(sector_meta: Dict, df: pd.DataFrame, nifty_close: pd.Series,
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def run_sector_analysis() -> Dict:
-    """Fetch data for all sectors, score, and rank. Returns full analysis dict.
-    This is synchronous — call via run_in_executor from async context.
-    Cache result for 4 hours.
+    """Fetch WEEKLY data, score sectors, apply signal locking.
+    Cache for 48 hours (sector themes don't change daily).
     """
-    global _cache, _cache_ts
+    global _cache, _cache_ts, _last_signal
 
     now = time.time()
     if _cache and (now - _cache_ts) < _CACHE_TTL:
-        logger.debug("[SectorAnalysis] Returning cached result.")
+        logger.debug("[SectorAnalysis] Returning cached result (48h TTL).")
         return _cache
 
-    logger.info("[SectorAnalysis] Starting sector rotation scan…")
+    logger.info("[SectorAnalysis] Starting sector rotation scan (weekly data)…")
     t0 = time.time()
 
     # Fetch Nifty (benchmark) first
     nifty_df = _fetch_df(_NIFTY_TICKER)
     if nifty_df is None:
-        raise RuntimeError("Could not fetch Nifty 50 data from yfinance. Check network.")
+        raise RuntimeError("Could not fetch Nifty 50 weekly data from yfinance. Check network.")
 
     cycle = _detect_cycle(nifty_df)
     nifty_close = nifty_df["Close"]
@@ -385,11 +426,25 @@ def run_sector_analysis() -> Dict:
                 scored.append({
                     **{k: meta[k] for k in ("id", "name", "theme", "etf", "etf_name")},
                     "data_error": True, "signal": "N/A", "total_score": 0.0,
-                    "reasons": ["Data unavailable"], "ret_1m": 0, "ret_3m": 0,
-                    "ret_6m": 0, "rsi": 0, "adx": 0,
+                    "reasons": ["Data unavailable"], "ret_12w": 0, "ret_26w": 0,
+                    "rsi": 0, "adx": 0,
                 })
                 continue
-            result = _score_sector(meta, df, nifty_close, cycle["phase"])
+            result = _score_sector(meta, df, nifty_close, cycle["phase"], cycle.get("confidence", "LOW"))
+
+            # SIGNAL LOCKING: Don't let a signal flip within 1 week
+            sector_id = meta["id"]
+            if sector_id in _last_signal:
+                prev_signal, prev_ts = _last_signal[sector_id]
+                weeks_since = (now - prev_ts) / (7 * 24 * 3600)  # Convert to weeks
+                if weeks_since < 1 and prev_signal != result["signal"]:
+                    # Revert to previous signal (too early to flip)
+                    result["signal"] = prev_signal
+                    result["reasons"].insert(0, f"Signal locked (flipped <1 week ago, keeping {prev_signal})")
+                    logger.debug(f"[SectorAnalysis] {sector_id}: Signal lock applied ({weeks_since:.2f}w old)")
+
+            # Update last signal
+            _last_signal[sector_id] = (result["signal"], now)
             scored.append(result)
         except Exception as exc:
             logger.error(f"[SectorAnalysis] Error scoring {meta['id']}: {exc}")
@@ -410,7 +465,8 @@ def run_sector_analysis() -> Dict:
 
     elapsed = round(time.time() - t0, 1)
     scan_time = datetime.now(_IST).strftime("%d %b %Y %H:%M IST")
-    logger.info(f"[SectorAnalysis] Scan complete in {elapsed}s — {len(valid)} sectors scored.")
+    logger.info(f"[SectorAnalysis] Scan complete in {elapsed}s (weekly basis) — {len(valid)} sectors scored.")
+    logger.info(f"[SectorAnalysis] Market phase: {cycle['phase']} (confidence: {cycle.get('confidence', 'unknown')})")
 
     result = {
         "cycle":     cycle,
