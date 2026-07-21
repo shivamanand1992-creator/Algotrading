@@ -229,10 +229,7 @@ Analyze and respond with JSON only (no markdown):"""
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=0.2,  # Low temp for consistent analysis
-                thinking={
-                    "type": "adaptive",  # Extended thinking for complex options math
-                    "budget_tokens": 5000
-                },
+                thinking={"type": "adaptive"},  # Extended thinking for complex options math
                 messages=[{"role": "user", "content": prompt}],
             )
 
