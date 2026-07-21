@@ -46,7 +46,7 @@ class HermesIntradayService:
         self.instrument = hermes_cfg.get("instrument", "NIFTYBEES")
         self.max_trades_per_day = hermes_cfg.get("max_trades_per_day", 4)
         self.capital_per_trade = hermes_cfg.get("capital_per_trade", 10000.0)
-        self.min_confidence = hermes_cfg.get("min_confidence", 0.7)
+        self.min_confidence = hermes_cfg.get("min_confidence", 0.65)  # Lowered from 0.70
 
         # Enhanced features
         self.use_atr_stops = hermes_cfg.get("use_atr_stops", True)

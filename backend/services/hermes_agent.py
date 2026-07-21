@@ -32,9 +32,9 @@ class HermesAgent:
             )
 
         self.client = AsyncAnthropic(api_key=self.api_key)
-        self.model = "claude-haiku-4-5"  # Fast, affordable Claude Haiku 4.5
-        self.timeout = 30.0
-        self.max_tokens = 1024
+        self.model = "claude-opus-4-8"  # Claude Opus 4.8 for better trading decisions
+        self.timeout = 45.0
+        self.max_tokens = 2048
 
         logger.info(f"[Hermes] ✅ Agent initialized successfully with model={self.model}, api_key={'set' if self.api_key else 'MISSING'}")
 
@@ -113,6 +113,13 @@ DECISION FRAMEWORK:
 - CLOSE_POSITION: Stop loss hit OR target reached OR time-based exit (3:10 PM)
 - WAIT: Setup forming but not yet confirmed
 
+CONFIDENCE SCORING:
+- 0.85-1.0: Perfect setup - all indicators bullish + breakout + strong volume
+- 0.70-0.84: Good setup - breakout with volume OR bounce with RSI support
+- 0.60-0.69: Moderate setup - trend is positive, minor confirmation missing
+- 0.50-0.59: Weak setup - mixed signals
+- Below 0.50: Poor setup - don't trade
+
 Analyze the current market state and respond with a JSON decision:
 
 {{
@@ -126,7 +133,7 @@ Analyze the current market state and respond with a JSON decision:
     "quantity": null or position size
 }}
 
-Be conservative. Only recommend BUY if confidence >= 0.7 and all conditions met."""
+Be calculated, not timid. Recommend BUY when confidence >= 0.65 and setup is valid. Don't be overly conservative - this is intraday trading with defined risk."""
 
     async def _call_llm(self, prompt: str) -> str:
         """Call Anthropic Claude API using official SDK"""
