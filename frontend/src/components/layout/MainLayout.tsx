@@ -8,12 +8,11 @@ import { JarvisVoicePanel } from '../jarvis/JarvisVoicePanel';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'DASHBOARD',    icon: '◈' },
-  { id: 'ml-intraday', label: 'ML INTRADAY', icon: '🎯' },
+  { id: 'market',    label: 'MARKET',       icon: '⊕' },
   { id: 'intraday',  label: 'INTRADAY',     icon: '⚡' },
-  { id: 'hermes',    label: 'HERMES AI',    icon: '🤖' },
+  { id: 'ml-intraday', label: 'ML INTRADAY', icon: '🎯' },
   { id: 'niftybees', label: 'NIFTYBEES',    icon: '⬡' },
   { id: 'stocks',    label: 'EQUITY',       icon: '↗' },
-  { id: 'market',    label: 'MARKET',       icon: '⊕' },
   { id: 'sectors',   label: 'SECTORS',      icon: '↻' },
   { id: 'news',      label: 'NEWS',         icon: '≡' },
   { id: 'holdings',  label: 'ETF HOLDINGS', icon: '⊞' },

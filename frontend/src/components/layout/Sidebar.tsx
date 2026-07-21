@@ -7,22 +7,23 @@ interface NavItem {
   section?: string;
 }
 
-// Navigation items - Claude Usage moved to bottom
+// Navigation items with proper organization and labels
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
-  { id: 'ml-intraday', label: 'ML Intraday',    icon: '🎯', section: 'TRADING' },
-  { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡' },
-  { id: 'hermes',     label: 'Hermes Control', icon: '🤖' },
-  { id: 'hermes-monitor', label: 'Hermes Monitor', icon: '👁️' },
-  { id: 'athena',     label: 'Athena Options', icon: '🏛️' },
-  { id: 'stocks',     label: 'Equity Swing',    icon: '↗' },
-  { id: 'niftybees',  label: 'NiftyBees ETF',   icon: '⬡' },
-  { id: 'market',     label: 'Market',          icon: '⊕', section: 'ANALYSIS' },
+
+  { id: 'market',     label: 'Market Data',    icon: '⊕', section: 'MARKETS' },
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
-  { id: 'news',       label: 'Market News',     icon: '≡' },
-  { id: 'holdings',   label: 'ETF Holdings',    icon: '⊞', section: 'PORTFOLIO' },
-  { id: 'portfolio',  label: 'Portfolio',        icon: '◫' },
-  { id: 'claude-usage', label: 'Claude API Usage', icon: '📊', section: 'SYSTEM' },
+  { id: 'news',       label: 'Market News',    icon: '≡' },
+
+  { id: 'intraday',   label: 'Intraday Intel', icon: '⚡', section: 'TRADING' },
+  { id: 'ml-intraday', label: 'ML Intraday',    icon: '🎯' },
+
+  { id: 'stocks',     label: 'Equity Swing',   icon: '↗', section: 'PORTFOLIOS' },
+  { id: 'niftybees',  label: 'NiftyBees ETF',  icon: '⬡' },
+  { id: 'holdings',   label: 'ETF Holdings',   icon: '⊞' },
+  { id: 'portfolio',  label: 'Positions',      icon: '◫' },
+
+  { id: 'conviction', label: 'Analysis',       icon: '⊛', section: 'ANALYSIS' },
 ];
 
 const bottomNavItems: NavItem[] = [
@@ -40,8 +41,8 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
   return (
     <aside
       style={{
-        width: 56,
-        minWidth: 56,
+        width: 220,
+        minWidth: 220,
         display: 'flex',
         flexDirection: 'column',
         background: 'rgba(2,6,18,0.85)',
@@ -53,7 +54,7 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
       {/* Top accent line */}
       <div style={{ height: 2, background: 'linear-gradient(90deg, transparent, rgba(0,229,255,0.6), transparent)' }} />
 
-      <nav style={{ flex: 1, paddingTop: 8, paddingBottom: 8 }}>
+      <nav style={{ flex: 1, paddingTop: 8, paddingBottom: 8, overflowY: 'auto' }}>
         {navItems.map((item) => {
           const showDivider = item.section && item.section !== lastSection;
           lastSection = item.section ?? lastSection;
@@ -62,60 +63,70 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
           return (
             <React.Fragment key={item.id}>
               {showDivider && (
-                <div style={{ margin: '8px 8px', height: 1, background: 'rgba(0,229,255,0.08)' }} />
+                <div style={{
+                  margin: '12px 12px 8px',
+                  fontSize: 10,
+                  letterSpacing: '0.15em',
+                  color: 'rgba(0,229,255,0.35)',
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                }}>
+                  {item.section}
+                </div>
               )}
-              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-                <button
-                  onClick={() => onNavigate(item.id)}
-                  title={item.label}
-                  style={{
-                    width: 40,
-                    height: 40,
-                    margin: '2px 0',
-                    borderRadius: 8,
-                    border: isActive ? '1px solid rgba(0,229,255,0.35)' : '1px solid transparent',
-                    background: isActive ? 'rgba(0,229,255,0.12)' : 'transparent',
-                    color: isActive ? '#00e5ff' : 'rgba(160,196,224,0.45)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 18,
-                    fontFamily: 'monospace',
-                    fontWeight: isActive ? 900 : 400,
-                    transition: 'all 0.2s',
-                    position: 'relative',
-                    boxShadow: isActive ? '0 0 12px rgba(0,229,255,0.2)' : 'none',
-                  }}
-                  onMouseEnter={e => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,229,255,0.06)';
-                      (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,229,255,0.75)';
-                    }
-                  }}
-                  onMouseLeave={e => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                      (e.currentTarget as HTMLButtonElement).style.color = 'rgba(160,196,224,0.45)';
-                    }
-                  }}
-                >
-                  {item.icon}
-                  {/* Active left-bar indicator */}
-                  {isActive && (
-                    <div style={{
-                      position: 'absolute',
-                      left: -9,
-                      top: '20%',
-                      width: 2,
-                      height: '60%',
-                      background: '#00e5ff',
-                      borderRadius: 1,
-                      boxShadow: '0 0 6px #00e5ff',
-                    }} />
-                  )}
-                </button>
-              </div>
+              <button
+                onClick={() => onNavigate(item.id)}
+                title={item.label}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  marginBottom: 2,
+                  borderRadius: 8,
+                  border: isActive ? '1px solid rgba(0,229,255,0.35)' : '1px solid transparent',
+                  background: isActive ? 'rgba(0,229,255,0.12)' : 'transparent',
+                  color: isActive ? '#00e5ff' : 'rgba(160,196,224,0.45)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  fontWeight: isActive ? 700 : 400,
+                  transition: 'all 0.2s',
+                  position: 'relative',
+                  boxShadow: isActive ? '0 0 12px rgba(0,229,255,0.2)' : 'none',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,229,255,0.06)';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,229,255,0.75)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'rgba(160,196,224,0.45)';
+                  }
+                }}
+              >
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{item.icon}</span>
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {/* Active right-bar indicator */}
+                {isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: '20%',
+                    width: 2,
+                    height: '60%',
+                    background: '#00e5ff',
+                    borderRadius: 1,
+                    boxShadow: '0 0 6px #00e5ff',
+                  }} />
+                )}
+              </button>
             </React.Fragment>
           );
         })}

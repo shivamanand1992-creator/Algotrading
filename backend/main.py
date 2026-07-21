@@ -34,10 +34,7 @@ from backend.api.routes import jarvis_voice
 from backend.api.routes import portfolio as portfolio_routes
 from backend.api.routes import conviction as conviction_routes
 from backend.api.routes import support_resistance as sr_routes
-from backend.api.routes import hermes as hermes_routes
 from backend.api.routes import version as version_routes
-from backend.api.routes import claude_usage
-from backend.api.routes import athena as athena_routes
 from backend.api.routes import ml_intraday as ml_intraday_routes
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
@@ -838,7 +835,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_swing_monitor_loop())
     asyncio.create_task(_swing_intraday_sl_loop())
     asyncio.create_task(_niftybees_monitor_loop())
-    asyncio.create_task(_hermes_intraday_loop())
+    # asyncio.create_task(_hermes_intraday_loop())  # ARCHIVED: Hermes AI loop
     asyncio.create_task(_ml_intraday_loop())
     asyncio.create_task(_nifty_ml_loop())
     asyncio.create_task(_etf_holdings_monitor_loop())
@@ -889,11 +886,11 @@ app.include_router(jarvis_voice.router)
 app.include_router(portfolio_routes.router)
 app.include_router(conviction_routes.router)
 app.include_router(sr_routes.router)
-app.include_router(hermes_routes.router)
-app.include_router(athena_routes.router)
+# app.include_router(hermes_routes.router)  # ARCHIVED: Hermes AI agent
+# app.include_router(athena_routes.router)  # ARCHIVED: Athena Options agent
 app.include_router(ml_intraday_routes.router)
 app.include_router(version_routes.router)
-app.include_router(claude_usage.router)
+# app.include_router(claude_usage.router)  # REMOVED: Claude API usage tracking
 # app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
 
 
