@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../../api/client';
 import './MLIntradayDashboard.css';
 
 const MLIntradayDashboard = () => {
@@ -31,7 +31,7 @@ const MLIntradayDashboard = () => {
 
   const fetchSystemStatus = async () => {
     try {
-      const response = await axios.get('/api/ml-intraday/status');
+      const response = await api.get('/api/ml-intraday/status');
       setSystemStatus(response.data);
     } catch (error) {
       console.error('Failed to fetch ML system status:', error);
@@ -40,21 +40,21 @@ const MLIntradayDashboard = () => {
 
   const fetchTopStocks = async () => {
     try {
-      const response = await axios.get('/api/ml-intraday/top-stocks');
+      const response = await api.get('/api/ml-intraday/top-stocks');
       setTopStocks(response.data.stocks || []);
       setSignals(response.data.signals || []);
     } catch (error) {
       console.error('Failed to fetch top stocks:', error);
     }
     try {
-      const pt = await axios.get('/api/ml-intraday/paper-trades');
+      const pt = await api.get('/api/ml-intraday/paper-trades');
       setPaperTrades(pt.data);
     } catch (e) { /* noop */ }
   };
 
   const fetchNiftyStatus = async () => {
     try {
-      const res = await axios.get('/api/ml-intraday/nifty-status');
+      const res = await api.get('/api/ml-intraday/nifty-status');
       setNiftyStatus(res.data);
     } catch (e) { /* noop */ }
   };
@@ -68,7 +68,7 @@ const MLIntradayDashboard = () => {
   const niftyAction = async (endpoint, body, label) => {
     setNiftyMsg(`${label}...`);
     try {
-      const res = await axios.post(`/api/ml-intraday/${endpoint}`, body || {});
+      const res = await api.post(`/api/ml-intraday/${endpoint}`, body || {});
       setNiftyMsg(res.data.message || JSON.stringify(res.data));
       setTimeout(fetchNiftyStatus, 1500);
     } catch (error) {
@@ -79,7 +79,7 @@ const MLIntradayDashboard = () => {
   const triggerAction = async (endpoint, label) => {
     setActionMsg(`${label}...`);
     try {
-      const res = await axios.post(`/api/ml-intraday/${endpoint}`);
+      const res = await api.post(`/api/ml-intraday/${endpoint}`);
       setActionMsg(res.data.message || res.data.status || `${label} done`);
       setTimeout(fetchSystemStatus, 2000);
     } catch (error) {
@@ -91,7 +91,7 @@ const MLIntradayDashboard = () => {
     setLoading(true);
     setSelectedSignal(signal);
     try {
-      const response = await axios.post('/api/ml-intraday/explain', {
+      const response = await api.post('/api/ml-intraday/explain', {
         symbol: signal.symbol,
         score: signal.score,
         features: signal.features
