@@ -729,20 +729,17 @@ def get_nifty_spot_price(client: 'AngelOneClient') -> float:
 
 def get_banknifty_spot_price(client: 'AngelOneClient') -> float:
     """Get current BANK NIFTY spot price"""
-    token = client.search_scrip("NSE", "NIFTY BANK")
-    if not token:
-        raise RuntimeError("Could not find BANKNIFTY token")
-    return client.get_ltp("NSE", "NIFTY BANK", token)
+    # Bank Nifty has a fixed token in Angel One
+    token = "99926000"  # NSE BANKNIFTY index token
+    return client.get_ltp("NSE", "Nifty Bank", token)
 
 
 def get_india_vix(client: 'AngelOneClient') -> float:
     """Get current India VIX value"""
     try:
-        token = client.search_scrip("NSE", "INDIA VIX")
-        if not token:
-            logger.warning("Could not find India VIX token, using default 16.0")
-            return 16.0
-        return client.get_ltp("NSE", "INDIA VIX", token)
+        # India VIX has a fixed token in Angel One
+        token = "26017"  # NSE INDIA VIX index token
+        return client.get_ltp("NSE", "India VIX", token)
     except Exception as e:
         logger.warning(f"Failed to fetch India VIX: {e}, using default 16.0")
         return 16.0
