@@ -294,8 +294,8 @@ class HermesIntradayService:
                 )
 
                 if cache_expired:
-                    # Fetch fresh historical data
-                    from_date = (now - pd.Timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+                    # Fetch fresh historical data (2 days to get previous day's high/low)
+                    from_date = (now - pd.Timedelta(days=2)).strftime("%Y-%m-%d %H:%M")
                     to_date = now.strftime("%Y-%m-%d %H:%M")
 
                     df = self.angel_client.get_historical_data(
@@ -315,6 +315,19 @@ class HermesIntradayService:
                     df = self._cached_historical_data
                     logger.debug(f"[Hermes] Using cached historical data ({len(df)} candles)")
 
+                # Get PREVIOUS DAY's high/low for breakout detection
+                # Filter to previous trading day (not today)
+                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                prev_day_candles = df[df.index < today_start]
+
+                if len(prev_day_candles) > 0:
+                    prev_high = prev_day_candles["high"].max()
+                    prev_low = prev_day_candles["low"].min()
+                else:
+                    # Fallback to quote if no historical data
+                    prev_high = quote["high"]
+                    prev_low = quote["low"]
+
                 # Calculate indicators
                 rsi = self._calculate_rsi(df) if len(df) >= 14 else 50.0
                 macd = self._calculate_macd(df) if len(df) >= 26 else 0.0
@@ -324,8 +337,8 @@ class HermesIntradayService:
                 return {
                     "symbol": self.instrument,
                     "price": quote["ltp"],
-                    "prev_high": quote["high"],
-                    "prev_low": quote["low"],
+                    "prev_high": prev_high,
+                    "prev_low": prev_low,
                     "day_open": quote["open"],
                     "rsi": rsi,
                     "macd": macd,
