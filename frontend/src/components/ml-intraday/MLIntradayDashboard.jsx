@@ -11,6 +11,9 @@ const MLIntradayDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [paperTrades, setPaperTrades] = useState(null);
   const [actionMsg, setActionMsg] = useState(null);
+  const [niftyStatus, setNiftyStatus] = useState(null);
+  const [niftyMsg, setNiftyMsg] = useState(null);
+  const [capital, setCapital] = useState(100000);
 
   // Fetch system status
   useEffect(() => {
@@ -47,6 +50,30 @@ const MLIntradayDashboard = () => {
       const pt = await axios.get('/api/ml-intraday/paper-trades');
       setPaperTrades(pt.data);
     } catch (e) { /* noop */ }
+  };
+
+  const fetchNiftyStatus = async () => {
+    try {
+      const res = await axios.get('/api/ml-intraday/nifty-status');
+      setNiftyStatus(res.data);
+    } catch (e) { /* noop */ }
+  };
+
+  useEffect(() => {
+    fetchNiftyStatus();
+    const interval = setInterval(fetchNiftyStatus, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const niftyAction = async (endpoint, body, label) => {
+    setNiftyMsg(`${label}...`);
+    try {
+      const res = await axios.post(`/api/ml-intraday/${endpoint}`, body || {});
+      setNiftyMsg(res.data.message || JSON.stringify(res.data));
+      setTimeout(fetchNiftyStatus, 1500);
+    } catch (error) {
+      setNiftyMsg(`${label} failed: ${error.response?.data?.detail || error.message}`);
+    }
   };
 
   const triggerAction = async (endpoint, label) => {
@@ -121,6 +148,122 @@ const MLIntradayDashboard = () => {
       </div>
 
       <div className="ml-content">
+        {/* NIFTY ML Auto-Trader — trained on 11 years of data */}
+        <div className="ml-card" style={{ borderColor: 'rgba(0,230,118,0.25)' }}>
+          <div className="card-header">
+            <h2>🎯 NIFTY Auto-Trader</h2>
+            {niftyStatus && (
+              <span className={`status-badge ${niftyStatus.enabled ? 'active' : 'inactive'}`}
+                style={{ padding: '0.4rem 1rem', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700 }}>
+                {niftyStatus.enabled ? `ACTIVE — ${niftyStatus.mode?.toUpperCase()}` : 'DISABLED'}
+              </span>
+            )}
+          </div>
+
+          {niftyStatus && (
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <div className="athena-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="stat-item">
+                  <span className="stat-label" style={{ fontSize: '0.7rem', color: 'var(--jarvis-text-secondary)', textTransform: 'uppercase' }}>Model</span>
+                  <span style={{ fontFamily: 'monospace', color: niftyStatus.model_loaded ? '#00e676' : '#ff1744' }}>
+                    {niftyStatus.model_loaded ? (niftyStatus.model_version || 'loaded') : 'NOT TRAINED'}
+                  </span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label" style={{ fontSize: '0.7rem', color: 'var(--jarvis-text-secondary)', textTransform: 'uppercase' }}>Test Win Rate</span>
+                  <span style={{ fontFamily: 'monospace', color: 'var(--jarvis-text-primary)' }}>
+                    {niftyStatus.test_report ? `${(niftyStatus.test_report.win_rate * 100).toFixed(0)}% (${niftyStatus.test_report.trades} trades)` : '—'}
+                  </span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label" style={{ fontSize: '0.7rem', color: 'var(--jarvis-text-secondary)', textTransform: 'uppercase' }}>Expectancy (after cost)</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: (niftyStatus.test_report?.expectancy_after_cost ?? 0) > 0 ? '#00e676' : '#ff1744' }}>
+                    {niftyStatus.test_report ? `${niftyStatus.test_report.expectancy_after_cost > 0 ? '+' : ''}${niftyStatus.test_report.expectancy_after_cost}%/trade` : '—'}
+                  </span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label" style={{ fontSize: '0.7rem', color: 'var(--jarvis-text-secondary)', textTransform: 'uppercase' }}>Live P(now)</span>
+                  <span style={{ fontFamily: 'monospace', color: 'var(--jarvis-primary)' }}>
+                    {niftyStatus.last_proba != null ? `${(niftyStatus.last_proba * 100).toFixed(1)}% @ ${niftyStatus.last_update}` : '—'}
+                  </span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label" style={{ fontSize: '0.7rem', color: 'var(--jarvis-text-secondary)', textTransform: 'uppercase' }}>Session P&L</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: (niftyStatus.total_pnl_rs ?? 0) >= 0 ? '#00e676' : '#ff1744' }}>
+                    ₹{niftyStatus.total_pnl_rs ?? 0} ({niftyStatus.trades_today ?? 0} trades)
+                  </span>
+                </div>
+              </div>
+
+              <p style={{ color: 'var(--jarvis-text-secondary)', fontSize: '0.8rem', marginBottom: '1rem' }}>
+                Strategy: BUY NIFTYBEES when P ≥ {niftyStatus.threshold} | Target +0.8% / SL −0.4% |
+                Entries 09:30–13:00 | Max hold 3.5h | Square-off 15:10
+              </p>
+
+              {niftyStatus.position && (
+                <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,230,118,0.08)', border: '1px solid rgba(0,230,118,0.3)', borderRadius: 8, marginBottom: '1rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                  OPEN [{niftyStatus.position.mode?.toUpperCase()}]: NIFTYBEES ×{niftyStatus.position.qty} @ ₹{niftyStatus.position.entry_bees} |
+                  NIFTY {niftyStatus.position.entry_nifty} → T {niftyStatus.position.target_nifty} / SL {niftyStatus.position.sl_nifty} |
+                  P={niftyStatus.position.probability}%
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button className="btn-explain" onClick={() => niftyAction('train-nifty', null, 'Training on 11yr data')}>
+                  Train Model
+                </button>
+                <input
+                  type="number" value={capital} step={10000} min={10000}
+                  onChange={(e) => setCapital(Number(e.target.value))}
+                  style={{ width: 110, padding: '0.45rem 0.6rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,229,255,0.25)', borderRadius: 6, color: 'var(--jarvis-text-primary)', fontFamily: 'monospace' }}
+                />
+                <button className="btn-explain" onClick={() => niftyAction('nifty-enable', { mode: 'paper', capital }, 'Enabling paper mode')}>
+                  ▶ Paper Trade
+                </button>
+                <button
+                  className="btn-explain"
+                  style={{ background: 'linear-gradient(135deg, #ff1744, #f50057)', color: '#fff', opacity: niftyStatus.tradeable ? 1 : 0.4 }}
+                  disabled={!niftyStatus.tradeable}
+                  onClick={() => {
+                    if (window.confirm(`⚠️ LIVE MODE: real orders on Angel One with ₹${capital.toLocaleString()} per trade. Confirm?`)) {
+                      niftyAction('nifty-enable', { mode: 'live', capital }, 'Enabling LIVE mode');
+                    }
+                  }}>
+                  🔴 GO LIVE
+                </button>
+                <button className="btn-close" style={{ fontSize: '0.75rem', padding: '0.5rem 1rem' }}
+                  onClick={() => niftyAction('nifty-disable', null, 'Disabling')}>
+                  ⏹ Stop
+                </button>
+              </div>
+              {niftyMsg && <p style={{ marginTop: '0.75rem', color: 'var(--jarvis-text-secondary)', fontSize: '0.85rem' }}>{niftyMsg}</p>}
+
+              {niftyStatus.trades_closed?.length > 0 && (
+                <div className="signals-table-container" style={{ marginTop: '1rem' }}>
+                  <table className="signals-table">
+                    <thead>
+                      <tr><th>Mode</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&L %</th><th>P&L ₹</th><th>Reason</th></tr>
+                    </thead>
+                    <tbody>
+                      {niftyStatus.trades_closed.map((t, i) => (
+                        <tr key={i}>
+                          <td><span className="rr-badge">{t.mode}</span></td>
+                          <td>{t.qty}</td>
+                          <td className="price-cell">₹{t.entry_bees}</td>
+                          <td className="price-cell">₹{t.exit_bees}</td>
+                          <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct}%</td>
+                          <td className={t.pnl_rs >= 0 ? 'positive' : 'negative'}>₹{t.pnl_rs}</td>
+                          <td className="time-cell">{t.exit_reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Setup Controls */}
         <div className="ml-card">
           <div className="card-header">

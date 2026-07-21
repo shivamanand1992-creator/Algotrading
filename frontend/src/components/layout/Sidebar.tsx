@@ -10,7 +10,8 @@ interface NavItem {
 // Navigation items - Claude Usage moved to bottom
 const navItems: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: '◈' },
-  { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡', section: 'TRADING' },
+  { id: 'ml-intraday', label: 'ML Intraday',    icon: '🎯', section: 'TRADING' },
+  { id: 'intraday',   label: 'Intraday Intel',  icon: '⚡' },
   { id: 'hermes',     label: 'Hermes Control', icon: '🤖' },
   { id: 'hermes-monitor', label: 'Hermes Monitor', icon: '👁️' },
   { id: 'athena',     label: 'Athena Options', icon: '🏛️' },

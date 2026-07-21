@@ -131,6 +131,90 @@ async def get_backtest_results():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# NIFTY ML TRADER (trained on 11 years of uploaded multi-timeframe data)
+# ============================================================================
+
+class NiftyEnableRequest(BaseModel):
+    mode: str = "paper"          # "paper" | "live"
+    capital: int = 100000        # ₹ per trade
+
+
+def get_nifty_trader():
+    from backend.ml.nifty_trader import NiftyMLTrader
+    return NiftyMLTrader.get_instance()
+
+
+@router.post("/train-nifty")
+async def train_nifty(background_tasks: BackgroundTasks):
+    """Auto-train the NIFTY model on the shipped 11-year dataset (background, ~2 min)."""
+    def _train():
+        from backend.ml.nifty_model import train
+        try:
+            meta = train()
+            get_nifty_trader().reload_model()
+            logger.info(f"[ML API] NIFTY training done: {meta['model_version']}, "
+                        f"test after-cost expectancy={meta['test_report']['expectancy_after_cost']}%")
+        except Exception as e:
+            logger.error(f"[ML API] NIFTY training failed: {e}")
+
+    background_tasks.add_task(_train)
+    return {"status": "started",
+            "message": "Training NIFTY model on 11 years of data (~2 min). Watch /nifty-status."}
+
+
+@router.get("/nifty-status")
+async def nifty_status():
+    """NIFTY trader status: model, mode, position, trades, backtest reports."""
+    try:
+        return get_nifty_trader().get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-enable")
+async def nifty_enable(req: NiftyEnableRequest):
+    """Enable the NIFTY auto-trader. Live mode requires positive after-cost test expectancy."""
+    try:
+        trader = get_nifty_trader()
+        if trader.booster is None:
+            raise HTTPException(status_code=400, detail="No model. POST /train-nifty first.")
+        if req.mode == "live" and not trader.tradeable:
+            raise HTTPException(
+                status_code=400,
+                detail="LIVE blocked: model's out-of-sample after-cost expectancy is not positive.")
+        trader.mode = "live" if req.mode == "live" else "paper"
+        trader.capital = max(10000, min(req.capital, 1000000))
+        trader.enabled = True
+        logger.info(f"[ML API] NIFTY trader ENABLED mode={trader.mode} capital=₹{trader.capital}")
+        return {"status": "enabled", "mode": trader.mode, "capital": trader.capital}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-disable")
+async def nifty_disable():
+    """Disable the NIFTY trader and square off any open position."""
+    try:
+        trader = get_nifty_trader()
+        trader.enabled = False
+        await trader.force_exit()
+        return {"status": "disabled"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-cycle")
+async def nifty_cycle():
+    """Manually trigger one NIFTY scoring/trading cycle (for testing)."""
+    try:
+        return await get_nifty_trader().run_cycle()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/explain")
 async def explain_signal(request: ExplanationRequest):
     """Claude explains WHY the ML model scored a stock high. Explanation only — no prediction."""

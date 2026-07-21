@@ -840,6 +840,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_niftybees_monitor_loop())
     asyncio.create_task(_hermes_intraday_loop())
     asyncio.create_task(_ml_intraday_loop())
+    asyncio.create_task(_nifty_ml_loop())
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
@@ -1065,6 +1066,43 @@ async def _hermes_intraday_loop() -> None:
                 "status": "error"
             })
             await asyncio.sleep(60)
+
+
+async def _nifty_ml_loop() -> None:
+    """Background task: NIFTY ML auto-trader every 5 minutes during market hours"""
+    from backend.ml.nifty_trader import NiftyMLTrader
+
+    await asyncio.sleep(25)  # Wait for startup + angel connection
+
+    trader = NiftyMLTrader.get_instance()
+    logger.info("[NiftyMLLoop] Starting NIFTY ML trader loop (5-min cycle)")
+
+    while True:
+        try:
+            now = datetime.now(_IST)
+            in_hours = now.weekday() < 5 and "09:30" <= now.strftime("%H:%M") <= "15:15"
+
+            if trader.enabled and trader.booster is not None and in_hours:
+                result = await trader.run_cycle()
+                logger.debug(f"[NiftyMLLoop] Cycle: {result.get('status')} proba={result.get('proba')}")
+
+                await ws_manager.broadcast({
+                    "type": "nifty_ml_update",
+                    "status": result.get("status"),
+                    "proba": result.get("proba"),
+                    "position": trader.position,
+                    "last_update": trader.last_update,
+                })
+                await asyncio.sleep(300)  # 5 minutes
+            elif trader.enabled and trader.position and now.strftime("%H:%M") > "15:15":
+                await trader.force_exit()
+                await asyncio.sleep(300)
+            else:
+                await asyncio.sleep(60)
+
+        except Exception as e:
+            logger.error(f"[NiftyMLLoop] Error: {e}")
+            await asyncio.sleep(300)
 
 
 async def _ml_intraday_loop() -> None:
