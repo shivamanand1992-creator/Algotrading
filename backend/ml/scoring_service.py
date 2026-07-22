@@ -85,9 +85,6 @@ class MLScoringService:
 
     async def run_cycle(self) -> Dict:
         """One scoring cycle. Called every 5 min by the scheduler."""
-        if self.model is None:
-            return {"status": "no_model"}
-
         now = datetime.now(_IST)
         if not self._is_market_hours(now):
             # Manage EOD: close all paper positions at 15:15
@@ -96,7 +93,12 @@ class MLScoringService:
             return {"status": "market_closed"}
 
         try:
-            scores, signals = await asyncio.to_thread(self._score_universe)
+            # If no model, use quick technical analysis fallback
+            if self.model is None:
+                scores, signals = await asyncio.to_thread(self._quick_technical_score)
+            else:
+                scores, signals = await asyncio.to_thread(self._score_universe)
+
             self.latest_scores = scores
             self.last_update = now.strftime("%H:%M:%S")
 
@@ -121,6 +123,116 @@ class MLScoringService:
         except Exception as e:
             logger.error(f"[MLScore] Cycle failed: {e}")
             return {"status": "error", "error": str(e)}
+
+    def _quick_technical_score(self):
+        """Fast technical analysis fallback when model is not trained.
+        Scores NIFTY50 stocks based on price action without requiring historical data."""
+        from backend.dependencies import get_angel_client
+        from data.angel_client import AngelOneClient
+
+        client = get_angel_client()
+        scores, signals = [], []
+
+        # NIFTY50 stocks for quick technical analysis
+        stocks = [
+            'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'BAJFINANCE',
+            'INFY', 'TCS', 'KOTAKBANK', 'AXISBANK', 'ITC',
+            'LT', 'SUNPHARMA', 'ASIANPAINT', 'MARUTI', 'NESTLEIND',
+            'BHARTIARTL', 'HINDALCO', 'BPCL', 'JSWSTEEL', 'TECHM'
+        ]
+
+        for symbol in stocks:
+            try:
+                # Get LTP and basic data
+                token = client.search_scrip("NSE", symbol)
+                if not token:
+                    continue
+
+                ltp_resp = client.get_ltp("NSE", token)
+                if not ltp_resp or "ltp" not in ltp_resp:
+                    continue
+
+                ltp = float(ltp_resp.get("ltp", 0))
+                if ltp <= 0:
+                    continue
+
+                # Get recent 15 candles for trend detection
+                import time as time_module
+                now = datetime.now(_IST)
+                frm = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+                to = now.strftime("%Y-%m-%d %H:%M")
+
+                df = client.get_historical_data("NSE", token, "FIVE_MINUTE", frm, to)
+                if df is None or len(df) < 3:
+                    continue
+
+                df = df.tail(12)  # Last 12 candles = ~1 hour
+                closes = df["close"].values
+                highs = df["high"].values
+                lows = df["low"].values
+                volumes = df["volume"].values
+
+                # Technical indicators (no training needed)
+                trend = "up" if closes[-1] > closes[0] else "down"
+                range_pct = (highs.max() - lows.min()) / lows.min() * 100
+                volume_trend = volumes[-1] > volumes[:-1].mean()
+                breakout = closes[-1] > highs[:-1].max()
+
+                # Simple scoring
+                score = 50
+                if trend == "up":
+                    score += 15
+                if volume_trend:
+                    score += 15
+                if breakout:
+                    score += 20
+                if range_pct > 1.5:
+                    score += 10
+
+                score = int(min(100, score))
+
+                entry = {
+                    "symbol": symbol,
+                    "score": score,
+                    "price": ltp,
+                    "probability": float(score),
+                    "features": {
+                        "trend": 75 if trend == "up" else 25,
+                        "breakout": 90 if breakout else 40,
+                        "volume": 80 if volume_trend else 50,
+                        "volatility": int(min(100, range_pct * 10))
+                    },
+                    "timestamp": datetime.now(_IST).isoformat(),
+                }
+                scores.append(entry)
+
+                # Generate signals for high-scoring stocks
+                if score >= 75 and trend == "up" and volume_trend:
+                    atr = (highs.max() - lows.min()) / 2
+                    sl = round(lows.min() - atr * 0.5, 2)
+                    target = round(ltp + (ltp - sl) * 1.5, 2)
+                    risk = ltp - sl
+                    reward = target - ltp
+                    rr = round(reward / risk, 2) if risk > 0 else 0
+
+                    if rr >= 1.5:
+                        signals.append({
+                            **entry,
+                            "entry": ltp,
+                            "stop_loss": sl,
+                            "target": target,
+                            "reward_risk": rr,
+                            "hold_time": 60,
+                        })
+
+                time_module.sleep(1.2)  # Rate limiting
+
+            except Exception as e:
+                logger.debug(f"[MLScore] {symbol} technical score failed: {e}")
+                continue
+
+        scores.sort(key=lambda s: -s["score"])
+        return scores[:15], signals
 
     def _score_universe(self):
         """Fetch recent candles from DB + live quote, score every stock."""
