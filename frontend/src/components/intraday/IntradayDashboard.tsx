@@ -19,7 +19,8 @@ export function IntradayDashboard() {
 
   useEffect(() => {
     fetchIntradaySignals();
-    const interval = setInterval(fetchIntradaySignals, 60000); // Refresh every minute
+    // Refresh every 5 seconds during trading hours to catch signals quickly
+    const interval = setInterval(fetchIntradaySignals, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -37,7 +38,20 @@ export function IntradayDashboard() {
   };
 
   const getSignalColor = (type: string) => {
-    return type === 'BUY' ? '#00e676' : '#ff5252';
+    if (type === 'BUY' || type === 'SUPPORT_BOUNCE') return '#00e676';
+    if (type === 'RESISTANCE_BREAKOUT') return '#00bcd4';
+    if (type === 'SELL') return '#ff5252';
+    return '#ffb300';
+  };
+
+  const getSignalLabel = (type: string) => {
+    const labels: { [key: string]: string } = {
+      'BUY': 'BUY',
+      'SELL': 'SELL',
+      'SUPPORT_BOUNCE': 'SUPPORT 🔼',
+      'RESISTANCE_BREAKOUT': 'BREAKOUT 📈',
+    };
+    return labels[type] || type;
   };
 
   const getConfidenceColor = (confidence: number) => {
@@ -110,44 +124,75 @@ export function IntradayDashboard() {
           </p>
         </Card>
       ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-          gap: 20,
-        }}>
-          {signals.map((signal, idx) => (
-            <Card
-              key={`${signal.symbol}-${idx}`}
-              title={signal.symbol}
-              className="border-l-2"
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Signal Type */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: '0.1em',
-                      color: 'rgba(160,196,224,0.5)',
-                      fontFamily: 'monospace',
-                    }}
-                  >
-                    SIGNAL
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 900,
-                      color: getSignalColor(signal.signal_type),
-                      fontFamily: "'Courier New', monospace",
-                      letterSpacing: '0.15em',
-                      textShadow: `0 0 10px ${getSignalColor(signal.signal_type)}80`,
-                    }}
-                  >
-                    {signal.signal_type}
-                  </span>
-                </div>
+        <>
+          {/* Signal Summary */}
+          <div style={{
+            padding: '1rem',
+            background: 'rgba(0, 188, 212, 0.08)',
+            border: '1px solid rgba(0, 188, 212, 0.3)',
+            borderRadius: 8,
+            marginBottom: '2rem',
+            fontSize: '0.85rem',
+          }}>
+            <span style={{ color: '#00bcd4', fontWeight: 600 }}>📊 Active Signals: </span>
+            <span style={{ color: 'rgba(255,255,255,0.7)' }}>
+              {signals.length} intraday trading opportunities
+              {signals.length > 0 && ` • Highest confidence: ${Math.round(Math.max(...signals.map(s => s.confidence || 0)) * 100)}%`}
+            </span>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: 20,
+          }}>
+            {signals.map((signal, idx) => (
+              <Card
+                key={`${signal.symbol}-${idx}`}
+                title={signal.symbol}
+                className="border-l-2"
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Signal Type & Source */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: '0.1em',
+                          color: 'rgba(160,196,224,0.5)',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        SIGNAL
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 900,
+                          color: getSignalColor(signal.signal_type),
+                          fontFamily: "'Courier New', monospace",
+                          letterSpacing: '0.15em',
+                          textShadow: `0 0 10px ${getSignalColor(signal.signal_type)}80`,
+                        }}
+                      >
+                        {getSignalLabel(signal.signal_type)}
+                      </span>
+                    </div>
+                    {signal.source && (
+                      <div style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        background: 'rgba(0, 188, 212, 0.2)',
+                        border: '1px solid rgba(0, 188, 212, 0.4)',
+                        borderRadius: 4,
+                        color: '#00bcd4',
+                      }}>
+                        {signal.source}
+                      </div>
+                    )}
+                  </div>
 
                 {/* Confidence */}
                 <div>
@@ -271,9 +316,10 @@ export function IntradayDashboard() {
                   {new Date(signal.timestamp).toLocaleString()}
                 </div>
               </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
