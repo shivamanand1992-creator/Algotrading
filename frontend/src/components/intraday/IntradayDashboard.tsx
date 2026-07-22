@@ -10,6 +10,9 @@ interface IntradaySignal {
   target: number;
   stop_loss: number;
   timestamp: string;
+  source?: string;
+  score?: number;
+  reward_risk?: number;
 }
 
 export function IntradayDashboard() {
