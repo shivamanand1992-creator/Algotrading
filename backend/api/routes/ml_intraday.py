@@ -63,18 +63,28 @@ async def get_paper_trades():
 
 
 @router.post("/run-cycle")
-async def trigger_cycle():
-    """Manually trigger a scoring cycle (normally runs on 5-min scheduler)."""
+async def trigger_cycle(background_tasks: BackgroundTasks):
+    """Manually trigger a scoring cycle using cached candles (fast path)."""
     try:
         svc = get_service()
-        # Skip candle update if last update was < 2 min ago (use cached data)
-        import time as time_module
-        now = time_module.time()
-        if not hasattr(svc, '_last_candle_update'):
-            svc._last_candle_update = 0
-        if now - svc._last_candle_update > 120:  # 2 minutes
-            await svc.update_live_candles()
-            svc._last_candle_update = now
+
+        # Schedule candle refresh in background (non-blocking)
+        def refresh_candles_async():
+            import asyncio
+            import time as time_module
+            try:
+                now = time_module.time()
+                if not hasattr(svc, '_last_candle_update'):
+                    svc._last_candle_update = 0
+                if now - svc._last_candle_update > 120:  # 2 minutes
+                    asyncio.run(svc.update_live_candles())
+                    svc._last_candle_update = now
+            except Exception as e:
+                logger.warning(f"[ML API] Background candle refresh failed: {e}")
+
+        background_tasks.add_task(refresh_candles_async)
+
+        # Scoring cycle uses cached data from DB - fast, non-blocking
         result = await svc.run_cycle()
         return result
     except Exception as e:
