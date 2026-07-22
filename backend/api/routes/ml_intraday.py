@@ -67,7 +67,14 @@ async def trigger_cycle():
     """Manually trigger a scoring cycle (normally runs on 5-min scheduler)."""
     try:
         svc = get_service()
-        await svc.update_live_candles()
+        # Skip candle update if last update was < 2 min ago (use cached data)
+        import time as time_module
+        now = time_module.time()
+        if not hasattr(svc, '_last_candle_update'):
+            svc._last_candle_update = 0
+        if now - svc._last_candle_update > 120:  # 2 minutes
+            await svc.update_live_candles()
+            svc._last_candle_update = now
         result = await svc.run_cycle()
         return result
     except Exception as e:
