@@ -48,12 +48,16 @@ def _retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     """Decorator that retries a method on exception with exponential backoff."""
     def decorator(func):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(self, *args, **kwargs):
+            # Enforce rate limiting before making any request
+            if hasattr(self, '_enforce_rate_limit'):
+                self._enforce_rate_limit()
+
             attempt = 0
             wait = delay
             while attempt < max_attempts:
                 try:
-                    return func(*args, **kwargs)
+                    return func(self, *args, **kwargs)
                 except Exception as exc:
                     attempt += 1
                     if attempt >= max_attempts:
@@ -85,9 +89,11 @@ class AngelOneClient:
 
     Session tokens are auto-refreshed every 6 hours in a background thread.
     All public methods are wrapped with 3-attempt retry logic.
+    Rate limiting: enforces 1.0s minimum interval between API calls.
     """
 
     _SESSION_REFRESH_INTERVAL_HOURS: int = 6
+    _MIN_REQUEST_INTERVAL: float = 1.0  # Angel One rate limit: ~1 req/sec
 
     def __init__(self, config: dict = None) -> None:
         if config is None:
@@ -111,8 +117,22 @@ class AngelOneClient:
         # _refresh_session() without deadlocking on itself.
         self._session_lock      = threading.RLock()
         self._refresh_timer: threading.Timer | None = None
+        self._last_request_time: float = 0.0  # Rate limiter
 
         logger.info("AngelOneClient initialised (not yet connected).")
+
+    # ------------------------------------------------------------------
+    # Rate limiting
+    # ------------------------------------------------------------------
+
+    def _enforce_rate_limit(self) -> None:
+        """Enforce minimum interval between API requests to prevent Angel One rate limiting."""
+        now = time.time()
+        elapsed = now - self._last_request_time
+        if elapsed < self._MIN_REQUEST_INTERVAL:
+            sleep_time = self._MIN_REQUEST_INTERVAL - elapsed
+            time.sleep(sleep_time)
+        self._last_request_time = time.time()
 
     # ------------------------------------------------------------------
     # Authentication

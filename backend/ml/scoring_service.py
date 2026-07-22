@@ -29,8 +29,9 @@ from backend.ml.label_generator import TARGET_PCT, SL_PCT, HOLD_MINUTES
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-# Score only the most liquid subset live (rate limits: ~1 quote/symbol/cycle)
-LIVE_UNIVERSE = UNIVERSE[:25]
+# Score only the most liquid subset live (reduced to prevent Angel One rate limiting)
+# Angel One allows ~1 req/sec; 12 symbols @ 1.2s/symbol = ~14.4s per cycle
+LIVE_UNIVERSE = UNIVERSE[:12]
 
 
 class MLScoringService:
@@ -282,7 +283,7 @@ class MLScoringService:
         frm = (now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
         to = now.strftime("%Y-%m-%d %H:%M")
 
-        for symbol in LIVE_UNIVERSE:
+        for i, symbol in enumerate(LIVE_UNIVERSE):
             try:
                 token = client.search_scrip("NSE", symbol)
                 if not token:
@@ -295,7 +296,7 @@ class MLScoringService:
                     rows = df[["symbol", "timestamp", "open", "high", "low", "close", "volume"]].values.tolist()
                     conn.executemany("INSERT OR REPLACE INTO candles_5min VALUES (?,?,?,?,?,?,?)", rows)
                     conn.commit()
-                await asyncio.sleep(0.35)  # rate limit
+                await asyncio.sleep(1.2)  # Angel One rate limit: 1+ second between requests
             except Exception as e:
                 logger.debug(f"[MLScore] live candle update {symbol} failed: {e}")
 
