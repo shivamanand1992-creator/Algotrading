@@ -57,6 +57,21 @@ class MLScoringService:
         self.paper_pnl_pct = 0.0
         self.enabled = False
         self.mode = "paper"  # paper only until backtest proves expectancy
+
+        # Progress tracking for import/training
+        self.import_progress = {
+            "status": "idle",  # idle, importing, complete, failed
+            "message": "",
+            "progress_pct": 0,
+            "stocks_done": 0,
+            "total_stocks": 0,
+        }
+        self.training_progress = {
+            "status": "idle",  # idle, training, complete, failed
+            "message": "",
+            "progress_pct": 0,
+        }
+
         self._load_model()
 
     # ------------------------------------------------------------------ model

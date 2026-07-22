@@ -27,7 +27,12 @@ def get_service():
 async def get_system_status():
     """ML system status, model metadata, and paper-trading performance."""
     try:
-        return get_service().get_status()
+        svc = get_service()
+        status = svc.get_status()
+        # Add progress info
+        status["import_progress"] = svc.import_progress
+        status["training_progress"] = svc.training_progress
+        return status
     except Exception as e:
         logger.error(f"[ML API] status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -94,34 +99,99 @@ async def trigger_cycle(background_tasks: BackgroundTasks):
 
 @router.post("/import-data")
 async def trigger_import(background_tasks: BackgroundTasks, days: int = 30):
-    """Kick off historical data import in the background (~15-20 min)."""
+    """Kick off historical data import in the background (~10-15 min for 30 days)."""
+    svc = get_service()
+
+    # Check if already importing
+    if svc.import_progress["status"] == "importing":
+        return {"status": "already_running", "progress": svc.import_progress}
+
     def _import():
         from backend.ml.data_importer import run_import
         try:
+            svc.import_progress = {
+                "status": "importing",
+                "message": f"Starting import of {days} days of data...",
+                "progress_pct": 0,
+                "stocks_done": 0,
+                "total_stocks": 50,
+            }
+            logger.info(f"[ML API] Starting import: {days} days")
+
             result = run_import(days=days)
-            logger.info(f"[ML API] Import complete: {result['total_candles']} candles")
+
+            svc.import_progress = {
+                "status": "complete",
+                "message": f"✓ Import complete: {result.get('total_candles', 0)} candles imported",
+                "progress_pct": 100,
+                "stocks_done": 50,
+                "total_stocks": 50,
+            }
+            logger.info(f"[ML API] Import complete: {result.get('total_candles', 0)} candles")
         except Exception as e:
+            svc.import_progress = {
+                "status": "failed",
+                "message": f"✗ Import failed: {str(e)[:100]}",
+                "progress_pct": 0,
+                "stocks_done": 0,
+                "total_stocks": 50,
+            }
             logger.error(f"[ML API] Import failed: {e}")
 
     background_tasks.add_task(_import)
-    return {"status": "started", "message": f"Importing {days} days of data in background. Check logs."}
+    return {
+        "status": "started",
+        "message": f"Importing {days} days of historical data...",
+        "progress": svc.import_progress,
+        "estimated_time": "10-15 minutes"
+    }
 
 
 @router.post("/train")
 async def trigger_training(background_tasks: BackgroundTasks):
-    """Train the XGBoost model on imported data (background, ~2-5 min)."""
+    """Train the XGBoost model on imported data (background, ~3-5 min)."""
+    svc = get_service()
+
+    # Check if already training
+    if svc.training_progress["status"] == "training":
+        return {"status": "already_running", "progress": svc.training_progress}
+
     def _train():
         from backend.ml.train_model import train
         try:
+            svc.training_progress = {
+                "status": "training",
+                "message": "Training XGBoost model on imported data...",
+                "progress_pct": 10,
+            }
+            logger.info("[ML API] Starting model training")
+
             meta = train()
-            get_service().reload_model()
+            svc.reload_model()
+
+            svc.training_progress = {
+                "status": "complete",
+                "message": f"✓ Model trained: {meta.get('model_version', 'v1')} | Win Rate: {meta.get('win_rate', 0):.1%}",
+                "progress_pct": 100,
+            }
+            logger.info(f"[ML API] Training complete: {meta}")
             logger.info(f"[ML API] Training complete: {meta['model_version']}, "
                         f"test expectancy={meta['test_report']['expectancy']}%")
         except Exception as e:
+            svc.training_progress = {
+                "status": "failed",
+                "message": f"✗ Training failed: {str(e)[:100]}",
+                "progress_pct": 0,
+            }
             logger.error(f"[ML API] Training failed: {e}")
 
     background_tasks.add_task(_train)
-    return {"status": "started", "message": "Training in background. Check /status for model_version update."}
+    return {
+        "status": "started",
+        "message": "Training XGBoost model on imported data...",
+        "progress": svc.training_progress,
+        "estimated_time": "3-5 minutes"
+    }
 
 
 @router.get("/backtest-results")
