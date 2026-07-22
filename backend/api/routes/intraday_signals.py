@@ -7,6 +7,7 @@ Provides real-time support/resistance levels, live trade setups,
 and market status checks for intraday trading operations.
 
 Endpoints:
+- GET  /api/intraday/signals          — Aggregate all intraday signals (ML + S/R setups)
 - GET  /api/intraday/levels           — Fetch current S/R levels for symbols
 - GET  /api/intraday/setups/live      — Stream active trade setups (SSE)
 - GET  /api/intraday/market-status    — Check if within trading windows
@@ -20,7 +21,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 
 from fastapi import APIRouter, HTTPException, Query, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, validator
 from loguru import logger
 
@@ -1014,6 +1015,101 @@ async def validate_trade_entry(request: ValidateEntryRequest):
             status_code=500,
             detail=f"Failed to validate entry: {str(e)}",
         )
+
+
+@router.get("/signals")
+async def get_all_intraday_signals():
+    """Aggregate all intraday signals from multiple sources (ML, S/R setups, etc.)."""
+    try:
+        from backend.ml.scoring_service import MLScoringService
+
+        signals = []
+
+        # 1. ML Intraday Signals (high-confidence from XGBoost model)
+        try:
+            ml_svc = MLScoringService.get_instance()
+            for sig in ml_svc.active_signals:
+                signals.append({
+                    "symbol": sig["symbol"],
+                    "signal_type": "BUY",
+                    "source": "ML Intraday (XGBoost)",
+                    "confidence": sig.get("probability", sig.get("score", 0)) / 100,
+                    "entry_price": sig.get("entry", 0),
+                    "stop_loss": sig.get("stop_loss", 0),
+                    "target": sig.get("target", 0),
+                    "reward_risk": sig.get("reward_risk", 0),
+                    "score": sig.get("score", 0),
+                    "timestamp": sig.get("timestamp", datetime.now(IST).isoformat()),
+                })
+        except Exception as e:
+            logger.debug(f"[IntradaySignals] ML signals fetch failed: {e}")
+
+        # 2. S/R Based Setups (support/resistance bounce and breakout signals)
+        try:
+            sr_svc = get_sr_service()
+            if sr_svc:
+                levels_result = await asyncio.to_thread(lambda: sr_svc.get_levels_for_symbols(
+                    symbols=["NIFTY50", "BANKNIFTY", "RELIANCE", "INFY", "TCS", "HDFCBANK", "ICICIBANK", "SBIN"]
+                ))
+
+                if levels_result and levels_result.get("status") == "ok":
+                    for symbol_data in levels_result.get("levels", []):
+                        symbol = symbol_data.get("symbol")
+                        r1 = symbol_data.get("r1", 0)
+                        s1 = symbol_data.get("s1", 0)
+                        current = symbol_data.get("current_price", 0)
+
+                        # Support bounce signal (price near S1)
+                        if s1 > 0 and current > 0:
+                            dist_to_s1 = abs(current - s1) / s1
+                            if dist_to_s1 < 0.02:  # Within 2% of S1
+                                signals.append({
+                                    "symbol": symbol,
+                                    "signal_type": "SUPPORT_BOUNCE",
+                                    "source": "S/R Support Bounce",
+                                    "confidence": max(0.6, 1 - (dist_to_s1 / 0.02)),
+                                    "entry_price": current,
+                                    "stop_loss": s1 * 0.99,
+                                    "target": s1 + (current - s1) * 1.5,
+                                    "timestamp": datetime.now(IST).isoformat(),
+                                })
+
+                        # Resistance breakout signal (price near R1)
+                        if r1 > 0 and current > 0:
+                            dist_to_r1 = abs(r1 - current) / r1
+                            if dist_to_r1 < 0.02:  # Within 2% of R1
+                                signals.append({
+                                    "symbol": symbol,
+                                    "signal_type": "RESISTANCE_BREAKOUT",
+                                    "source": "S/R Resistance Breakout",
+                                    "confidence": max(0.6, 1 - (dist_to_r1 / 0.02)),
+                                    "entry_price": current,
+                                    "stop_loss": current * 0.99,
+                                    "target": r1 * 1.015,
+                                    "timestamp": datetime.now(IST).isoformat(),
+                                })
+        except Exception as e:
+            logger.debug(f"[IntradaySignals] S/R signals fetch failed: {e}")
+
+        # Sort by confidence (descending)
+        signals.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+
+        return {
+            "status": "ok",
+            "signals": signals,
+            "total": len(signals),
+            "timestamp": datetime.now(IST).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"[IntradaySignals] Failed to fetch all signals: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "signals": [],
+            "total": 0,
+            "error": str(e),
+            "timestamp": datetime.now(IST).isoformat(),
+        }
 
 
 # ---------------------------------------------------------------------------
