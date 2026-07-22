@@ -1,0 +1,8 @@
+{
+  "model_version": "placeholder",
+  "tradeable": false,
+  "threshold": 0.7,
+  "win_rate": 0.0,
+  "expectancy": 0.0,
+  "note": "Placeholder model - train a real model via Import Data \u2192 Train Model"
+}
