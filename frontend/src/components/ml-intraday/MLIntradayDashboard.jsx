@@ -337,39 +337,108 @@ const MLIntradayDashboard = () => {
         {/* Setup Controls */}
         <div className="ml-card">
           <div className="card-header">
-            <h2>System Controls</h2>
+            <h2>Setup & Operations</h2>
             {systemStatus?.tradeable === false && systemStatus?.model_loaded && (
               <span className="status-value" style={{ color: '#ff9100' }}>
                 ⚠ Model expectancy not positive — PAPER ONLY
               </span>
             )}
           </div>
-          <div className="ml-controls" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
+
+          {/* Workflow Guide */}
+          <div style={{ padding: '1rem', background: 'rgba(0, 188, 212, 0.08)', border: '1px solid rgba(0, 188, 212, 0.3)', borderRadius: 8, marginBottom: '1rem', fontSize: '0.85rem', lineHeight: '1.6' }}>
+            <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#00bcd4' }}>📋 Workflow Guide</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Step 1: Import Data</div>
+                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.75rem' }}>
+                  ✓ Do once or when new data needed
+                  <br/>• Fetches 30 days of candles
+                  <br/>• Takes ~10-15 min
+                </div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Step 2: Train Model</div>
+                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.75rem' }}>
+                  ✓ Do once after import
+                  <br/>• Builds XGBoost model
+                  <br/>• Takes ~3-5 min
+                </div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Step 3: Run Cycle</div>
+                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.75rem' }}>
+                  ✓ Do anytime (auto-runs every 5 min)
+                  <br/>• Scores current stocks
+                  <br/>• Takes ~15-20 sec
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Status Indicators */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: 6, fontSize: '0.8rem' }}>
+              <div style={{ color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontSize: '0.7rem', marginBottom: '0.25rem' }}>Data Import</div>
+              {systemStatus?.import_progress?.status === 'complete' ? (
+                <div style={{ color: '#00e676', fontWeight: 500 }}>✓ Imported</div>
+              ) : systemStatus?.import_progress?.status === 'failed' ? (
+                <div style={{ color: '#ff1744', fontWeight: 500 }}>✗ Failed</div>
+              ) : (
+                <div style={{ color: 'rgba(255,255,255,0.6)' }}>Not started</div>
+              )}
+            </div>
+            <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: 6, fontSize: '0.8rem' }}>
+              <div style={{ color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontSize: '0.7rem', marginBottom: '0.25rem' }}>Model Status</div>
+              {systemStatus?.model_loaded ? (
+                <div style={{ color: '#00e676', fontWeight: 500 }}>✓ Trained ({systemStatus.model_version})</div>
+              ) : (
+                <div style={{ color: 'rgba(255,255,255,0.6)' }}>Not trained yet</div>
+              )}
+            </div>
+            <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: 6, fontSize: '0.8rem' }}>
+              <div style={{ color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontSize: '0.7rem', marginBottom: '0.25rem' }}>Live Scoring</div>
+              {systemStatus?.last_update ? (
+                <div style={{ color: '#00bcd4', fontWeight: 500 }}>🔄 Active @ {systemStatus.last_update}</div>
+              ) : (
+                <div style={{ color: 'rgba(255,255,255,0.6)' }}>Idle</div>
+              )}
+            </div>
+          </div>
+
+          {/* Control Buttons */}
+          <div className="ml-controls" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'relative', zIndex: 1, marginBottom: '1rem' }}>
             <button
               className="btn-explain"
               onClick={() => triggerAction('import-data?days=30', 'Importing 30 days of data')}
-              disabled={activeOperation === 'importing'}
+              disabled={activeOperation === 'importing' || systemStatus?.import_progress?.status === 'complete'}
+              style={{ opacity: systemStatus?.import_progress?.status === 'complete' ? 0.5 : 1 }}
+              title={systemStatus?.import_progress?.status === 'complete' ? 'Data already imported' : ''}
             >
               1. Import Data
             </button>
             <button
               className="btn-explain"
               onClick={() => triggerAction('train', 'Training model')}
-              disabled={activeOperation === 'training'}
+              disabled={activeOperation === 'training' || !systemStatus?.import_progress?.message?.includes('candles')}
+              style={{ opacity: !systemStatus?.import_progress?.message?.includes('candles') ? 0.5 : 1 }}
+              title={!systemStatus?.import_progress?.message?.includes('candles') ? 'Import data first' : ''}
             >
               2. Train Model
             </button>
             <button
               className="btn-explain"
               onClick={() => triggerAction('run-cycle', 'Running scoring cycle')}
-              disabled={activeOperation === 'importing' || activeOperation === 'training'}
+              disabled={activeOperation === 'importing' || activeOperation === 'training' || !systemStatus?.model_loaded}
+              style={{ opacity: !systemStatus?.model_loaded ? 0.5 : 1 }}
+              title={!systemStatus?.model_loaded ? 'Train model first or using fallback scoring' : ''}
             >
               3. Run Cycle Now
             </button>
           </div>
 
           {/* Import Progress */}
-          {systemStatus?.import_progress && (
+          {systemStatus?.import_progress && systemStatus.import_progress.status !== 'idle' && (
             <ProgressBar
               progress={systemStatus.import_progress.progress_pct || 0}
               status={systemStatus.import_progress.status}
@@ -378,7 +447,7 @@ const MLIntradayDashboard = () => {
           )}
 
           {/* Training Progress */}
-          {systemStatus?.training_progress && (
+          {systemStatus?.training_progress && systemStatus.training_progress.status !== 'idle' && (
             <ProgressBar
               progress={systemStatus.training_progress.progress_pct || 0}
               status={systemStatus.training_progress.status}
@@ -387,7 +456,7 @@ const MLIntradayDashboard = () => {
           )}
 
           {actionMsg && !activeOperation && (
-            <p style={{ marginTop: '1rem', color: 'var(--jarvis-text-secondary)', position: 'relative', zIndex: 1 }}>
+            <p style={{ marginTop: '1rem', color: systemStatus?.import_progress?.status === 'failed' || systemStatus?.training_progress?.status === 'failed' ? '#ff1744' : 'var(--jarvis-text-secondary)', position: 'relative', zIndex: 1 }}>
               {actionMsg}
             </p>
           )}

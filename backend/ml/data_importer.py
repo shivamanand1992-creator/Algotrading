@@ -65,9 +65,13 @@ def get_db() -> sqlite3.Connection:
 
 def import_symbol(client, conn: sqlite3.Connection, symbol: str, days: int) -> int:
     """Import candles for one symbol. Returns row count inserted."""
-    token = client.search_scrip("NSE", symbol)
-    if not token:
-        logger.warning(f"[Importer] Token not found for {symbol}, skipping")
+    try:
+        token = client.search_scrip("NSE", symbol)
+        if not token:
+            logger.warning(f"[Importer] Token not found for {symbol}, skipping")
+            return 0
+    except Exception as e:
+        logger.warning(f"[Importer] Failed to search {symbol}: {e}")
         return 0
 
     now = datetime.now(_IST)
@@ -96,11 +100,12 @@ def import_symbol(client, conn: sqlite3.Connection, symbol: str, days: int) -> i
                 )
                 conn.commit()
                 total += len(rows)
+                logger.debug(f"[Importer] {symbol} {start.date()}→{end.date()}: {len(rows)} candles")
         except Exception as e:
             logger.warning(f"[Importer] {symbol} chunk {start.date()}–{end.date()} failed: {e}")
 
         start = end
-        time.sleep(0.4)  # Angel One rate limit: ~3 req/sec
+        time.sleep(1.2)  # Angel One: client enforces 1.0s min between requests, add 0.2s buffer
 
     logger.info(f"[Importer] {symbol}: {total} candles stored")
     return total
@@ -134,7 +139,7 @@ def import_index(client, conn: sqlite3.Connection, name: str, token: str, days: 
         except Exception as e:
             logger.warning(f"[Importer] {name} chunk failed: {e}")
         start = end
-        time.sleep(0.4)
+        time.sleep(1.2)
     logger.info(f"[Importer] {name}: {total} candles stored")
     return total
 
