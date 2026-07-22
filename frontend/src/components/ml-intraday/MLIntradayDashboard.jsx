@@ -2,6 +2,48 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../api/client';
 import './MLIntradayDashboard.css';
 
+const ProgressBar = ({ progress, status, message }) => {
+  const getStatusColor = () => {
+    if (status === 'complete') return '#00e676';
+    if (status === 'failed') return '#ff1744';
+    if (status === 'importing' || status === 'training') return '#00bcd4';
+    return 'rgba(255, 255, 255, 0.2)';
+  };
+
+  const getStatusLabel = () => {
+    if (status === 'complete') return '✓ Complete';
+    if (status === 'failed') return '✗ Failed';
+    if (status === 'importing') return '⏳ Importing...';
+    if (status === 'training') return '⏳ Training...';
+    return 'Ready';
+  };
+
+  return (
+    <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{getStatusLabel()}</span>
+        <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'rgba(255, 255, 255, 0.6)' }}>{progress}%</span>
+      </div>
+      <div style={{ width: '100%', height: 8, background: 'rgba(0,0,0,0.3)', borderRadius: 4, overflow: 'hidden', marginBottom: '0.5rem' }}>
+        <div
+          style={{
+            height: '100%',
+            width: `${progress}%`,
+            background: getStatusColor(),
+            transition: 'width 0.3s ease',
+            borderRadius: 4
+          }}
+        />
+      </div>
+      {message && (
+        <p style={{ fontSize: '0.8rem', color: 'rgba(255, 255, 255, 0.7)', margin: '0.5rem 0 0 0' }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const MLIntradayDashboard = () => {
   const [signals, setSignals] = useState([]);
   const [topStocks, setTopStocks] = useState([]);
@@ -14,13 +56,15 @@ const MLIntradayDashboard = () => {
   const [niftyStatus, setNiftyStatus] = useState(null);
   const [niftyMsg, setNiftyMsg] = useState(null);
   const [capital, setCapital] = useState(100000);
+  const [activeOperation, setActiveOperation] = useState(null); // 'importing' | 'training' | null
+  const [pollInterval, setPollInterval] = useState(10000); // 10s default, 1.5s during operations
 
   // Fetch system status
   useEffect(() => {
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 10000); // Every 10s
+    const interval = setInterval(fetchSystemStatus, pollInterval);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollInterval]);
 
   // Fetch top scored stocks
   useEffect(() => {
@@ -33,6 +77,26 @@ const MLIntradayDashboard = () => {
     try {
       const response = await api.get('/api/ml-intraday/status');
       setSystemStatus(response.data);
+
+      // Track active operations and adjust poll interval
+      const importStatus = response.data.import_progress?.status;
+      const trainingStatus = response.data.training_progress?.status;
+
+      if (importStatus === 'importing' || trainingStatus === 'training') {
+        // Poll more frequently during operations
+        setPollInterval(1500);
+        setActiveOperation(importStatus === 'importing' ? 'importing' : 'training');
+      } else if (importStatus === 'complete' || trainingStatus === 'complete') {
+        // After completion, show for 2 seconds then revert to normal polling
+        setTimeout(() => {
+          setActiveOperation(null);
+          setPollInterval(10000);
+        }, 2000);
+      } else {
+        // No active operation, use normal polling interval
+        setActiveOperation(null);
+        setPollInterval(10000);
+      }
     } catch (error) {
       console.error('Failed to fetch ML system status:', error);
     }
@@ -77,13 +141,19 @@ const MLIntradayDashboard = () => {
   };
 
   const triggerAction = async (endpoint, label) => {
+    // Determine operation type
+    const opType = endpoint.includes('import') ? 'importing' : endpoint.includes('train') ? 'training' : null;
+    if (opType) setActiveOperation(opType);
+
     setActionMsg(`${label}...`);
     try {
       const res = await api.post(`/api/ml-intraday/${endpoint}`);
-      setActionMsg(res.data.message || res.data.status || `${label} done`);
-      setTimeout(fetchSystemStatus, 2000);
+      setActionMsg(res.data.message || res.data.status || `${label} started`);
+      // Fetch status immediately to show initial progress
+      setTimeout(fetchSystemStatus, 500);
     } catch (error) {
       setActionMsg(`${label} failed: ${error.response?.data?.detail || error.message}`);
+      setActiveOperation(null);
     }
   };
 
@@ -275,21 +345,53 @@ const MLIntradayDashboard = () => {
             )}
           </div>
           <div className="ml-controls" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
-            <button className="btn-explain" onClick={() => triggerAction('import-data?days=30', 'Importing 30 days of data')}>
+            <button
+              className="btn-explain"
+              onClick={() => triggerAction('import-data?days=30', 'Importing 30 days of data')}
+              disabled={activeOperation === 'importing'}
+            >
               1. Import Data
             </button>
-            <button className="btn-explain" onClick={() => triggerAction('train', 'Training model')}>
+            <button
+              className="btn-explain"
+              onClick={() => triggerAction('train', 'Training model')}
+              disabled={activeOperation === 'training'}
+            >
               2. Train Model
             </button>
-            <button className="btn-explain" onClick={() => triggerAction('run-cycle', 'Running scoring cycle')}>
+            <button
+              className="btn-explain"
+              onClick={() => triggerAction('run-cycle', 'Running scoring cycle')}
+              disabled={activeOperation === 'importing' || activeOperation === 'training'}
+            >
               3. Run Cycle Now
             </button>
           </div>
-          {actionMsg && (
+
+          {/* Import Progress */}
+          {systemStatus?.import_progress && (
+            <ProgressBar
+              progress={systemStatus.import_progress.progress_pct || 0}
+              status={systemStatus.import_progress.status}
+              message={systemStatus.import_progress.message || `${systemStatus.import_progress.stocks_done}/${systemStatus.import_progress.total_stocks} stocks`}
+            />
+          )}
+
+          {/* Training Progress */}
+          {systemStatus?.training_progress && (
+            <ProgressBar
+              progress={systemStatus.training_progress.progress_pct || 0}
+              status={systemStatus.training_progress.status}
+              message={systemStatus.training_progress.message}
+            />
+          )}
+
+          {actionMsg && !activeOperation && (
             <p style={{ marginTop: '1rem', color: 'var(--jarvis-text-secondary)', position: 'relative', zIndex: 1 }}>
               {actionMsg}
             </p>
           )}
+
           {systemStatus?.test_expectancy != null && (
             <p style={{ marginTop: '0.5rem', color: 'var(--jarvis-text-primary)', position: 'relative', zIndex: 1 }}>
               Out-of-sample expectancy: <strong style={{ color: systemStatus.test_expectancy > 0 ? '#00e676' : '#ff1744' }}>
