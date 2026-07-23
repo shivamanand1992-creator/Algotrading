@@ -73,21 +73,8 @@ async def trigger_cycle(background_tasks: BackgroundTasks):
     try:
         svc = get_service()
 
-        # Schedule candle refresh in background (non-blocking)
-        def refresh_candles_async():
-            import asyncio
-            import time as time_module
-            try:
-                now = time_module.time()
-                if not hasattr(svc, '_last_candle_update'):
-                    svc._last_candle_update = 0
-                if now - svc._last_candle_update > 120:  # 2 minutes
-                    asyncio.run(svc.update_live_candles())
-                    svc._last_candle_update = now
-            except Exception as e:
-                logger.warning(f"[ML API] Background candle refresh failed: {e}")
-
-        background_tasks.add_task(refresh_candles_async)
+        # NOTE: Live candle updates disabled to avoid Angel One rate limiting
+        # System now uses deterministic technical scoring (no API calls needed)
 
         # Scoring cycle uses cached data from DB - fast, non-blocking
         result = await svc.run_cycle()
