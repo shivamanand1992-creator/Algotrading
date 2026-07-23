@@ -33,6 +33,37 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 # Angel One allows ~1 req/sec; 12 symbols @ 1.2s/symbol = ~14.4s per cycle
 LIVE_UNIVERSE = UNIVERSE[:12]
 
+# Realistic NSE stock price ranges (as of July 2026)
+# Maps each stock to its typical trading range for deterministic pricing
+STOCK_PRICE_RANGES = {
+    # Top 25 Nifty50 stocks with realistic ranges
+    "RELIANCE": (2900, 3100),      # Typically ₹2950-3050
+    "HDFCBANK": (1700, 1800),      # Typically ₹1730-1770
+    "ICICIBANK": (1000, 1100),     # Typically ₹1030-1070
+    "SBIN": (750, 850),            # Typically ₹780-820
+    "BAJFINANCE": (1000, 1080),    # Typically ₹1030-1060
+    "INFY": (2400, 2600),          # Typically ₹2450-2550
+    "TCS": (3300, 3700),           # Typically ₹3400-3600
+    "KOTAKBANK": (500, 600),       # Typically ₹530-570
+    "AXISBANK": (1080, 1150),      # Typically ₹1100-1130
+    "ITC": (430, 470),             # Typically ₹445-460
+    "LT": (2400, 2600),            # Typically ₹2450-2550
+    "SUNPHARMA": (820, 920),       # Typically ₹850-890
+    "ASIANPAINT": (2800, 3000),    # Typically ₹2900-2950
+    "MARUTI": (12500, 13500),      # Typically ₹12800-13200
+    "NESTLEIND": (2300, 2500),     # Typically ₹2350-2450
+    "BHARTIARTL": (1400, 1600),    # Typically ₹1480-1550
+    "HINDALCO": (680, 750),        # Typically ₹700-730
+    "BPCL": (360, 420),            # Typically ₹380-400
+    "JSWSTEEL": (900, 1000),       # Typically ₹940-980
+    "TECHM": (1500, 1650),         # Typically ₹1550-1600
+    "WIPRO": (450, 550),           # Typically ₹480-520
+    "HCLTECH": (1700, 1900),       # Typically ₹1790-1850
+    "TITAN": (3400, 3600),         # Typically ₹3450-3550
+    "ULTRACEMCO": (11000, 12000),  # Typically ₹11400-11800
+    "CIPLA": (1400, 1600),         # Typically ₹1480-1550
+}
+
 
 class MLScoringService:
     """Singleton service for live ML scoring + paper trading."""
@@ -169,9 +200,16 @@ class MLScoringService:
                 score = int(base_score + time_factor)
                 score = max(30, min(95, score))  # Clamp 30-95
 
-                # Base price varies by symbol hash
+                # Get realistic base price from stock-specific range
                 symbol_hash_val = int(hashlib.md5(symbol.encode()).hexdigest(), 16)
-                base_price = 1500 + (symbol_hash_val % 3000)
+                if symbol in STOCK_PRICE_RANGES:
+                    low, high = STOCK_PRICE_RANGES[symbol]
+                else:
+                    # Fallback for stocks not in mapping (shouldn't happen for Nifty50)
+                    low, high = 1000, 1200
+                # Map hash to price range (normalized to 0.0-1.0)
+                normalized = (symbol_hash_val % 10000) / 10000.0
+                base_price = low + (high - low) * normalized
 
                 # Price moves with intraday volatility (deterministic)
                 price_move = (time_factor / 10) * base_price * 0.02
