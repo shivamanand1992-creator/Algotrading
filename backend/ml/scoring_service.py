@@ -17,7 +17,7 @@ import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -138,19 +138,22 @@ class MLScoringService:
             logger.error(f"[MLScore] Cycle failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    def _calculate_technical_score(self, df: pd.DataFrame) -> float:
-        """Calculate technical confirmation score (0-100) from candle data."""
+    def _calculate_technical_score(self, df: pd.DataFrame) -> Tuple[float, Dict[str, int]]:
+        """
+        Calculate technical confirmation score (0-100) and individual component scores.
+        Returns: (avg_technical_score, components_dict)
+        Components: trend, momentum, volume, pattern (all 0-100)
+        """
         if df is None or len(df) < 20:
-            return 50.0  # Neutral if insufficient data
+            return 50.0, {"trend": 50, "momentum": 50, "volume": 50, "pattern": 50}
 
         close = df["close"].values
         volume = df["volume"].values
-        high = df["high"].values
-        low = df["low"].values
-
         scores = []
+        components = {}
 
-        # RSI (14-period) - overbought (>70) and oversold (<30) detection
+        # RSI (14-period) - used for MOMENTUM
+        rsi_score = 50.0
         if len(close) >= 14:
             delta = np.diff(close)
             gain = np.where(delta > 0, delta, 0)
@@ -159,58 +162,71 @@ class MLScoringService:
             avg_loss = np.mean(loss[-14:])
             rs = avg_gain / avg_loss if avg_loss != 0 else 1
             rsi = 100 - (100 / (1 + rs))
-            # Score: 40-60 is neutral, <30 or >70 is extreme
-            rsi_score = 50 + (rsi - 50) * 0.6  # Dampen extremes
+            rsi_score = 50 + (rsi - 50) * 0.6
             scores.append(rsi_score)
 
-        # MACD (12, 26, 9) - momentum confirmation
+        # MACD (12, 26, 9) - also for MOMENTUM
+        macd_score = 50.0
         if len(close) >= 26:
             ema12 = pd.Series(close).ewm(span=12).mean().values
             ema26 = pd.Series(close).ewm(span=26).mean().values
             macd_line = ema12 - ema26
             signal_line = pd.Series(macd_line).ewm(span=9).mean().values
             histogram = macd_line - signal_line
-            # Positive MACD above signal = bullish
             if histogram[-1] > 0:
-                macd_score = 55 + min(20, histogram[-1] * 100)  # Up to 75
+                macd_score = 55 + min(20, histogram[-1] * 100)
             else:
-                macd_score = 45 - min(20, -histogram[-1] * 100)  # Down to 25
-            scores.append(np.clip(macd_score, 0, 100))
+                macd_score = 45 - min(20, -histogram[-1] * 100)
+            macd_score = np.clip(macd_score, 0, 100)
+            scores.append(macd_score)
 
-        # Bollinger Bands (20-period) - volatility & trend confirmation
+        # Bollinger Bands (20-period) - used for PATTERN
+        pattern_score = 50.0
         if len(close) >= 20:
             sma20 = np.mean(close[-20:])
             std20 = np.std(close[-20:])
             bb_upper = sma20 + (std20 * 2)
             bb_lower = sma20 - (std20 * 2)
             current = close[-1]
-            # Near lower band = oversold (buy signal), near upper = overbought
             if std20 > 0:
                 bb_position = (current - bb_lower) / (bb_upper - bb_lower)
-                bb_score = bb_position * 100  # 0-100
+                pattern_score = bb_position * 100
             else:
-                bb_score = 50.0
-            scores.append(np.clip(bb_score, 0, 100))
+                pattern_score = 50.0
+            pattern_score = np.clip(pattern_score, 0, 100)
+            scores.append(pattern_score)
 
-        # Volume surge - higher volume = stronger signal
+        # Volume surge - VOLUME component
+        volume_score = 50.0
         if len(volume) >= 5:
             avg_vol = np.mean(volume[-20:])
             current_vol = volume[-1]
             vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1
-            vol_score = 50 + min(30, (vol_ratio - 1) * 30)  # 50-80 range
-            scores.append(np.clip(vol_score, 0, 100))
+            volume_score = 50 + min(30, (vol_ratio - 1) * 30)
+            volume_score = np.clip(volume_score, 0, 100)
+            scores.append(volume_score)
 
-        # Trend (close above/below SMA50)
+        # Trend (close above/below SMA50) - TREND component
+        trend_score = 50.0
         if len(close) >= 50:
             sma50 = np.mean(close[-50:])
-            if close[-1] > sma50:
-                trend_score = 60  # Above MA = slight bullish
-            else:
-                trend_score = 40  # Below MA = slight bearish
+            trend_score = 60 if close[-1] > sma50 else 40
             scores.append(trend_score)
 
+        # Momentum = average of RSI and MACD
+        momentum_score = (rsi_score + macd_score) / 2
+
+        # Build components dict for UI
+        components = {
+            "trend": int(trend_score),
+            "momentum": int(momentum_score),
+            "volume": int(volume_score),
+            "pattern": int(pattern_score),
+        }
+
         # Return weighted average of all technical scores
-        return np.mean(scores) if scores else 50.0
+        avg_technical = np.mean(scores) if scores else 50.0
+        return avg_technical, components
 
     def _ml_score(self) -> Dict:
         """Get ML predictions for LIVE_UNIVERSE (12 liquid stocks) using trained model."""
@@ -303,7 +319,7 @@ class MLScoringService:
                     conn, params=(symbol, (datetime.now(_IST) - timedelta(days=2)).strftime("%Y-%m-%d"))
                 )
 
-                tech_score = self._calculate_technical_score(candle_df)
+                tech_score, tech_components = self._calculate_technical_score(candle_df)
 
                 # Hybrid score: ML (60% weight) + Technical (40% weight)
                 hybrid_score = int((ml_score * 0.6) + (tech_score * 0.4))
@@ -320,6 +336,7 @@ class MLScoringService:
                     "ml_score": ml_score,
                     "technical_score": int(tech_score),
                     "features": {
+                        **tech_components,  # Include individual component scores: trend, momentum, volume, pattern
                         "rsi": rsi,
                         "macd": "Bullish" if macd_histogram > 0 else "Bearish",
                         "ml_confirmation": "✓" if ml_score >= 60 else "✗",
