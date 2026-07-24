@@ -1,14 +1,15 @@
 """
-Real-Time ML Scoring Service
+Real-Time ML Scoring Service - Hybrid ML + Technical Analysis
 
 Every 5 minutes during market hours:
 1. Fetch latest candles for the universe
-2. Compute features
-3. Score each stock with the trained XGBoost model
-4. Generate signals (probability >= trained threshold, R:R >= 1.3)
-5. Paper-trade signals and track P&L
+2. Generate ML prediction (trained XGBoost model)
+3. Generate Technical confirmation (RSI, MACD, Bollinger Bands, Volume)
+4. Combine scores (only signal if BOTH ML ≥ 60 AND Technical ≥ 60)
+5. Final signal = (ML × 0.6) + (Technical × 0.4)
+6. Paper-trade signals and track P&L
 
-LLM (Claude) is used ONLY to explain signals, never to predict.
+Hybrid approach: ML for pattern recognition, Technical for entry timing confirmation
 """
 
 import json
@@ -16,7 +17,7 @@ import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,37 +33,6 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 # Score only the most liquid subset live (reduced to prevent Angel One rate limiting)
 # Angel One allows ~1 req/sec; 12 symbols @ 1.2s/symbol = ~14.4s per cycle
 LIVE_UNIVERSE = UNIVERSE[:12]
-
-# Realistic NSE stock price ranges (as of July 2026)
-# Maps each stock to its typical trading range for deterministic pricing
-STOCK_PRICE_RANGES = {
-    # Top 25 Nifty50 stocks with realistic ranges
-    "RELIANCE": (2900, 3100),      # Typically ₹2950-3050
-    "HDFCBANK": (1700, 1800),      # Typically ₹1730-1770
-    "ICICIBANK": (1000, 1100),     # Typically ₹1030-1070
-    "SBIN": (750, 850),            # Typically ₹780-820
-    "BAJFINANCE": (1000, 1080),    # Typically ₹1030-1060
-    "INFY": (2400, 2600),          # Typically ₹2450-2550
-    "TCS": (3300, 3700),           # Typically ₹3400-3600
-    "KOTAKBANK": (500, 600),       # Typically ₹530-570
-    "AXISBANK": (1080, 1150),      # Typically ₹1100-1130
-    "ITC": (430, 470),             # Typically ₹445-460
-    "LT": (2400, 2600),            # Typically ₹2450-2550
-    "SUNPHARMA": (820, 920),       # Typically ₹850-890
-    "ASIANPAINT": (2800, 3000),    # Typically ₹2900-2950
-    "MARUTI": (12500, 13500),      # Typically ₹12800-13200
-    "NESTLEIND": (2300, 2500),     # Typically ₹2350-2450
-    "BHARTIARTL": (1400, 1600),    # Typically ₹1480-1550
-    "HINDALCO": (680, 750),        # Typically ₹700-730
-    "BPCL": (360, 420),            # Typically ₹380-400
-    "JSWSTEEL": (900, 1000),       # Typically ₹940-980
-    "TECHM": (1500, 1650),         # Typically ₹1550-1600
-    "WIPRO": (450, 550),           # Typically ₹480-520
-    "HCLTECH": (1700, 1900),       # Typically ₹1790-1850
-    "TITAN": (3400, 3600),         # Typically ₹3450-3550
-    "ULTRACEMCO": (11000, 12000),  # Typically ₹11400-11800
-    "CIPLA": (1400, 1600),         # Typically ₹1480-1550
-}
 
 
 class MLScoringService:
@@ -139,9 +109,9 @@ class MLScoringService:
             return {"status": "market_closed"}
 
         try:
-            # ALWAYS use quick technical scoring (avoids Angel One rate limits)
-            # No live API calls = fast, reliable, zero rate limit issues
-            scores, signals = await asyncio.to_thread(self._quick_technical_score)
+            # Use hybrid ML + Technical scoring (ML 60%, Technical 40%)
+            # Only generates signals when BOTH ML and Technical confirm (both >= 60)
+            scores, signals = await asyncio.to_thread(self._hybrid_scoring)
 
             self.latest_scores = scores
             self.last_update = now.strftime("%H:%M:%S")
@@ -168,40 +138,116 @@ class MLScoringService:
             logger.error(f"[MLScore] Cycle failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    def _quick_technical_score(self):
-        """Fast technical analysis - fetches LIVE LTP quotes + deterministic technical scoring."""
-        import hashlib
+    def _calculate_technical_score(self, df: pd.DataFrame) -> float:
+        """Calculate technical confirmation score (0-100) from candle data."""
+        if df is None or len(df) < 20:
+            return 50.0  # Neutral if insufficient data
+
+        close = df["close"].values
+        volume = df["volume"].values
+        high = df["high"].values
+        low = df["low"].values
+
+        scores = []
+
+        # RSI (14-period) - overbought (>70) and oversold (<30) detection
+        if len(close) >= 14:
+            delta = np.diff(close)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain[-14:])
+            avg_loss = np.mean(loss[-14:])
+            rs = avg_gain / avg_loss if avg_loss != 0 else 1
+            rsi = 100 - (100 / (1 + rs))
+            # Score: 40-60 is neutral, <30 or >70 is extreme
+            rsi_score = 50 + (rsi - 50) * 0.6  # Dampen extremes
+            scores.append(rsi_score)
+
+        # MACD (12, 26, 9) - momentum confirmation
+        if len(close) >= 26:
+            ema12 = pd.Series(close).ewm(span=12).mean().values
+            ema26 = pd.Series(close).ewm(span=26).mean().values
+            macd_line = ema12 - ema26
+            signal_line = pd.Series(macd_line).ewm(span=9).mean().values
+            histogram = macd_line - signal_line
+            # Positive MACD above signal = bullish
+            if histogram[-1] > 0:
+                macd_score = 55 + min(20, histogram[-1] * 100)  # Up to 75
+            else:
+                macd_score = 45 - min(20, -histogram[-1] * 100)  # Down to 25
+            scores.append(np.clip(macd_score, 0, 100))
+
+        # Bollinger Bands (20-period) - volatility & trend confirmation
+        if len(close) >= 20:
+            sma20 = np.mean(close[-20:])
+            std20 = np.std(close[-20:])
+            bb_upper = sma20 + (std20 * 2)
+            bb_lower = sma20 - (std20 * 2)
+            current = close[-1]
+            # Near lower band = oversold (buy signal), near upper = overbought
+            if std20 > 0:
+                bb_position = (current - bb_lower) / (bb_upper - bb_lower)
+                bb_score = bb_position * 100  # 0-100
+            else:
+                bb_score = 50.0
+            scores.append(np.clip(bb_score, 0, 100))
+
+        # Volume surge - higher volume = stronger signal
+        if len(volume) >= 5:
+            avg_vol = np.mean(volume[-20:])
+            current_vol = volume[-1]
+            vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1
+            vol_score = 50 + min(30, (vol_ratio - 1) * 30)  # 50-80 range
+            scores.append(np.clip(vol_score, 0, 100))
+
+        # Trend (close above/below SMA50)
+        if len(close) >= 50:
+            sma50 = np.mean(close[-50:])
+            if close[-1] > sma50:
+                trend_score = 60  # Above MA = slight bullish
+            else:
+                trend_score = 40  # Below MA = slight bearish
+            scores.append(trend_score)
+
+        # Return weighted average of all technical scores
+        return np.mean(scores) if scores else 50.0
+
+    def _ml_score(self) -> Dict:
+        """Get ML predictions for LIVE_UNIVERSE (12 liquid stocks) using trained model."""
+        if self.model is None:
+            logger.warning("[MLScore] Model not loaded, skipping ML scoring")
+            return {}
+
         import time as time_module
         from backend.dependencies import get_angel_client
 
-        scores, signals = [], []
-
-        # Top 25 NIFTY50 stocks for daily scoring
-        stocks = [
-            'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'BAJFINANCE',
-            'INFY', 'TCS', 'KOTAKBANK', 'AXISBANK', 'ITC',
-            'LT', 'SUNPHARMA', 'ASIANPAINT', 'MARUTI', 'NESTLEIND',
-            'BHARTIARTL', 'HINDALCO', 'BPCL', 'JSWSTEEL', 'TECHM',
-            'WIPRO', 'HCLTECH', 'TITAN', 'ULTRACEMCO', 'CIPLA'
-        ]
-
-        now = datetime.now(_IST)
-        current_minute = now.hour * 60 + now.minute
+        ml_scores = {}
         conn = sqlite3.connect(DB_PATH)
+        cutoff = (datetime.now(_IST) - timedelta(days=5)).strftime("%Y-%m-%d")
         angel_client = get_angel_client()
 
-        for i, symbol in enumerate(stocks):
+        for symbol in LIVE_UNIVERSE:
             try:
-                # Deterministic scoring based on symbol hash + time
-                hash_val = int(hashlib.md5((symbol + now.strftime("%Y-%m-%d")).encode()).hexdigest(), 16)
+                # Fetch 5-day candles for feature engineering
+                df = pd.read_sql(
+                    "SELECT * FROM candles_5min WHERE symbol=? AND timestamp>=? ORDER BY timestamp",
+                    conn, params=(symbol, cutoff)
+                )
 
-                # Base score from symbol hash + time fluctuation
-                base_score = 50 + ((hash_val % 30) - 15)  # 35-65 base
-                time_factor = ((current_minute % 100) - 50) / 50 * 10  # ±10 from time
-                score = int(base_score + time_factor)
-                score = max(30, min(95, score))  # Clamp 30-95
+                if len(df) < 60:
+                    logger.debug(f"[MLScore] {symbol} insufficient candles ({len(df)})")
+                    continue
 
-                # Get LIVE LTP from Angel One (current market price)
+                # Compute features for ML model
+                features = compute_features(df)
+                if len(features) == 0:
+                    continue
+
+                row = features.iloc[[-1]]
+                proba = float(self.model.predict_proba(row[FEATURE_COLS])[:, 1][0])
+                ml_score = int(proba * 100)
+
+                # Get live price
                 ltp = None
                 if angel_client:
                     try:
@@ -210,54 +256,83 @@ class MLScoringService:
                             quote = angel_client.get_quote("NSE", symbol, token)
                             if quote and quote.get("ltp", 0) > 0:
                                 ltp = float(quote["ltp"])
-                        time_module.sleep(1.1)  # Angel One rate limit: 1+ second
-                    except Exception as e:
-                        logger.debug(f"[MLScore] {symbol} live quote failed: {e}")
+                        time_module.sleep(1.1)
+                    except Exception:
+                        pass
 
-                # Fallback to latest candle close if quote fetch fails
                 if ltp is None:
-                    candle_df = pd.read_sql(
-                        "SELECT close FROM candles_5min WHERE symbol=? ORDER BY timestamp DESC LIMIT 1",
-                        conn, params=(symbol,)
-                    )
-                    if len(candle_df) > 0:
-                        ltp = float(candle_df.iloc[0]["close"])
-                        logger.debug(f"[MLScore] {symbol} using candle close (quote unavailable)")
+                    ltp = float(row.iloc[0]["close"])
 
-                # Final fallback to price range midpoint
-                if ltp is None:
-                    if symbol in STOCK_PRICE_RANGES:
-                        low, high = STOCK_PRICE_RANGES[symbol]
-                        ltp = (low + high) / 2
-                    else:
-                        ltp = 1100
-                    logger.debug(f"[MLScore] {symbol} using fallback price {ltp}")
+                ml_scores[symbol] = {
+                    "ml_score": ml_score,
+                    "price": round(ltp, 2),
+                    "candles": len(df),
+                }
 
-                # Technical feature scores (derived from score)
-                trend_score = min(100, score + (15 if score > 60 else -15))
-                momentum_score = min(100, score + ((hash_val % 20) - 10))
-                volume_score = max(20, 50 + ((hash_val % 40) - 20))
-                pattern_score = min(100, max(30, score + ((current_minute % 30) - 15)))
+            except Exception as e:
+                logger.debug(f"[MLScore] {symbol} ML score failed: {e}")
+                continue
+
+        conn.close()
+        return ml_scores
+
+    def _hybrid_scoring(self) -> Tuple[List[Dict], List[Dict]]:
+        """Hybrid scoring: ML (60%) + Technical (40%). Only signal if BOTH ≥ 60."""
+        scores, signals = [], []
+        now = datetime.now(_IST)
+        conn = sqlite3.connect(DB_PATH)
+
+        # Get ML predictions for liquid stocks
+        ml_predictions = self._ml_score()
+        logger.info(f"[MLScore] ML predictions for {len(ml_predictions)} stocks")
+
+        cutoff = (datetime.now(_IST) - timedelta(days=5)).strftime("%Y-%m-%d")
+
+        for symbol in LIVE_UNIVERSE:
+            try:
+                if symbol not in ml_predictions:
+                    continue
+
+                ml_data = ml_predictions[symbol]
+                ml_score = ml_data["ml_score"]
+                ltp = ml_data["price"]
+
+                # Calculate technical score from 20-day candles
+                candle_df = pd.read_sql(
+                    "SELECT * FROM candles_5min WHERE symbol=? AND timestamp>=? ORDER BY timestamp DESC LIMIT 400",
+                    conn, params=(symbol, (datetime.now(_IST) - timedelta(days=2)).strftime("%Y-%m-%d"))
+                )
+
+                tech_score = self._calculate_technical_score(candle_df)
+
+                # Hybrid score: ML (60% weight) + Technical (40% weight)
+                hybrid_score = int((ml_score * 0.6) + (tech_score * 0.4))
+
+                # Get technical details for breakdown
+                rsi = self._get_rsi(candle_df)
+                macd_histogram = self._get_macd_histogram(candle_df)
 
                 entry = {
                     "symbol": symbol,
-                    "score": score,
-                    "price": round(ltp, 2),
-                    "probability": float(score),
+                    "score": hybrid_score,
+                    "price": ltp,
+                    "probability": float(hybrid_score),
+                    "ml_score": ml_score,
+                    "technical_score": int(tech_score),
                     "features": {
-                        "trend": min(100, max(0, trend_score)),
-                        "momentum": min(100, max(0, momentum_score)),
-                        "volume": min(100, max(0, volume_score)),
-                        "pattern": min(100, max(0, pattern_score))
+                        "rsi": rsi,
+                        "macd": "Bullish" if macd_histogram > 0 else "Bearish",
+                        "ml_confirmation": "✓" if ml_score >= 60 else "✗",
+                        "technical_confirmation": "✓" if tech_score >= 60 else "✗",
                     },
                     "timestamp": now.isoformat(),
                 }
                 scores.append(entry)
 
-                # Generate signals for high-scoring stocks (>=70)
-                if score >= 70:
-                    sl = round(ltp * 0.985, 2)
-                    target = round(ltp * 1.025, 2)
+                # Generate signals only if BOTH ML and Technical confirm (both ≥ 60)
+                if ml_score >= 60 and tech_score >= 60:
+                    sl = round(ltp * 0.98, 2)
+                    target = round(ltp * 1.03, 2)
                     risk = ltp - sl
                     reward = target - ltp
                     rr = round(reward / risk, 2) if risk > 0 else 1.5
@@ -270,17 +345,47 @@ class MLScoringService:
                             "target": target,
                             "reward_risk": rr,
                             "hold_time": 45,
+                            "confidence": f"ML:{ml_score}% + Technical:{int(tech_score)}% = {hybrid_score}%",
                         })
 
             except Exception as e:
-                logger.debug(f"[MLScore] {symbol} score failed: {e}")
+                logger.debug(f"[MLScore] {symbol} hybrid score failed: {e}")
                 continue
 
         conn.close()
         scores.sort(key=lambda s: -s["score"])
         num_signals = len(signals)
-        logger.info(f"[MLScore] Technical scoring: {len(scores)} stocks, {num_signals} signals (Score: {scores[0]['score'] if scores else 0}/100, using LIVE LTP)")
+        logger.info(
+            f"[MLScore] Hybrid scoring: {len(scores)} stocks analyzed, "
+            f"{num_signals} signals (ML+Technical confirmed)"
+        )
         return scores[:20], signals
+
+    def _get_rsi(self, df: pd.DataFrame) -> int:
+        """Calculate 14-period RSI."""
+        if df is None or len(df) < 14:
+            return 50
+        close = df["close"].values[-14:]
+        delta = np.diff(close)
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        avg_gain = np.mean(gain)
+        avg_loss = np.mean(loss)
+        rs = avg_gain / avg_loss if avg_loss != 0 else 1
+        rsi = 100 - (100 / (1 + rs))
+        return int(rsi)
+
+    def _get_macd_histogram(self, df: pd.DataFrame) -> float:
+        """Calculate MACD histogram."""
+        if df is None or len(df) < 26:
+            return 0
+        close = df["close"].values
+        ema12 = pd.Series(close).ewm(span=12).mean().values
+        ema26 = pd.Series(close).ewm(span=26).mean().values
+        macd_line = ema12 - ema26
+        signal_line = pd.Series(macd_line).ewm(span=9).mean().values
+        histogram = macd_line - signal_line
+        return float(histogram[-1])
 
     def _score_universe(self):
         """Fetch recent candles from DB + live quote, score every stock."""

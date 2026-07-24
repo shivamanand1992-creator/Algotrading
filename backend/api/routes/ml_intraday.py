@@ -85,8 +85,8 @@ async def trigger_cycle(background_tasks: BackgroundTasks):
 
 
 @router.post("/import-data")
-async def trigger_import(background_tasks: BackgroundTasks, days: int = 30):
-    """Kick off historical data import in the background (~10-15 min for 30 days)."""
+async def trigger_import(background_tasks: BackgroundTasks, days: int = 730):
+    """Kick off historical data import (default: 2 years = 730 days for accurate model training)."""
     svc = get_service()
 
     # Check if already importing
