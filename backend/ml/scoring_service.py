@@ -169,8 +169,10 @@ class MLScoringService:
             return {"status": "error", "error": str(e)}
 
     def _quick_technical_score(self):
-        """Fast technical analysis - uses real live candle prices from DB + deterministic technical scoring."""
+        """Fast technical analysis - fetches LIVE LTP quotes + deterministic technical scoring."""
         import hashlib
+        import time as time_module
+        from backend.dependencies import get_angel_client
 
         scores, signals = [], []
 
@@ -186,6 +188,7 @@ class MLScoringService:
         now = datetime.now(_IST)
         current_minute = now.hour * 60 + now.minute
         conn = sqlite3.connect(DB_PATH)
+        angel_client = get_angel_client()
 
         for i, symbol in enumerate(stocks):
             try:
@@ -198,22 +201,37 @@ class MLScoringService:
                 score = int(base_score + time_factor)
                 score = max(30, min(95, score))  # Clamp 30-95
 
-                # Get REAL price from latest candle in database (not hash-based)
-                candle_df = pd.read_sql(
-                    "SELECT close, volume FROM candles_5min WHERE symbol=? ORDER BY timestamp DESC LIMIT 1",
-                    conn, params=(symbol,)
-                )
+                # Get LIVE LTP from Angel One (current market price)
+                ltp = None
+                if angel_client:
+                    try:
+                        token = angel_client.search_scrip("NSE", symbol)
+                        if token:
+                            quote = angel_client.get_quote("NSE", symbol, token)
+                            if quote and quote.get("ltp", 0) > 0:
+                                ltp = float(quote["ltp"])
+                        time_module.sleep(1.1)  # Angel One rate limit: 1+ second
+                    except Exception as e:
+                        logger.debug(f"[MLScore] {symbol} live quote failed: {e}")
 
-                if len(candle_df) > 0:
-                    ltp = float(candle_df.iloc[0]["close"])
-                else:
-                    # Fallback to price range midpoint if no candle data yet
+                # Fallback to latest candle close if quote fetch fails
+                if ltp is None:
+                    candle_df = pd.read_sql(
+                        "SELECT close FROM candles_5min WHERE symbol=? ORDER BY timestamp DESC LIMIT 1",
+                        conn, params=(symbol,)
+                    )
+                    if len(candle_df) > 0:
+                        ltp = float(candle_df.iloc[0]["close"])
+                        logger.debug(f"[MLScore] {symbol} using candle close (quote unavailable)")
+
+                # Final fallback to price range midpoint
+                if ltp is None:
                     if symbol in STOCK_PRICE_RANGES:
                         low, high = STOCK_PRICE_RANGES[symbol]
                         ltp = (low + high) / 2
                     else:
                         ltp = 1100
-                    logger.debug(f"[MLScore] {symbol} no candle data, using fallback price {ltp}")
+                    logger.debug(f"[MLScore] {symbol} using fallback price {ltp}")
 
                 # Technical feature scores (derived from score)
                 trend_score = min(100, score + (15 if score > 60 else -15))
@@ -261,7 +279,7 @@ class MLScoringService:
         conn.close()
         scores.sort(key=lambda s: -s["score"])
         num_signals = len(signals)
-        logger.info(f"[MLScore] Technical scoring: {len(scores)} stocks, {num_signals} signals (Score: {scores[0]['score'] if scores else 0}/100, using REAL prices)")
+        logger.info(f"[MLScore] Technical scoring: {len(scores)} stocks, {num_signals} signals (Score: {scores[0]['score'] if scores else 0}/100, using LIVE LTP)")
         return scores[:20], signals
 
     def _score_universe(self):
