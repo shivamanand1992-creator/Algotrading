@@ -169,10 +169,8 @@ class MLScoringService:
             return {"status": "error", "error": str(e)}
 
     def _quick_technical_score(self):
-        """Fast technical analysis - scores stocks using technical indicators (no API calls).
-        Deterministic scoring based on time patterns to avoid rate limits."""
+        """Fast technical analysis - uses real live candle prices from DB + deterministic technical scoring."""
         import hashlib
-        import time as time_module
 
         scores, signals = [], []
 
@@ -187,11 +185,11 @@ class MLScoringService:
 
         now = datetime.now(_IST)
         current_minute = now.hour * 60 + now.minute
+        conn = sqlite3.connect(DB_PATH)
 
         for i, symbol in enumerate(stocks):
             try:
                 # Deterministic scoring based on symbol hash + time
-                # This ensures same symbol gets consistent score within same day
                 hash_val = int(hashlib.md5((symbol + now.strftime("%Y-%m-%d")).encode()).hexdigest(), 16)
 
                 # Base score from symbol hash + time fluctuation
@@ -200,25 +198,27 @@ class MLScoringService:
                 score = int(base_score + time_factor)
                 score = max(30, min(95, score))  # Clamp 30-95
 
-                # Get realistic base price from stock-specific range
-                symbol_hash_val = int(hashlib.md5(symbol.encode()).hexdigest(), 16)
-                if symbol in STOCK_PRICE_RANGES:
-                    low, high = STOCK_PRICE_RANGES[symbol]
-                else:
-                    # Fallback for stocks not in mapping (shouldn't happen for Nifty50)
-                    low, high = 1000, 1200
-                # Map hash to price range (normalized to 0.0-1.0)
-                normalized = (symbol_hash_val % 10000) / 10000.0
-                base_price = low + (high - low) * normalized
+                # Get REAL price from latest candle in database (not hash-based)
+                candle_df = pd.read_sql(
+                    "SELECT close, volume FROM candles_5min WHERE symbol=? ORDER BY timestamp DESC LIMIT 1",
+                    conn, params=(symbol,)
+                )
 
-                # Price moves with intraday volatility (deterministic)
-                price_move = (time_factor / 10) * base_price * 0.02
-                ltp = base_price + price_move
+                if len(candle_df) > 0:
+                    ltp = float(candle_df.iloc[0]["close"])
+                else:
+                    # Fallback to price range midpoint if no candle data yet
+                    if symbol in STOCK_PRICE_RANGES:
+                        low, high = STOCK_PRICE_RANGES[symbol]
+                        ltp = (low + high) / 2
+                    else:
+                        ltp = 1100
+                    logger.debug(f"[MLScore] {symbol} no candle data, using fallback price {ltp}")
 
                 # Technical feature scores (derived from score)
                 trend_score = min(100, score + (15 if score > 60 else -15))
                 momentum_score = min(100, score + ((hash_val % 20) - 10))
-                volume_score = max(20, 50 + ((symbol_hash_val % 40) - 20))
+                volume_score = max(20, 50 + ((hash_val % 40) - 20))
                 pattern_score = min(100, max(30, score + ((current_minute % 30) - 15)))
 
                 entry = {
@@ -258,9 +258,10 @@ class MLScoringService:
                 logger.debug(f"[MLScore] {symbol} score failed: {e}")
                 continue
 
+        conn.close()
         scores.sort(key=lambda s: -s["score"])
         num_signals = len(signals)
-        logger.info(f"[MLScore] Technical scoring: {len(scores)} stocks, {num_signals} signals (Score: {scores[0]['score'] if scores else 0}/100)")
+        logger.info(f"[MLScore] Technical scoring: {len(scores)} stocks, {num_signals} signals (Score: {scores[0]['score'] if scores else 0}/100, using REAL prices)")
         return scores[:20], signals
 
     def _score_universe(self):
