@@ -144,15 +144,16 @@ def import_index(client, conn: sqlite3.Connection, name: str, token: str, days: 
     return total
 
 
-def run_import(days: int = 30, symbols: list = None) -> dict:
-    """Main import entry point. Returns summary dict."""
+def run_import(days: int = 30, symbols: list = None, progress_callback=None) -> dict:
+    """Main import entry point. Returns summary dict. Progress callback for UI updates."""
     from backend.dependencies import get_angel_client
 
     client = get_angel_client()
     conn = get_db()
     symbols = symbols or UNIVERSE
+    total_symbols = len(symbols)
 
-    logger.info(f"[Importer] Starting import: {len(symbols)} symbols × {days} days")
+    logger.info(f"[Importer] Starting import: {total_symbols} symbols × {days} days")
     results = {}
 
     # Indices first (needed for market-context features)
@@ -161,7 +162,18 @@ def run_import(days: int = 30, symbols: list = None) -> dict:
 
     for i, symbol in enumerate(symbols, 1):
         results[symbol] = import_symbol(client, conn, symbol, days)
-        logger.info(f"[Importer] Progress: {i}/{len(symbols)}")
+
+        # Update progress callback for UI
+        if progress_callback:
+            progress_pct = int((i / total_symbols) * 100)
+            progress_callback({
+                "status": "importing",
+                "message": f"Importing {symbol}... ({i}/{total_symbols})",
+                "progress_pct": progress_pct,
+                "stocks_done": i,
+                "total_stocks": total_symbols,
+            })
+        logger.info(f"[Importer] Progress: {i}/{total_symbols} — {symbol}")
 
     conn.close()
     total = sum(results.values())

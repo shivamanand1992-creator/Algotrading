@@ -105,7 +105,12 @@ async def trigger_import(background_tasks: BackgroundTasks, days: int = 730):
             }
             logger.info(f"[ML API] Starting import: {days} days")
 
-            result = run_import(days=days)
+            # Progress callback updates UI in real-time
+            def update_progress(progress_dict):
+                svc.import_progress = progress_dict
+                logger.info(f"[ML API] {progress_dict['message']} ({progress_dict['progress_pct']}%)")
+
+            result = run_import(days=days, progress_callback=update_progress)
 
             svc.import_progress = {
                 "status": "complete",
