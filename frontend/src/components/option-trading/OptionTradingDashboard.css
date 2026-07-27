@@ -1,0 +1,316 @@
+/* Option Trading Dashboard Styles */
+
+.option-trading-container {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.option-trading-header {
+  margin-bottom: 2rem;
+}
+
+.option-trading-header h1 {
+  font-size: 2rem;
+  color: #00e5ff;
+  margin-bottom: 0.5rem;
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.option-trading-header p {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+}
+
+.option-status-badge {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 229, 255, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.active {
+  background: #00e676;
+}
+
+.status-indicator.inactive {
+  background: #666;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.greeks-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(0, 229, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 229, 255, 0.1);
+}
+
+.greek-item {
+  text-align: center;
+}
+
+.greek-label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 0.25rem;
+  font-family: monospace;
+}
+
+.greek-value {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #00e5ff;
+  font-family: monospace;
+}
+
+.greek-context {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 0.25rem;
+}
+
+.position-card {
+  padding: 1.5rem;
+  background: rgba(0, 229, 255, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+.position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.position-symbol {
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #00e5ff;
+  margin-top: 0.25rem;
+  font-family: monospace;
+}
+
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.1);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.1);
+}
+
+.trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.trade-table thead {
+  border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+.trade-table th {
+  padding: 0.75rem;
+  text-align: left;
+  color: rgba(0, 229, 255, 0.8);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.trade-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.trade-table tr:hover {
+  background: rgba(0, 229, 255, 0.03);
+}
+
+.pnl-positive {
+  color: #00e676;
+  font-weight: bold;
+}
+
+.pnl-negative {
+  color: #ff6b6b;
+  font-weight: bold;
+}
+
+.controls-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+.button-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.btn {
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-weight: bold;
+  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-paper {
+  background: rgba(0, 229, 255, 0.2);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #00e5ff;
+}
+
+.btn-paper:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.3);
+}
+
+.btn-live {
+  background: rgba(255, 107, 107, 0.2);
+  border-color: rgba(255, 107, 107, 0.4);
+  color: #ff6b6b;
+}
+
+.btn-live:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.3);
+}
+
+.btn-primary {
+  background: rgba(0, 230, 118, 0.2);
+  border-color: rgba(0, 230, 118, 0.4);
+  color: #00e676;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: rgba(0, 230, 118, 0.3);
+}
+
+.btn-danger {
+  background: rgba(255, 107, 107, 0.2);
+  border-color: rgba(255, 107, 107, 0.4);
+  color: #ff6b6b;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.3);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  padding: 1rem;
+  background: rgba(0, 229, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 229, 255, 0.1);
+}
+
+.stat-label {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 0.5rem;
+  font-family: monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-value {
+  font-size: 1.3rem;
+  font-weight: bold;
+  font-family: monospace;
+}
+
+.message {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  font-family: monospace;
+}
+
+.message.success {
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.3);
+  color: #00e676;
+}
+
+.message.error {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #ff6b6b;
+}
+
+@media (max-width: 1024px) {
+  .controls-section {
+    grid-template-columns: 1fr;
+  }
+
+  .greeks-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .option-trading-container {
+    padding: 1rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .position-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trade-table {
+    font-size: 0.75rem;
+  }
+
+  .trade-table th,
+  .trade-table td {
+    padding: 0.5rem;
+  }
+}
