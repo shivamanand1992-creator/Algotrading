@@ -831,13 +831,13 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_session_refresh_loop())
     asyncio.create_task(_session_health_watchdog_loop())
-    asyncio.create_task(_swing_autopilot_loop())
-    asyncio.create_task(_swing_monitor_loop())
-    asyncio.create_task(_swing_intraday_sl_loop())
+    # asyncio.create_task(_swing_autopilot_loop())  # DISABLED: free API quota for options trader
+    # asyncio.create_task(_swing_monitor_loop())  # DISABLED: free API quota for options trader
+    # asyncio.create_task(_swing_intraday_sl_loop())  # DISABLED: free API quota for options trader
     asyncio.create_task(_niftybees_monitor_loop())
     # asyncio.create_task(_hermes_intraday_loop())  # ARCHIVED: Hermes AI loop
-    asyncio.create_task(_ml_intraday_loop())
-    asyncio.create_task(_nifty_ml_loop())
+    # asyncio.create_task(_ml_intraday_loop())  # DISABLED: free API quota for options trader
+    # asyncio.create_task(_nifty_ml_loop())  # DISABLED: free API quota for options trader
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
