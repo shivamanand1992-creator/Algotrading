@@ -6,6 +6,7 @@ ML predicts; Claude only explains.
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, Optional
+from datetime import datetime
 from pydantic import BaseModel
 from loguru import logger
 
@@ -290,6 +291,67 @@ async def nifty_cycle():
     """Manually trigger one NIFTY scoring/trading cycle (for testing)."""
     try:
         return await get_nifty_trader().run_cycle()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# NIFTY OPTIONS TRADER (paper → autopilot)
+# ============================================================================
+
+def get_nifty_options_trader():
+    from backend.ml.nifty_options_trader import NiftyOptionsTrader
+    return NiftyOptionsTrader.get_instance()
+
+
+@router.get("/nifty-options-status")
+async def nifty_options_status():
+    """NIFTY options trader status: model, mode, position, trades, Greeks."""
+    try:
+        return get_nifty_options_trader().get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-options-enable")
+async def nifty_options_enable(req: NiftyEnableRequest):
+    """Enable NIFTY options trading. Paper mode by default."""
+    try:
+        trader = get_nifty_options_trader()
+        if trader.booster is None:
+            raise HTTPException(status_code=400, detail="No model. POST /train-nifty first.")
+        if req.mode == "live" and not trader.tradeable:
+            raise HTTPException(
+                status_code=400,
+                detail="LIVE blocked: model's out-of-sample after-cost expectancy is not positive.")
+        trader.mode = "live" if req.mode == "live" else "paper"
+        trader.capital = max(50000, min(req.capital, 1000000))
+        trader.enabled = True
+        logger.info(f"[ML API] NIFTY OPTIONS trader ENABLED mode={trader.mode} capital=₹{trader.capital}")
+        return {"status": "enabled", "mode": trader.mode, "capital": trader.capital}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-options-disable")
+async def nifty_options_disable():
+    """Disable NIFTY options trader and close any open position."""
+    try:
+        trader = get_nifty_options_trader()
+        trader.enabled = False
+        await trader._manage_position(0, datetime.now())
+        return {"status": "disabled"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/nifty-options-cycle")
+async def nifty_options_cycle():
+    """Manually trigger one NIFTY options scoring/trading cycle (for testing)."""
+    try:
+        return await get_nifty_options_trader().run_cycle()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
