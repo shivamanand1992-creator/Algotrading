@@ -47,12 +47,31 @@ interface TraderStatus {
   active_trades?: any[];
 }
 
+interface PaperTradingStatus {
+  status: string;
+  capital: number;
+  balance: number;
+  equity: number;
+  total_pnl: number;
+  return_pct: number;
+  week_pnl: number;
+  active_trades: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  profit_factor: number;
+  largest_win: number;
+  largest_loss: number;
+}
+
 export function WeeklyIncomeTrader() {
   const [opportunities, setOpportunities] = useState<OpportunitiesResponse | null>(null);
   const [status, setStatus] = useState<TraderStatus | null>(null);
+  const [paperStatus, setPaperStatus] = useState<PaperTradingStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedSetup, setSelectedSetup] = useState<TradeSetup | null>(null);
 
   const fetchOpportunities = useCallback(async () => {
@@ -77,6 +96,15 @@ export function WeeklyIncomeTrader() {
     }
   }, []);
 
+  const fetchPaperTradingStatus = useCallback(async () => {
+    try {
+      const resp = await api.get<PaperTradingStatus>('/api/weekly-income/paper-trading/status');
+      setPaperStatus(resp.data);
+    } catch (err) {
+      // Silent fail for paper trading status
+    }
+  }, []);
+
   const executeSetup = async (setupId: string) => {
     try {
       await api.post(`/api/weekly-income/execute?setup_id=${setupId}`);
@@ -90,15 +118,18 @@ export function WeeklyIncomeTrader() {
   useEffect(() => {
     fetchOpportunities();
     fetchStatus();
+    fetchPaperTradingStatus();
 
-    if (autoRefresh) {
-      const interval = setInterval(() => {
+    // Auto-refresh every 30 seconds (paper trading is live)
+    const interval = setInterval(() => {
+      fetchPaperTradingStatus();
+      if (Math.random() < 0.33) {  // Full scan every 90 seconds
         fetchOpportunities();
-        fetchStatus();
-      }, 60000); // Refresh every minute
-      return () => clearInterval(interval);
-    }
-  }, [autoRefresh]);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -141,6 +172,54 @@ export function WeeklyIncomeTrader() {
           </button>
         </div>
       </div>
+
+      {/* LIVE PAPER TRADING Status */}
+      {paperStatus && (
+        <div className="glass-panel rounded-xl p-6 border border-green-500/50 bg-green-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">📈</span>
+              <div>
+                <h2 className="text-lg font-bold text-green-400">PAPER TRADING LIVE</h2>
+                <p className="text-xs text-jarvis-text-secondary">Automated ₹100,000 account (continuous scanning)</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse"></div>
+              <span className="text-xs text-green-400">RUNNING</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Equity', value: `₹${paperStatus.equity.toLocaleString('en-IN')}`, color: 'text-cyan-400' },
+              { label: 'Total P&L', value: `₹${paperStatus.total_pnl.toLocaleString('en-IN')}`, color: paperStatus.total_pnl >= 0 ? 'text-green-400' : 'text-red-400' },
+              { label: 'Return', value: `${paperStatus.return_pct.toFixed(2)}%`, color: paperStatus.return_pct >= 0 ? 'text-green-400' : 'text-red-400' },
+              { label: 'Week P&L', value: `₹${paperStatus.week_pnl.toLocaleString('en-IN')}`, color: paperStatus.week_pnl >= 0 ? 'text-green-400' : 'text-red-400' },
+              { label: 'Trades', value: paperStatus.total_trades, color: 'text-yellow-400' },
+              { label: 'Win Rate', value: `${paperStatus.win_rate.toFixed(0)}%`, color: 'text-blue-400' },
+              { label: 'Profit Factor', value: `${paperStatus.profit_factor.toFixed(2)}x`, color: paperStatus.profit_factor > 2 ? 'text-green-400' : 'text-yellow-400' },
+              { label: 'Active', value: paperStatus.active_trades, color: 'text-orange-400' },
+            ].map((item) => (
+              <div key={item.label} className="bg-white/5 rounded-lg p-3 text-center">
+                <div className="text-[10px] text-jarvis-text-secondary uppercase mb-1">{item.label}</div>
+                <div className={`text-sm font-bold ${item.color}`}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="bg-green-500/10 rounded-lg p-3 text-center border border-green-500/30">
+              <div className="text-xs text-jarvis-text-secondary mb-1">Largest Win</div>
+              <div className="text-lg font-bold text-green-400">₹{paperStatus.largest_win.toLocaleString('en-IN')}</div>
+            </div>
+            <div className="bg-red-500/10 rounded-lg p-3 text-center border border-red-500/30">
+              <div className="text-xs text-jarvis-text-secondary mb-1">Largest Loss</div>
+              <div className="text-lg font-bold text-red-400">₹{paperStatus.largest_loss.toLocaleString('en-IN')}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Performance Summary */}
       {status && (
