@@ -435,7 +435,7 @@ async def get_options_strategy_analysis():
     """
     try:
         from backend.dependencies import get_angel_client
-        from backend.services.market_service import get_market_service
+        from backend.api.routes.market_data import get_market_service
         import asyncio
 
         angel = get_angel_client()
@@ -549,7 +549,7 @@ async def get_spread_details(spread_name: str):
         advisor = get_strategy_advisor()
 
         # Get current NIFTY price
-        from backend.services.market_service import get_market_service
+        from backend.api.routes.market_data import get_market_service
         market_svc = get_market_service()
         current_data = await market_svc.get_current_market_data()
         nifty_price = float(current_data.get("ltp", 0))
