@@ -15,11 +15,7 @@ const navItems: NavItem[] = [
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
   { id: 'news',       label: 'Market News',    icon: '≡' },
 
-  { id: 'intraday',   label: 'Intraday Intel', icon: '⚡', section: 'TRADING' },
-  { id: 'ml-intraday', label: 'ML Intraday',    icon: '🎯' },
-  { id: 'option-trading', label: 'Option Trading', icon: '📊' },
-  { id: 'options-strategy', label: 'Strategy Advisor', icon: '💡' },
-  { id: 'weekly-income', label: 'Weekly 5% Income', icon: '💰' },
+  { id: 'weekly-income', label: 'Weekly 5% Income', icon: '💰', section: 'TRADING' },
 
   { id: 'stocks',     label: 'Equity Swing',   icon: '↗', section: 'PORTFOLIOS' },
   { id: 'niftybees',  label: 'NiftyBees ETF',  icon: '⬡' },

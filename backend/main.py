@@ -829,24 +829,24 @@ async def lifespan(app: FastAPI):
     # asyncio.create_task(
     #     ws_manager.start_periodic_updates(get_position_service(), get_market_service())
     # )
-    asyncio.create_task(_eod_squareoff_loop())
-    asyncio.create_task(_morning_retrain_loop())
     asyncio.create_task(_session_refresh_loop())
     asyncio.create_task(_session_health_watchdog_loop())
-    # asyncio.create_task(_swing_autopilot_loop())  # DISABLED: free API quota for options trader
-    # asyncio.create_task(_swing_monitor_loop())  # DISABLED: free API quota for options trader
-    # asyncio.create_task(_swing_intraday_sl_loop())  # DISABLED: free API quota for options trader
-    asyncio.create_task(_niftybees_monitor_loop())
-    # asyncio.create_task(_hermes_intraday_loop())  # ARCHIVED: Hermes AI loop
-    # asyncio.create_task(_ml_intraday_loop())  # DISABLED: free API quota for options trader
-    # asyncio.create_task(_nifty_ml_loop())  # DISABLED: free API quota for options trader
-    asyncio.create_task(_nifty_options_trader_loop())  # Options trader — now has dedicated API quota
-    asyncio.create_task(_paper_trading_loop())  # Weekly 5% Income paper trading (continuous)
-    asyncio.create_task(_etf_holdings_monitor_loop())
-    asyncio.create_task(_eod_telegram_report_loop())
-    asyncio.create_task(_balance_check_loop())
-    asyncio.create_task(_morning_news_loop())
-    asyncio.create_task(_sr_refresh_loop())
+    # DISABLED: All competing strategies (free API quota for Weekly 5% Income only)
+    # asyncio.create_task(_swing_autopilot_loop())  # DISABLED
+    # asyncio.create_task(_swing_monitor_loop())  # DISABLED
+    # asyncio.create_task(_swing_intraday_sl_loop())  # DISABLED
+    # asyncio.create_task(_niftybees_monitor_loop())  # DISABLED
+    # asyncio.create_task(_etf_holdings_monitor_loop())  # DISABLED
+    # asyncio.create_task(_ml_intraday_loop())  # DISABLED
+    # asyncio.create_task(_nifty_ml_loop())  # DISABLED
+    # asyncio.create_task(_nifty_options_trader_loop())  # DISABLED
+    # asyncio.create_task(_eod_squareoff_loop())  # DISABLED
+    # asyncio.create_task(_morning_retrain_loop())  # DISABLED
+    # asyncio.create_task(_sr_refresh_loop())  # DISABLED
+    asyncio.create_task(_paper_trading_loop())  # ONLY: Weekly 5% Income paper trading (continuous)
+    asyncio.create_task(_eod_telegram_report_loop())  # Keep: Daily reporting
+    asyncio.create_task(_balance_check_loop())  # Keep: Account health
+    asyncio.create_task(_morning_news_loop())  # Keep: Market news
     asyncio.create_task(_startup_telegram_ping())
     # Restore strategies that were running before any restart/redeploy
     await get_strategy_service().restore_running_strategies()

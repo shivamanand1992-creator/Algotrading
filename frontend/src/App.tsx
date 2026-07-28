@@ -11,10 +11,6 @@ import { SectorAnalysisView } from './components/sectors/SectorAnalysisView';
 import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { StockConvictionView } from './components/conviction/StockConvictionView';
-import { IntradayDashboard } from './components/intraday/IntradayDashboard';
-import MLIntradayDashboard from './components/ml-intraday/MLIntradayDashboard';
-import OptionTradingDashboard from './components/option-trading/OptionTradingDashboard';
-import OptionsStrategyAdvisor from './components/options-strategy/OptionsStrategyAdvisor';
 import { WeeklyIncomeTrader } from './components/weekly-income/WeeklyIncomeTrader';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
@@ -61,10 +57,6 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
-      case 'intraday':   return <IntradayDashboard />;
-      case 'ml-intraday': return <MLIntradayDashboard />;
-      case 'option-trading': return <OptionTradingDashboard />;
-      case 'options-strategy': return <OptionsStrategyAdvisor />;
       case 'weekly-income': return <WeeklyIncomeTrader />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
