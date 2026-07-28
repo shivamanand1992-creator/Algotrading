@@ -458,11 +458,8 @@ async def get_options_strategy_analysis():
             range_high = range_low = nifty_price
 
         # Fetch technical indicators (RSI, MACD, SMA50, volume)
-        # Using ML scoring service for consistency
+        # Using cached features from scoring service (no API calls)
         scoring_svc = get_service()
-        await scoring_svc.update_live_candles()
-
-        # Get calculated features from scoring service
         features = scoring_svc.latest_features or {}
 
         rsi = features.get("rsi", 50)
