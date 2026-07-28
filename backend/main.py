@@ -838,6 +838,7 @@ async def lifespan(app: FastAPI):
     # asyncio.create_task(_hermes_intraday_loop())  # ARCHIVED: Hermes AI loop
     # asyncio.create_task(_ml_intraday_loop())  # DISABLED: free API quota for options trader
     # asyncio.create_task(_nifty_ml_loop())  # DISABLED: free API quota for options trader
+    asyncio.create_task(_nifty_options_trader_loop())  # Options trader — now has dedicated API quota
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
@@ -1100,6 +1101,48 @@ async def _nifty_ml_loop() -> None:
         except Exception as e:
             logger.error(f"[NiftyMLLoop] Error: {e}")
             await asyncio.sleep(300)
+
+
+async def _nifty_options_trader_loop() -> None:
+    """Background task: NIFTY options auto-trader every 30s during market hours"""
+    from backend.ml.nifty_options_trader import NiftyOptionsTrader
+
+    await asyncio.sleep(30)  # Wait for startup + angel connection
+
+    trader = NiftyOptionsTrader.get_instance()
+    logger.info("[NiftyOptionsLoop] Starting NIFTY options trader loop (30-sec cycle)")
+
+    while True:
+        try:
+            now = datetime.now(_IST)
+            is_weekday = now.weekday() < 5
+            hm_str = now.strftime("%H:%M")
+            in_hours = "09:15" <= hm_str <= "15:30"
+
+            if trader.enabled and is_weekday and in_hours:
+                result = await trader.run_cycle()
+                if result.get("status") != "waiting":
+                    logger.info(
+                        f"[NiftyOptionsLoop] Cycle complete: status={result.get('status')} | "
+                        f"action={result.get('action')}"
+                    )
+                    # Broadcast update to connected clients
+                    try:
+                        await ws_manager.broadcast({
+                            "type": "nifty_options_update",
+                            "status": result.get("status"),
+                            "action": result.get("action"),
+                            "last_update": now.isoformat(),
+                        })
+                    except Exception:
+                        pass
+                await asyncio.sleep(30)  # 30 seconds
+            else:
+                await asyncio.sleep(60)  # Check again in 1 min when closed/disabled
+
+        except Exception as e:
+            logger.error(f"[NiftyOptionsLoop] Error: {e}")
+            await asyncio.sleep(60)
 
 
 async def _ml_intraday_loop() -> None:
