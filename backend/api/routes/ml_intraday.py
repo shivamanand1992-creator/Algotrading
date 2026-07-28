@@ -445,8 +445,8 @@ async def get_options_strategy_analysis():
 
         # Fetch current market data
         current_data = await market_svc.get_current_market_data()
-        nifty_price = float(current_data.get("ltp", 0))
-        prev_close = float(current_data.get("prev_close", 0))
+        nifty_price = float(current_data.ltp)
+        prev_close = nifty_price - float(current_data.change)
 
         # Fetch OHLCV for technical analysis
         ohlcv = await market_svc.get_ohlcv_data("FIFTEEN_MINUTE", days=1)
@@ -552,7 +552,7 @@ async def get_spread_details(spread_name: str):
         from backend.api.routes.market_data import get_market_service
         market_svc = get_market_service()
         current_data = await market_svc.get_current_market_data()
-        nifty_price = float(current_data.get("ltp", 0))
+        nifty_price = float(current_data.ltp)
 
         # Default IV (should be fetched from broker in real implementation)
         iv = 50.0
