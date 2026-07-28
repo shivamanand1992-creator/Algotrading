@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.config import DEMO_MODE
 from backend.ml.weekly_income_trader import get_trader
+from backend.ml.paper_trading_engine import get_paper_engine
 from backend.api.routes.market_data import get_market_service
 
 router = APIRouter(prefix="/api/weekly-income", tags=["weekly-income"])
@@ -280,6 +281,65 @@ async def get_trader_status():
         return status
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Status fetch failed: {exc}")
+
+
+@router.get("/paper-trading/status")
+async def get_paper_trading_status():
+    """Get live paper trading performance (₹100,000 account)"""
+    if DEMO_MODE:
+        return {
+            "status": "running",
+            "capital": 100000.0,
+            "balance": 98500.0,
+            "equity": 101850.0,
+            "total_pnl": 1850.0,
+            "return_pct": 1.85,
+            "week_pnl": 1850.0,
+            "active_trades": 2,
+            "total_trades": 5,
+            "winning_trades": 3,
+            "losing_trades": 2,
+            "win_rate": 60.0,
+            "profit_factor": 2.33,
+            "largest_win": 2500.0,
+            "largest_loss": -800.0,
+            "active": [
+                {
+                    "trade_id": "trade_abc123",
+                    "strategy": "call_spread",
+                    "entry_price": 24567.85,
+                    "entry_time": "09:30",
+                    "current_pnl": 1250.0,
+                    "current_pnl_pct": 15.6,
+                    "max_profit": 12000.0,
+                    "max_loss": -8000.0,
+                }
+            ]
+        }
+
+    try:
+        engine = get_paper_engine()
+        status = await engine.get_status()
+        return {
+            **status,
+            "status": "running",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Status fetch failed: {exc}")
+
+
+@router.post("/paper-trading/reset")
+async def reset_paper_trading():
+    """Reset paper trading account (start fresh ₹100,000)"""
+    if DEMO_MODE:
+        return {"status": "reset", "message": "Demo mode - no reset needed"}
+
+    try:
+        from backend.ml.paper_trading_engine import reset_paper_engine
+        reset_paper_engine()
+        return {"status": "reset", "message": "Paper trading account reset to ₹100,000"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Reset failed: {exc}")
 
 
 @router.get("/strategy-guide")

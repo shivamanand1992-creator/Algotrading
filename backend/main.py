@@ -37,6 +37,7 @@ from backend.api.routes import support_resistance as sr_routes
 from backend.api.routes import version as version_routes
 from backend.api.routes import ml_intraday as ml_intraday_routes
 from backend.api.routes import weekly_income as weekly_income_routes
+from backend.ml.paper_trading_engine import get_paper_engine
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
 from backend.dependencies import cleanup_dependencies
@@ -840,6 +841,7 @@ async def lifespan(app: FastAPI):
     # asyncio.create_task(_ml_intraday_loop())  # DISABLED: free API quota for options trader
     # asyncio.create_task(_nifty_ml_loop())  # DISABLED: free API quota for options trader
     asyncio.create_task(_nifty_options_trader_loop())  # Options trader — now has dedicated API quota
+    asyncio.create_task(_paper_trading_loop())  # Weekly 5% Income paper trading (continuous)
     asyncio.create_task(_etf_holdings_monitor_loop())
     asyncio.create_task(_eod_telegram_report_loop())
     asyncio.create_task(_balance_check_loop())
@@ -1145,6 +1147,110 @@ async def _nifty_options_trader_loop() -> None:
         except Exception as e:
             logger.error(f"[NiftyOptionsLoop] Error: {e}")
             await asyncio.sleep(60)
+
+
+async def _paper_trading_loop() -> None:
+    """Background task: Weekly 5% Income paper trading (continuous scanning & execution)"""
+    from backend.ml.weekly_income_trader import get_trader
+    from backend.api.routes.market_data import get_market_service
+
+    await asyncio.sleep(30)  # Wait for startup
+
+    trader = get_trader()
+    engine = get_paper_engine()
+    logger.info("[PaperTrading] Starting continuous paper trading loop (₹100,000 account)")
+
+    scan_counter = 0
+    while True:
+        try:
+            now = datetime.now(_IST)
+            is_weekday = now.weekday() < 5
+            hm_str = now.strftime("%H:%M")
+            in_hours = "09:15" <= hm_str <= "15:30"
+
+            if is_weekday and in_hours:
+                # Scan every 5 minutes for new opportunities
+                scan_counter += 1
+
+                if scan_counter >= 5:  # Scan every 5 mins
+                    scan_counter = 0
+                    try:
+                        market_svc = get_market_service()
+                        current_data = await market_svc.get_current_market_data()
+                        nifty_price = float(current_data.ltp)
+
+                        # Fetch technicals
+                        technicals = await market_svc.get_nifty_technicals()
+
+                        # Fetch cycle
+                        from backend.services.sector_analysis_service import run_sector_analysis
+                        cycle = run_sector_analysis().get("cycle", {})
+
+                        market_data = {
+                            "ltp": nifty_price,
+                            "rsi": technicals.get("rsi14", 50),
+                            "macd_histogram": technicals.get("macd_hist", 0),
+                            "volume_ratio": technicals.get("vol_ratio", 1.0),
+                            "atr": technicals.get("atr14", 100),
+                            "sma50": technicals.get("sma50", nifty_price),
+                            "support": technicals.get("support_level", nifty_price - 200),
+                            "resistance": technicals.get("resistance_level", nifty_price + 200),
+                            "iv_percentile": technicals.get("iv_percentile", 50),
+                        }
+
+                        # Update prices in engine
+                        await engine.update_prices(nifty_price)
+
+                        # Check for exits
+                        closed = await engine.check_exits(nifty_price)
+                        if closed:
+                            logger.info(f"[PaperTrading] Closed {len(closed)} trades at ₹{nifty_price:.2f}")
+
+                        # Scan for new opportunities
+                        setups = await trader.scan_for_opportunities(market_data, cycle)
+                        logger.info(f"[PaperTrading] Scanned: {len(setups)} high-confidence setups found (confidence ≥65%)")
+
+                        # Auto-execute if capital available
+                        for setup in setups:
+                            # Check if we have enough capital
+                            if engine.account.equity >= setup.capital_required * 1.2:  # 20% buffer
+                                trade = await engine.execute_trade(setup)
+                                logger.info(f"[PaperTrading] AUTO-EXECUTED: {setup.strategy} @ ₹{setup.entry_price:.2f}")
+
+                                # Broadcast to connected clients
+                                try:
+                                    await ws_manager.broadcast({
+                                        "type": "paper_trading_update",
+                                        "event": "trade_executed",
+                                        "trade_id": trade.trade_id,
+                                        "strategy": setup.strategy,
+                                        "confidence": setup.confidence_score,
+                                        "nifty_price": nifty_price,
+                                        "account_equity": engine.account.equity,
+                                    })
+                                except Exception:
+                                    pass
+
+                        # Log account status every 30 mins
+                        if scan_counter % 30 == 0:
+                            status = await engine.get_status()
+                            logger.info(
+                                f"[PaperTrading] Status: Equity=₹{status['equity']:,.0f} | "
+                                f"P&L=₹{status['total_pnl']:,.0f} ({status['return_pct']:.1f}%) | "
+                                f"Trades={status['total_trades']} | Win={status['win_rate']:.0f}% | "
+                                f"Active={status['active_trades']}"
+                            )
+
+                    except Exception as e:
+                        logger.error(f"[PaperTrading] Scan error: {e}")
+
+                await asyncio.sleep(60)  # Check every minute
+            else:
+                await asyncio.sleep(120)  # Market closed, check less frequently
+
+        except Exception as e:
+            logger.error(f"[PaperTrading] Loop error: {e}")
+            await asyncio.sleep(120)
 
 
 async def _ml_intraday_loop() -> None:
