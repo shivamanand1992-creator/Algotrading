@@ -458,23 +458,19 @@ async def get_options_strategy_analysis():
             range_high = range_low = nifty_price
 
         # Fetch technical indicators (RSI, MACD, SMA50, volume)
-        # Using cached features from scoring service (no API calls)
-        scoring_svc = get_service()
-        features = scoring_svc.latest_features or {}
+        technicals = await market_svc.get_nifty_technicals()
 
-        rsi = features.get("rsi", 50)
-        macd_signal = "BULLISH" if features.get("macd_histogram", 0) > 0 else "BEARISH"
-        sma50 = features.get("sma_50", nifty_price)
-        volume_ratio = features.get("volume_ratio", 1.0)
+        rsi = technicals.get("rsi14", 50)
+        macd_signal = "BULLISH" if technicals.get("macd_hist", 0) > 0 else "BEARISH"
+        sma50 = technicals.get("sma50", nifty_price)
+        volume_ratio = technicals.get("vol_ratio", 1.0)
 
-        # Support/Resistance from service
-        support = features.get("support_level", nifty_price - 200)
-        resistance = features.get("resistance_level", nifty_price + 200)
+        # Support/Resistance from technical levels
+        support = technicals.get("support", nifty_price - 200)
+        resistance = technicals.get("resistance", nifty_price + 200)
 
-        # IV Percentile (0-100)
-        # In real implementation, fetch from broker API
-        # For now, estimate from ATR
-        atr = features.get("atr", 100)
+        # IV Percentile from ATR
+        atr = technicals.get("atr14", 100)
         iv_percentile = min(100, int((atr / nifty_price) * 500))
 
         # Analyze market
