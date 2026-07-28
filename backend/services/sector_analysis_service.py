@@ -208,9 +208,11 @@ def _detect_cycle(nifty_df: pd.DataFrame) -> Dict:
     # Momentum acceleration on weekly basis
     accelerating = r12w > (r26w / 2)
 
-    # CONFIRMATION RULE: Need 2+ weeks above/below EMA200
-    confirmed_above = weeks_above >= 2
-    confirmed_below = (12 - weeks_above) >= 2
+    # CONFIRMATION RULE: Need 2+ CONSECUTIVE weeks above/below EMA200
+    # Check if last 2 weeks are both above/below (persistent confirmation)
+    last_2_weeks = (close > ema200_series).tail(2).values
+    confirmed_above = all(last_2_weeks)  # Last 2 weeks both above
+    confirmed_below = not any(last_2_weeks)  # Last 2 weeks both below
 
     if confirmed_above and r26w > 8 and r12w > 3 and accelerating:
         phase = "expansion"
@@ -373,6 +375,7 @@ def _score_sector(sector_meta: Dict, df: pd.DataFrame, nifty_close: pd.Series,
         "ret_4w":       r4w,
         "ret_12w":      r12w,
         "ret_26w":      r26w,
+        "ret_4w_vs_nifty": vs4w_raw,
         "ret_12w_vs_nifty": vs12w_raw,
         "ret_26w_vs_nifty": vs26w_raw,
         "rsi":          rsi_val,

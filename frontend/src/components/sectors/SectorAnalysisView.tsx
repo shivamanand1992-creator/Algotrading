@@ -33,6 +33,7 @@ interface SectorResult {
   ret_4w: number;
   ret_12w: number;
   ret_26w: number;
+  ret_4w_vs_nifty: number;
   ret_12w_vs_nifty: number;
   ret_26w_vs_nifty: number;
   rsi: number;
@@ -280,7 +281,7 @@ function SectorCard({ sector, expanded, onToggle }: {
             <div className="text-xs text-jarvis-text-secondary uppercase tracking-wider mb-2">Weekly Returns vs Nifty</div>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: '4 Weeks', abs: sector.ret_4w, vs: 0 },
+                { label: '4 Weeks', abs: sector.ret_4w, vs: sector.ret_4w_vs_nifty },
                 { label: '12 Weeks', abs: sector.ret_12w, vs: sector.ret_12w_vs_nifty },
                 { label: '26 Weeks', abs: sector.ret_26w, vs: sector.ret_26w_vs_nifty },
               ].map(r => (
