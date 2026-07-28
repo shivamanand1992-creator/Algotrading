@@ -18,6 +18,7 @@ const navItems: NavItem[] = [
   { id: 'intraday',   label: 'Intraday Intel', icon: '⚡', section: 'TRADING' },
   { id: 'ml-intraday', label: 'ML Intraday',    icon: '🎯' },
   { id: 'option-trading', label: 'Option Trading', icon: '📊' },
+  { id: 'options-strategy', label: 'Strategy Advisor', icon: '💡' },
 
   { id: 'stocks',     label: 'Equity Swing',   icon: '↗', section: 'PORTFOLIOS' },
   { id: 'niftybees',  label: 'NiftyBees ETF',  icon: '⬡' },

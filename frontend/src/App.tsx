@@ -14,6 +14,7 @@ import { StockConvictionView } from './components/conviction/StockConvictionView
 import { IntradayDashboard } from './components/intraday/IntradayDashboard';
 import MLIntradayDashboard from './components/ml-intraday/MLIntradayDashboard';
 import OptionTradingDashboard from './components/option-trading/OptionTradingDashboard';
+import OptionsStrategyAdvisor from './components/options-strategy/OptionsStrategyAdvisor';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -62,6 +63,7 @@ function App() {
       case 'intraday':   return <IntradayDashboard />;
       case 'ml-intraday': return <MLIntradayDashboard />;
       case 'option-trading': return <OptionTradingDashboard />;
+      case 'options-strategy': return <OptionsStrategyAdvisor />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;

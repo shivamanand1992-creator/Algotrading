@@ -416,3 +416,209 @@ async def explain_signal(request: ExplanationRequest):
     except Exception as e:
         logger.error(f"[ML API] explain failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# OPTIONS STRATEGY ADVISOR (comprehensive monthly income strategy engine)
+# ============================================================================
+
+def get_strategy_advisor():
+    from backend.ml.options_strategy_advisor import get_strategy_advisor as _get_advisor
+    return _get_advisor()
+
+
+@router.get("/options-strategy-analysis")
+async def get_options_strategy_analysis():
+    """
+    Comprehensive options strategy recommendation for current market.
+    Includes: market analysis, spread recommendations, Greeks, entry/exit, breakevens, P&L targets.
+    """
+    try:
+        from backend.dependencies import get_angel_client
+        from backend.services.market_service import get_market_service
+        import asyncio
+
+        angel = get_angel_client()
+        market_svc = get_market_service()
+
+        loop = asyncio.get_event_loop()
+
+        # Fetch current market data
+        current_data = await market_svc.get_current_market_data()
+        nifty_price = float(current_data.get("ltp", 0))
+        prev_close = float(current_data.get("prev_close", 0))
+
+        # Fetch OHLCV for technical analysis
+        ohlcv = await market_svc.get_ohlcv_data("FIFTEEN_MINUTE", days=1)
+        if ohlcv and len(ohlcv) > 0:
+            latest = ohlcv[-1]
+            range_high = float(latest.get("high", nifty_price))
+            range_low = float(latest.get("low", nifty_price))
+        else:
+            range_high = range_low = nifty_price
+
+        # Fetch technical indicators (RSI, MACD, SMA50, volume)
+        # Using ML scoring service for consistency
+        scoring_svc = get_service()
+        await scoring_svc.update_live_candles()
+
+        # Get calculated features from scoring service
+        features = scoring_svc.latest_features or {}
+
+        rsi = features.get("rsi", 50)
+        macd_signal = "BULLISH" if features.get("macd_histogram", 0) > 0 else "BEARISH"
+        sma50 = features.get("sma_50", nifty_price)
+        volume_ratio = features.get("volume_ratio", 1.0)
+
+        # Support/Resistance from service
+        support = features.get("support_level", nifty_price - 200)
+        resistance = features.get("resistance_level", nifty_price + 200)
+
+        # IV Percentile (0-100)
+        # In real implementation, fetch from broker API
+        # For now, estimate from ATR
+        atr = features.get("atr", 100)
+        iv_percentile = min(100, int((atr / nifty_price) * 500))
+
+        # Analyze market
+        advisor = get_strategy_advisor()
+        market_analysis = advisor.analyze_market(
+            nifty_price=nifty_price,
+            prev_close=prev_close,
+            volatility=iv_percentile,
+            rsi=rsi,
+            macd_signal=macd_signal,
+            sma50=sma50,
+            support=support,
+            resistance=resistance,
+            range_high=range_high,
+            range_low=range_low,
+            volume_ratio=volume_ratio,
+        )
+
+        # Generate strategy recommendation
+        recommendation = advisor.recommend_strategy(market_analysis, iv_percentile)
+
+        if not recommendation:
+            raise HTTPException(status_code=500, detail="Failed to generate strategy recommendation")
+
+        # Convert to JSON-serializable format
+        from dataclasses import asdict
+
+        def serialize_spread(spread):
+            return {
+                "name": spread.name,
+                "description": spread.description,
+                "outlook": spread.outlook,
+                "legs": spread.legs,
+                "max_profit": float(spread.max_profit),
+                "max_loss": float(spread.max_loss),
+                "breakeven_points": [float(x) for x in spread.breakeven_points],
+                "probability_profit": float(spread.probability_profit),
+                "capital_required": float(spread.capital_required),
+                "reward_risk_ratio": float(spread.reward_risk_ratio),
+            }
+
+        return {
+            "market_analysis": asdict(market_analysis),
+            "primary_strategy": serialize_spread(recommendation.primary_strategy),
+            "alternative_strategies": [serialize_spread(s) for s in recommendation.alternative_strategies],
+            "rationale": recommendation.rationale,
+            "risk_factors": recommendation.risk_factors,
+            "profit_targets": {k: float(v) for k, v in recommendation.profit_targets.items()},
+            "stop_loss_level": float(recommendation.stop_loss_level),
+            "ideal_entry_time": recommendation.ideal_entry_time,
+            "expiry_days": recommendation.expiry_days,
+            "timestamp": recommendation.timestamp,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Strategy Advisor] analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/options-spread-details/{spread_name}")
+async def get_spread_details(spread_name: str):
+    """
+    Get detailed information for a specific options spread.
+    Includes: payoff diagram data, Greeks at different price levels, entry/exit calculations.
+    """
+    try:
+        advisor = get_strategy_advisor()
+
+        # Get current NIFTY price
+        from backend.services.market_service import get_market_service
+        market_svc = get_market_service()
+        current_data = await market_svc.get_current_market_data()
+        nifty_price = float(current_data.get("ltp", 0))
+
+        # Default IV (should be fetched from broker in real implementation)
+        iv = 50.0
+
+        # Build the spread
+        spread = advisor.build_spread(
+            spread_name,
+            nifty_price,
+            iv,
+            days_to_expiry=14,
+        )
+
+        if not spread:
+            raise HTTPException(status_code=404, detail=f"Spread '{spread_name}' not found or not buildable")
+
+        # Calculate payoff across price range
+        import numpy as np
+        strike_range = np.arange(nifty_price - 500, nifty_price + 500, 10)
+        payoff, stats = advisor.calculate_spread_payoff(
+            spread.legs,
+            strike_range,
+            sum(leg.get("premium", 0) for leg in spread.legs),
+        )
+
+        # Calculate Greeks at current price and key levels
+        greeks_current = advisor.calculate_spread_Greeks(
+            spread.legs, nifty_price, iv, days_to_expiry=14
+        )
+
+        from dataclasses import asdict
+
+        return {
+            "spread": asdict(spread),
+            "payoff_data": {
+                "price_levels": [float(p) for p in strike_range],
+                "pnl": [float(p) for p in payoff],
+                "max_profit": float(stats["max_profit"]),
+                "max_loss": float(stats["max_loss"]),
+                "breakeven_points": [float(x) for x in stats["breakeven_points"]],
+            },
+            "current_greeks": {
+                "delta": float(greeks_current["delta"]),
+                "gamma": float(greeks_current["gamma"]),
+                "theta": float(greeks_current["theta"]),
+                "vega": float(greeks_current["vega"]),
+            },
+            "position_sizing": {
+                "capital_required": float(spread.capital_required),
+                "max_profit_potential": float(spread.max_profit),
+                "max_loss_potential": float(spread.max_loss),
+                "reward_risk_ratio": float(spread.reward_risk_ratio),
+            },
+            "entry_exit_guide": {
+                "recommended_entry": f"₹{nifty_price:.0f} ± 1% (market order or limit near midpoint)",
+                "profit_targets": {
+                    "50%": f"₹{greeks_current['net_premium'] * 0.5:.0f}",
+                    "75%": f"₹{greeks_current['net_premium'] * 0.75:.0f}",
+                    "100%": f"₹{greeks_current['net_premium']:.0f}",
+                },
+                "stop_loss": f"₹{spread.max_loss * 1.2:.0f} (allow 20% adverse move)",
+                "time_stop": "Exit if 50% of expiry time passed with <50% max profit",
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Strategy Advisor] spread details failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
