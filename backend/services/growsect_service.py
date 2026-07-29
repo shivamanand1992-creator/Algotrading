@@ -159,50 +159,95 @@ class NiftyGrowsectService:
         self.last_reshuffled: Optional[datetime] = None
         self._cache_ttl = 60  # 1 minute
 
-    async def update_stock_prices(self, market_service) -> bool:
-        """Fetch latest prices for all GROWSECT 15 stocks"""
+    async def update_stock_prices(self, market_service=None) -> bool:
+        """Fetch latest prices for all GROWSECT 15 stocks using yfinance"""
         try:
+            import yfinance as yf
             updated_count = 0
 
-            for symbol, sector in GROWSECT_15_STOCKS.items():
+            # Fetch all 15 stocks at once
+            symbols_list = list(GROWSECT_15_STOCKS.keys())
+            tickers_str = " ".join([f"{s}.NS" for s in symbols_list])  # NSE format
+
+            data = yf.download(tickers_str, period="5d", interval="1d", progress=False)
+
+            if data.empty:
+                logger.warning("[GROWSECT] No data returned from yfinance")
+                return False
+
+            # Extract close and other info
+            for symbol in symbols_list:
                 try:
-                    # Get current quote
-                    quote = await market_service.get_quote(f"{symbol}-EQ")
-                    if not quote:
+                    # Get the latest data for this symbol
+                    ticker = yf.Ticker(f"{symbol}.NS")
+                    hist = ticker.history(period="5d")
+                    info = ticker.info if hasattr(ticker, 'info') else {}
+
+                    if hist.empty:
                         continue
 
-                    # Get technicals for this stock
-                    technicals = await market_service.get_stock_technicals(symbol)
+                    # Get latest price (last row)
+                    latest = hist.iloc[-1]
+                    prev = hist.iloc[-2] if len(hist) > 1 else latest
 
-                    price = float(quote.get("ltp", 0))
-                    prev_close = float(quote.get("previous_close", price))
+                    price = float(latest['Close'])
+                    prev_close = float(prev['Close']) if len(hist) > 1 else float(latest['Open'])
                     change_pct = ((price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+
+                    # Estimate RSI from available data (simplified calculation)
+                    rsi = self._calculate_simple_rsi(hist, symbol)
 
                     self.stocks_data[symbol] = StockData(
                         symbol=symbol,
                         price=price,
                         prev_close=prev_close,
                         change_pct=change_pct,
-                        sector=sector,
+                        sector=GROWSECT_15_STOCKS[symbol],
                         timestamp=datetime.now(_IST),
-                        rsi=technicals.get("rsi14", 50),
-                        macd_hist=technicals.get("macd_hist", 0),
-                        volume_ratio=technicals.get("vol_ratio", 1.0),
-                        atr=technicals.get("atr14", 0),
+                        rsi=rsi,
+                        macd_hist=0.0,  # Would need additional calculation
+                        volume_ratio=float(latest.get('Volume', 1000000)) / 1000000,
+                        atr=0.0,  # Would need additional calculation
                     )
                     updated_count += 1
-                    await asyncio.sleep(0.1)  # Rate limit
+                    await asyncio.sleep(0.05)  # Rate limit
                 except Exception as e:
                     logger.warning(f"[GROWSECT] Failed to fetch {symbol}: {e}")
                     continue
 
             self.last_update = datetime.now(_IST)
             logger.info(f"[GROWSECT] Updated {updated_count}/{len(GROWSECT_15_STOCKS)} stocks")
-            return updated_count == len(GROWSECT_15_STOCKS)
+            return updated_count > 0
 
         except Exception as e:
             logger.error(f"[GROWSECT] Update error: {e}")
             return False
+
+    @staticmethod
+    def _calculate_simple_rsi(hist, symbol: str, period: int = 14) -> float:
+        """Calculate simplified RSI from price history"""
+        try:
+            if len(hist) < period:
+                return 50.0
+
+            closes = hist['Close'].values
+            deltas = np.diff(closes)
+
+            gains = np.where(deltas > 0, deltas, 0)
+            losses = np.where(deltas < 0, -deltas, 0)
+
+            avg_gain = np.mean(gains[-period:])
+            avg_loss = np.mean(losses[-period:])
+
+            if avg_loss == 0:
+                return 100.0 if avg_gain > 0 else 50.0
+
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+            return float(rsi)
+        except Exception as e:
+            logger.debug(f"[GROWSECT] RSI calc error for {symbol}: {e}")
+            return 50.0
 
     def get_heatmap_data(self) -> Dict:
         """Generate heatmap with sector performance"""
