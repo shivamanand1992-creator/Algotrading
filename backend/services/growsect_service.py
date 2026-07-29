@@ -51,17 +51,35 @@ SECTOR_GROUPS = {
 
 @dataclass
 class StockData:
-    """Real-time stock data point"""
+    """Real-time stock data point with comprehensive technical analysis"""
     symbol: str
     price: float
     prev_close: float
     change_pct: float
     sector: str
     timestamp: datetime
+    # Technical indicators
     rsi: float = 50.0
     macd_hist: float = 0.0
     volume_ratio: float = 1.0
     atr: float = 0.0
+    # Support/Resistance
+    support: float = 0.0
+    resistance: float = 0.0
+    # Bollinger Bands
+    bb_upper: float = 0.0
+    bb_middle: float = 0.0
+    bb_lower: float = 0.0
+    bb_pct: float = 50.0  # % B: position between bands (0-100)
+    # MACD components
+    macd_line: float = 0.0
+    macd_signal: float = 0.0
+    # Trend strength
+    adx: float = 20.0
+    # EMA alignment
+    ema50: float = 0.0
+    ema100: float = 0.0
+    ema200: float = 0.0
 
     @property
     def trend(self) -> str:
@@ -76,6 +94,50 @@ class StockData:
             return "SELL"
         else:
             return "NEUTRAL"
+
+    @property
+    def technical_summary(self) -> Dict:
+        """Get comprehensive technical analysis summary"""
+        return {
+            "support_resistance": {
+                "support": round(self.support, 2),
+                "resistance": round(self.resistance, 2),
+                "distance_to_support_pct": round(((self.price - self.support) / self.price * 100), 2) if self.price > 0 else 0,
+                "distance_to_resistance_pct": round(((self.resistance - self.price) / self.price * 100), 2) if self.price > 0 else 0,
+            },
+            "bollinger_bands": {
+                "upper": round(self.bb_upper, 2),
+                "middle": round(self.bb_middle, 2),
+                "lower": round(self.bb_lower, 2),
+                "pct_b": round(self.bb_pct, 1),  # 0 = at lower band, 100 = at upper band, 50 = at middle
+                "status": "Overbought" if self.bb_pct > 80 else "Oversold" if self.bb_pct < 20 else "Neutral",
+            },
+            "momentum": {
+                "macd_line": round(self.macd_line, 4),
+                "macd_signal": round(self.macd_signal, 4),
+                "macd_histogram": round(self.macd_hist, 4),
+                "direction": "Bullish" if self.macd_hist > 0 else "Bearish",
+            },
+            "trend_strength": {
+                "adx": round(self.adx, 1),
+                "strength": "Very Strong" if self.adx > 40 else "Strong" if self.adx > 25 else "Weak",
+            },
+            "ema_alignment": {
+                "ema50": round(self.ema50, 2),
+                "ema100": round(self.ema100, 2),
+                "ema200": round(self.ema200, 2),
+                "bullish": (self.price > self.ema50 > self.ema100 > self.ema200),
+                "status": "All EMAs aligned (Bullish)" if (self.price > self.ema50 > self.ema100 > self.ema200) else "Mixed signals",
+            },
+            "volume": {
+                "ratio": round(self.volume_ratio, 2),
+                "strength": "Strong" if self.volume_ratio > 1.3 else "Normal" if self.volume_ratio > 0.8 else "Weak",
+            },
+            "rsi": {
+                "value": round(self.rsi, 1),
+                "zone": "Overbought" if self.rsi > 70 else "Oversold" if self.rsi < 30 else "Neutral",
+            },
+        }
 
 @dataclass
 class SectorStats:
@@ -200,7 +262,7 @@ class NiftyGrowsectService:
         }
 
     def get_stock_heatmap(self) -> List[Dict]:
-        """Get individual stock data for heatmap table"""
+        """Get individual stock data for heatmap table with technical analysis"""
         stocks_list = []
 
         for symbol, data in self.stocks_data.items():
@@ -215,13 +277,17 @@ class NiftyGrowsectService:
                 "trend": data.trend,
                 "color": self._get_color_code(data.change_pct, data.trend),
                 "timestamp": data.timestamp.isoformat(),
+                # Technical analysis (expandable)
+                "technical": data.technical_summary,
+                "atr": round(data.atr, 2),
+                "volume_ratio": round(data.volume_ratio, 2),
             })
 
         # Sort by change_pct descending
         return sorted(stocks_list, key=lambda x: x["change_pct"], reverse=True)
 
     def get_trend_signals(self) -> Dict:
-        """Identify high-conviction entry signals"""
+        """Identify high-conviction entry signals with technical details"""
         signals = {
             "strong_buy": [],
             "buy": [],
@@ -231,40 +297,74 @@ class NiftyGrowsectService:
 
         for symbol, data in self.stocks_data.items():
             trend = data.trend
+            signal_data = {
+                "symbol": symbol,
+                "sector": data.sector,
+                "change_pct": round(data.change_pct, 2),
+                "price": round(data.price, 2),
+                "rsi": round(data.rsi, 1),
+                # Technical analysis details (for expandable view)
+                "technical": data.technical_summary,
+                "confidence": self._calculate_confidence(data),
+            }
+
             if trend == "STRONG_BUY":
-                signals["strong_buy"].append({
-                    "symbol": symbol,
-                    "sector": data.sector,
-                    "change_pct": data.change_pct,
-                    "price": data.price,
-                    "rsi": data.rsi,
-                })
+                signals["strong_buy"].append(signal_data)
             elif trend == "BUY":
-                signals["buy"].append({
-                    "symbol": symbol,
-                    "sector": data.sector,
-                    "change_pct": data.change_pct,
-                    "price": data.price,
-                    "rsi": data.rsi,
-                })
+                signals["buy"].append(signal_data)
             elif trend == "SELL":
-                signals["sell"].append({
-                    "symbol": symbol,
-                    "sector": data.sector,
-                    "change_pct": data.change_pct,
-                    "price": data.price,
-                    "rsi": data.rsi,
-                })
+                signals["sell"].append(signal_data)
             elif trend == "STRONG_SELL":
-                signals["strong_sell"].append({
-                    "symbol": symbol,
-                    "sector": data.sector,
-                    "change_pct": data.change_pct,
-                    "price": data.price,
-                    "rsi": data.rsi,
-                })
+                signals["strong_sell"].append(signal_data)
 
         return signals
+
+    def _calculate_confidence(self, data: StockData) -> Dict:
+        """Calculate confidence score based on multiple technical factors"""
+        score = 50.0
+
+        # RSI contribution (±15)
+        if 50 <= data.rsi <= 65:
+            score += 15
+        elif data.rsi > 70 or data.rsi < 40:
+            score -= 5
+
+        # MACD contribution (±10)
+        if data.macd_hist > 0:
+            score += 10
+
+        # Volume contribution (±8)
+        if data.volume_ratio > 1.3:
+            score += 8
+        elif data.volume_ratio < 0.8:
+            score -= 5
+
+        # Trend strength (ADX) (±10)
+        if data.adx > 25:
+            score += 10
+        elif data.adx < 15:
+            score -= 5
+
+        # EMA alignment (±12)
+        if data.price > data.ema50 > data.ema100 > data.ema200:
+            score += 12
+
+        # Bollinger Bands (±8)
+        if data.bb_pct < 20:
+            score += 8  # Oversold, potential bounce
+        elif data.bb_pct > 80:
+            score -= 3  # Overbought, caution
+
+        return {
+            "score": min(100, max(0, score)),
+            "factors": {
+                "rsi": "Bullish" if 50 <= data.rsi <= 70 else "Bearish" if data.rsi < 40 else "Neutral",
+                "macd": "Bullish" if data.macd_hist > 0 else "Bearish",
+                "volume": "Strong" if data.volume_ratio > 1.3 else "Weak" if data.volume_ratio < 0.8 else "Normal",
+                "trend_strength": "Strong" if data.adx > 25 else "Weak",
+                "ema_alignment": "Perfect" if data.price > data.ema50 > data.ema100 > data.ema200 else "Mixed",
+            }
+        }
 
     @staticmethod
     def _get_color_code(change_pct: float, trend: str) -> str:

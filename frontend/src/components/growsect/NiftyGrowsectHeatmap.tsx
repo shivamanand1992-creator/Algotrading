@@ -25,6 +25,25 @@ interface Signal {
   change_pct: number;
   price: number;
   rsi: number;
+  confidence?: {
+    score: number;
+    factors: {
+      rsi: string;
+      macd: string;
+      volume: string;
+      trend_strength: string;
+      ema_alignment: string;
+    };
+  };
+  technical?: {
+    support_resistance: { support: number; resistance: number; distance_to_support_pct: number; distance_to_resistance_pct: number };
+    bollinger_bands: { upper: number; middle: number; lower: number; pct_b: number; status: string };
+    momentum: { macd_line: number; macd_signal: number; macd_histogram: number; direction: string };
+    trend_strength: { adx: number; strength: string };
+    ema_alignment: { ema50: number; ema100: number; ema200: number; bullish: boolean; status: string };
+    volume: { ratio: number; strength: string };
+    rsi: { value: number; zone: string };
+  };
 }
 
 export function NiftyGrowsectHeatmap() {
@@ -33,6 +52,7 @@ export function NiftyGrowsectHeatmap() {
   const [signals, setSignals] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'heatmap' | 'stocks' | 'signals'>('heatmap');
+  const [expandedSignal, setExpandedSignal] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -281,7 +301,7 @@ export function NiftyGrowsectHeatmap() {
                   {category === 'strong_sell' && '🔴 STRONG SELL'}
                   {' '}({signals[category].length})
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'grid', gap: '12px' }}>
                   {signals[category].map((signal: Signal) => (
                     <div
                       key={signal.symbol}
@@ -290,18 +310,106 @@ export function NiftyGrowsectHeatmap() {
                         background: category.includes('buy') ? 'rgba(0,204,0,0.1)' : 'rgba(204,0,0,0.1)',
                         border: `1px solid ${category.includes('buy') ? '#00cc00' : '#cc0000'}`,
                         borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      onClick={() => setExpandedSignal(expandedSignal === signal.symbol ? null : signal.symbol)}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = category.includes('buy') ? 'rgba(0,204,0,0.15)' : 'rgba(204,0,0,0.15)';
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = category.includes('buy') ? 'rgba(0,204,0,0.1)' : 'rgba(204,0,0,0.1)';
                       }}
                     >
-                      <div style={{ fontWeight: 700, marginBottom: '8px', color: category.includes('buy') ? '#00cc00' : '#cc0000' }}>
-                        {signal.symbol}
+                      {/* Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, marginBottom: '8px', color: category.includes('buy') ? '#00cc00' : '#cc0000' }}>
+                            {signal.symbol}
+                            {signal.confidence && (
+                              <span style={{ marginLeft: '8px', fontSize: '10px', color: 'rgba(0,229,255,0.6)' }}>
+                                Confidence: {signal.confidence.score}%
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'rgba(0,229,255,0.7)', marginBottom: '5px' }}>
+                            {signal.sector} | Price: ₹{signal.price.toFixed(2)}
+                          </div>
+                          <div style={{ fontSize: '11px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            <span>Change: {signal.change_pct > 0 ? '+' : ''}{signal.change_pct.toFixed(2)}%</span>
+                            <span>RSI: {signal.rsi.toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '16px', opacity: 0.6 }}>
+                          {expandedSignal === signal.symbol ? '▼' : '▶'}
+                        </span>
                       </div>
-                      <div style={{ fontSize: '11px', color: 'rgba(0,229,255,0.7)', marginBottom: '5px' }}>
-                        {signal.sector} | Price: ₹{signal.price.toFixed(2)}
-                      </div>
-                      <div style={{ fontSize: '11px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        <span>Change: {signal.change_pct > 0 ? '+' : ''}{signal.change_pct.toFixed(2)}%</span>
-                        <span>RSI: {signal.rsi.toFixed(1)}</span>
-                      </div>
+
+                      {/* Expanded Technical Analysis */}
+                      {expandedSignal === signal.symbol && signal.technical && (
+                        <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid rgba(0,229,255,0.2)' }}>
+                          <div style={{ fontSize: '11px', lineHeight: 1.8 }}>
+                            {/* Support/Resistance */}
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>📍 Support & Resistance</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>Support: ₹{signal.technical.support_resistance.support.toFixed(2)}</span>
+                                <span>Resistance: ₹{signal.technical.support_resistance.resistance.toFixed(2)}</span>
+                                <span>From Support: +{signal.technical.support_resistance.distance_to_support_pct.toFixed(2)}%</span>
+                                <span>To Resistance: +{signal.technical.support_resistance.distance_to_resistance_pct.toFixed(2)}%</span>
+                              </div>
+                            </div>
+
+                            {/* Bollinger Bands */}
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>📊 Bollinger Bands</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>Upper: ₹{signal.technical.bollinger_bands.upper.toFixed(2)}</span>
+                                <span>Lower: ₹{signal.technical.bollinger_bands.lower.toFixed(2)}</span>
+                                <span>Position: {signal.technical.bollinger_bands.pct_b.toFixed(0)}% ({signal.technical.bollinger_bands.status})</span>
+                              </div>
+                            </div>
+
+                            {/* MACD */}
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>⚡ MACD Momentum</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>Direction: {signal.technical.momentum.direction}</span>
+                                <span>Histogram: {signal.technical.momentum.macd_histogram.toFixed(4)}</span>
+                              </div>
+                            </div>
+
+                            {/* Trend Strength */}
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>📈 Trend Strength (ADX)</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>ADX: {signal.technical.trend_strength.adx.toFixed(1)}</span>
+                                <span>Status: {signal.technical.trend_strength.strength}</span>
+                              </div>
+                            </div>
+
+                            {/* EMA Alignment */}
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>🔄 EMA Alignment</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>EMA50: ₹{signal.technical.ema_alignment.ema50.toFixed(2)}</span>
+                                <span>EMA100: ₹{signal.technical.ema_alignment.ema100.toFixed(2)}</span>
+                                <span>EMA200: ₹{signal.technical.ema_alignment.ema200.toFixed(2)}</span>
+                                <span>{signal.technical.ema_alignment.status}</span>
+                              </div>
+                            </div>
+
+                            {/* Volume & RSI */}
+                            <div>
+                              <div style={{ fontWeight: 700, color: '#00e5ff', marginBottom: '5px' }}>📊 Volume & RSI</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: 'rgba(0,229,255,0.8)' }}>
+                                <span>Volume Ratio: {signal.technical.volume.ratio.toFixed(2)}x ({signal.technical.volume.strength})</span>
+                                <span>RSI: {signal.technical.rsi.value.toFixed(1)} ({signal.technical.rsi.zone})</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

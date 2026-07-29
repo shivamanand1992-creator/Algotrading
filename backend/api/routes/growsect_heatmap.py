@@ -122,28 +122,139 @@ async def get_stocks():
 
 @router.get("/signals")
 async def get_signals():
-    """Get entry signals: which stocks to trade today (intraday)"""
+    """Get entry signals with comprehensive technical analysis"""
     try:
         if _DEMO_MODE:
             return {
                 "timestamp": datetime.now(_IST).isoformat(),
                 "strong_buy": [
-                    {"symbol": "DIVISLAB", "sector": "Pharma", "change_pct": 4.51, "price": 7760.00, "rsi": 68.2},
-                    {"symbol": "HINDUNILVR", "sector": "FMCG", "change_pct": 4.42, "price": 2112.10, "rsi": 65.5},
-                    {"symbol": "INFY", "sector": "IT", "change_pct": 4.26, "price": 1152.80, "rsi": 70.1},
+                    {
+                        "symbol": "DIVISLAB",
+                        "sector": "Pharma",
+                        "change_pct": 4.51,
+                        "price": 7760.00,
+                        "rsi": 68.2,
+                        "confidence": {"score": 82, "factors": {"rsi": "Bullish", "macd": "Bullish", "volume": "Strong", "trend_strength": "Strong", "ema_alignment": "Perfect"}},
+                        "technical": {
+                            "support_resistance": {"support": 7650.00, "resistance": 7900.00, "distance_to_support_pct": 1.43, "distance_to_resistance_pct": 1.81},
+                            "bollinger_bands": {"upper": 7850.00, "middle": 7750.00, "lower": 7650.00, "pct_b": 65.0, "status": "Neutral"},
+                            "momentum": {"macd_line": 0.45, "macd_signal": 0.35, "macd_histogram": 0.10, "direction": "Bullish"},
+                            "trend_strength": {"adx": 28.5, "strength": "Strong"},
+                            "ema_alignment": {"ema50": 7680.00, "ema100": 7600.00, "ema200": 7520.00, "bullish": True, "status": "All EMAs aligned (Bullish)"},
+                            "volume": {"ratio": 1.45, "strength": "Strong"},
+                            "rsi": {"value": 68.2, "zone": "Overbought"},
+                        }
+                    },
+                    {
+                        "symbol": "HINDUNILVR",
+                        "sector": "FMCG",
+                        "change_pct": 4.42,
+                        "price": 2112.10,
+                        "rsi": 65.5,
+                        "confidence": {"score": 79, "factors": {"rsi": "Bullish", "macd": "Bullish", "volume": "Strong", "trend_strength": "Strong", "ema_alignment": "Perfect"}},
+                        "technical": {
+                            "support_resistance": {"support": 2050.00, "resistance": 2180.00, "distance_to_support_pct": 2.94, "distance_to_resistance_pct": 3.14},
+                            "bollinger_bands": {"upper": 2150.00, "middle": 2080.00, "lower": 2010.00, "pct_b": 62.0, "status": "Neutral"},
+                            "momentum": {"macd_line": 0.32, "macd_signal": 0.25, "macd_histogram": 0.07, "direction": "Bullish"},
+                            "trend_strength": {"adx": 26.2, "strength": "Strong"},
+                            "ema_alignment": {"ema50": 2050.00, "ema100": 1980.00, "ema200": 1920.00, "bullish": True, "status": "All EMAs aligned (Bullish)"},
+                            "volume": {"ratio": 1.38, "strength": "Strong"},
+                            "rsi": {"value": 65.5, "zone": "Neutral"},
+                        }
+                    },
+                    {
+                        "symbol": "INFY",
+                        "sector": "IT",
+                        "change_pct": 4.26,
+                        "price": 1152.80,
+                        "rsi": 70.1,
+                        "confidence": {"score": 80, "factors": {"rsi": "Bullish", "macd": "Bullish", "volume": "Strong", "trend_strength": "Strong", "ema_alignment": "Perfect"}},
+                        "technical": {
+                            "support_resistance": {"support": 1120.00, "resistance": 1190.00, "distance_to_support_pct": 2.85, "distance_to_resistance_pct": 3.22},
+                            "bollinger_bands": {"upper": 1180.00, "middle": 1140.00, "lower": 1100.00, "pct_b": 72.0, "status": "Neutral"},
+                            "momentum": {"macd_line": 0.38, "macd_signal": 0.28, "macd_histogram": 0.10, "direction": "Bullish"},
+                            "trend_strength": {"adx": 27.8, "strength": "Strong"},
+                            "ema_alignment": {"ema50": 1130.00, "ema100": 1090.00, "ema200": 1050.00, "bullish": True, "status": "All EMAs aligned (Bullish)"},
+                            "volume": {"ratio": 1.42, "strength": "Strong"},
+                            "rsi": {"value": 70.1, "zone": "Overbought"},
+                        }
+                    },
                 ],
                 "buy": [
-                    {"symbol": "CIPLA", "sector": "Pharma", "change_pct": 2.75, "price": 1484.30, "rsi": 62.3},
-                    {"symbol": "TCS", "sector": "IT", "change_pct": 1.92, "price": 2444.00, "rsi": 58.9},
+                    {
+                        "symbol": "CIPLA",
+                        "sector": "Pharma",
+                        "change_pct": 2.75,
+                        "price": 1484.30,
+                        "rsi": 62.3,
+                        "confidence": {"score": 71, "factors": {"rsi": "Bullish", "macd": "Bullish", "volume": "Normal", "trend_strength": "Strong", "ema_alignment": "Perfect"}},
+                        "technical": {
+                            "support_resistance": {"support": 1450.00, "resistance": 1520.00, "distance_to_support_pct": 2.36, "distance_to_resistance_pct": 2.41},
+                            "bollinger_bands": {"upper": 1510.00, "middle": 1460.00, "lower": 1410.00, "pct_b": 58.0, "status": "Neutral"},
+                            "momentum": {"macd_line": 0.25, "macd_signal": 0.18, "macd_histogram": 0.07, "direction": "Bullish"},
+                            "trend_strength": {"adx": 23.5, "strength": "Weak"},
+                            "ema_alignment": {"ema50": 1460.00, "ema100": 1430.00, "ema200": 1400.00, "bullish": True, "status": "All EMAs aligned (Bullish)"},
+                            "volume": {"ratio": 1.15, "strength": "Normal"},
+                            "rsi": {"value": 62.3, "zone": "Neutral"},
+                        }
+                    },
+                    {
+                        "symbol": "TCS",
+                        "sector": "IT",
+                        "change_pct": 1.92,
+                        "price": 2444.00,
+                        "rsi": 58.9,
+                        "confidence": {"score": 68, "factors": {"rsi": "Bullish", "macd": "Bullish", "volume": "Normal", "trend_strength": "Weak", "ema_alignment": "Perfect"}},
+                        "technical": {
+                            "support_resistance": {"support": 2400.00, "resistance": 2500.00, "distance_to_support_pct": 1.82, "distance_to_resistance_pct": 2.29},
+                            "bollinger_bands": {"upper": 2480.00, "middle": 2420.00, "lower": 2360.00, "pct_b": 52.0, "status": "Neutral"},
+                            "momentum": {"macd_line": 0.18, "macd_signal": 0.12, "macd_histogram": 0.06, "direction": "Bullish"},
+                            "trend_strength": {"adx": 21.2, "strength": "Weak"},
+                            "ema_alignment": {"ema50": 2420.00, "ema100": 2390.00, "ema200": 2350.00, "bullish": True, "status": "All EMAs aligned (Bullish)"},
+                            "volume": {"ratio": 0.95, "strength": "Normal"},
+                            "rsi": {"value": 58.9, "zone": "Neutral"},
+                        }
+                    },
                 ],
                 "sell": [
-                    {"symbol": "TITAN", "sector": "Consumer", "change_pct": -0.30, "price": 4835.00, "rsi": 42.5},
-                    {"symbol": "EICHERMOT", "sector": "Auto", "change_pct": -0.70, "price": 7781.50, "rsi": 38.9},
+                    {
+                        "symbol": "TITAN",
+                        "sector": "Consumer",
+                        "change_pct": -0.30,
+                        "price": 4835.00,
+                        "rsi": 42.5,
+                        "confidence": {"score": 35, "factors": {"rsi": "Neutral", "macd": "Bearish", "volume": "Weak", "trend_strength": "Weak", "ema_alignment": "Mixed"}},
+                        "technical": {
+                            "support_resistance": {"support": 4750.00, "resistance": 4900.00, "distance_to_support_pct": 1.79, "distance_to_resistance_pct": 1.34},
+                            "bollinger_bands": {"upper": 4900.00, "middle": 4800.00, "lower": 4700.00, "pct_b": 45.0, "status": "Neutral"},
+                            "momentum": {"macd_line": -0.05, "macd_signal": 0.02, "macd_histogram": -0.07, "direction": "Bearish"},
+                            "trend_strength": {"adx": 18.5, "strength": "Weak"},
+                            "ema_alignment": {"ema50": 4850.00, "ema100": 4880.00, "ema200": 4820.00, "bullish": False, "status": "Mixed"},
+                            "volume": {"ratio": 0.75, "strength": "Weak"},
+                            "rsi": {"value": 42.5, "zone": "Neutral"},
+                        }
+                    },
                 ],
                 "strong_sell": [
-                    {"symbol": "M&M", "sector": "Auto", "change_pct": -1.46, "price": 3223.50, "rsi": 35.2},
+                    {
+                        "symbol": "M&M",
+                        "sector": "Auto",
+                        "change_pct": -1.46,
+                        "price": 3223.50,
+                        "rsi": 35.2,
+                        "confidence": {"score": 20, "factors": {"rsi": "Bearish", "macd": "Bearish", "volume": "Weak", "trend_strength": "Weak", "ema_alignment": "Bearish"}},
+                        "technical": {
+                            "support_resistance": {"support": 3100.00, "resistance": 3300.00, "distance_to_support_pct": 3.81, "distance_to_resistance_pct": 2.32},
+                            "bollinger_bands": {"upper": 3310.00, "middle": 3220.00, "lower": 3130.00, "pct_b": 35.0, "status": "Oversold"},
+                            "momentum": {"macd_line": -0.18, "macd_signal": -0.10, "macd_histogram": -0.08, "direction": "Bearish"},
+                            "trend_strength": {"adx": 15.2, "strength": "Weak"},
+                            "ema_alignment": {"ema50": 3280.00, "ema100": 3320.00, "ema200": 3350.00, "bullish": False, "status": "All EMAs pointing down (Bearish)"},
+                            "volume": {"ratio": 0.65, "strength": "Weak"},
+                            "rsi": {"value": 35.2, "zone": "Oversold"},
+                        }
+                    },
                 ],
-                "recommendation": "🟢 STRONG_BUY 3 stocks (DIVISLAB, HINDUNILVR, INFY). BUY 2 more (CIPLA, TCS). Avoid M&M & EICHERMOT."
+                "recommendation": "🟢 STRONG_BUY 3 stocks (DIVISLAB, HINDUNILVR, INFY). All have perfect EMA alignment & strong momentum. BUY 2 more (CIPLA, TCS) for secondary positions. AVOID M&M (bearish signals, oversold)."
             }
 
         service = get_growsect_service()
