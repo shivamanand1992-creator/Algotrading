@@ -48,11 +48,11 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 
 
 # ---------------------------------------------------------------------------
-# EOD auto square-off — runs at 15:15 IST every weekday
+# EOD auto square-off — runs at 15:30 IST every weekday
 # ---------------------------------------------------------------------------
 
 async def _eod_squareoff_loop() -> None:
-    """Background task: square off all positions at 15:15 IST on trading days."""
+    """Background task: square off all positions at 15:30 IST on trading days."""
     last_squareoff_date: _date | None = None
 
     while True:
@@ -61,12 +61,12 @@ async def _eod_squareoff_loop() -> None:
             today   = now_ist.date()
 
             is_weekday         = today.weekday() < 5          # Mon–Fri
-            past_cutoff        = (now_ist.hour, now_ist.minute) >= (15, 15)
+            past_cutoff        = (now_ist.hour, now_ist.minute) >= (15, 30)
             not_done_today     = last_squareoff_date != today
 
             if is_weekday and past_cutoff and not_done_today:
                 last_squareoff_date = today
-                logger.warning("EOD 15:15 — auto square-off triggered.")
+                logger.warning("EOD 15:30 — auto square-off triggered.")
 
                 # Stop all running strategies first
                 try:
@@ -84,7 +84,7 @@ async def _eod_squareoff_loop() -> None:
                     loop = asyncio.get_event_loop()
                     om = get_order_manager()
                     await loop.run_in_executor(
-                        None, om.exit_all_positions, "EOD auto square-off 15:15"
+                        None, om.exit_all_positions, "EOD auto square-off 15:30"
                     )
                     logger.info("EOD: all positions squared off.")
                 except Exception as exc:
@@ -1084,7 +1084,7 @@ async def _nifty_ml_loop() -> None:
     while True:
         try:
             now = datetime.now(_IST)
-            in_hours = now.weekday() < 5 and "09:30" <= now.strftime("%H:%M") <= "15:15"
+            in_hours = now.weekday() < 5 and "09:30" <= now.strftime("%H:%M") <= "15:30"
 
             if trader.enabled and trader.booster is not None and in_hours:
                 result = await trader.run_cycle()
@@ -1098,7 +1098,7 @@ async def _nifty_ml_loop() -> None:
                     "last_update": trader.last_update,
                 })
                 await asyncio.sleep(300)  # 5 minutes
-            elif trader.enabled and trader.position and now.strftime("%H:%M") > "15:15":
+            elif trader.enabled and trader.position and now.strftime("%H:%M") > "15:30":
                 await trader.force_exit()
                 await asyncio.sleep(300)
             else:
@@ -1152,7 +1152,7 @@ async def _nifty_options_trader_loop() -> None:
 
 
 async def _paper_trading_loop() -> None:
-    """Background task: Weekly 5% Income paper trading (9:15 AM - 3:15 PM IST non-stop)"""
+    """Background task: Weekly 5% Income paper trading (9:15 AM - 3:30 PM IST non-stop)"""
     from backend.ml.weekly_income_trader import get_trader
     from backend.api.routes.market_data import get_market_service
 
@@ -1160,7 +1160,7 @@ async def _paper_trading_loop() -> None:
 
     trader = get_trader()
     engine = get_paper_engine()
-    logger.info("[PaperTrading] 🟢 Continuous paper trading enabled (9:15 AM - 3:15 PM IST, weekdays only)")
+    logger.info("[PaperTrading] 🟢 Continuous paper trading enabled (9:15 AM - 3:30 PM IST, weekdays only)")
     logger.info("[PaperTrading] Account: ₹100,000 | Strategy: Weekly 5% Income | Target: 65%+ win rate")
 
     scan_counter = 0
@@ -1171,7 +1171,7 @@ async def _paper_trading_loop() -> None:
             now = datetime.now(_IST)
             is_weekday = now.weekday() < 5  # Mon-Fri
             hm_str = now.strftime("%H:%M")
-            in_hours = "09:15" <= hm_str <= "15:15"  # 9:15 AM - 3:15 PM IST
+            in_hours = "09:15" <= hm_str <= "15:30"  # 9:15 AM - 3:30 PM IST
 
             # Log market open/close status once per hour
             current_hour = now.hour

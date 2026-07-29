@@ -428,7 +428,7 @@ export function NiftyGrowsectHeatmap() {
         color: 'rgba(0,229,255,0.5)',
         textAlign: 'center',
       }}>
-        Updates every 1 minute during market hours (9:15 AM - 3:15 PM IST)
+        Updates every 1 minute during market hours (9:15 AM - 3:30 PM IST)
       </div>
     </div>
   );
