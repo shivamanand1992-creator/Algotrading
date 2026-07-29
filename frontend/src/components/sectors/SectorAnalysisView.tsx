@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { api } from '../../api/client';
+import { NiftyGrowsectHeatmap } from '../growsect/NiftyGrowsectHeatmap';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -447,8 +448,22 @@ export function SectorAnalysisView() {
         </div>
       )}
 
+      {/* NIFTY GROWSECT 15 REAL-TIME HEATMAP - Always show when NOT loading */}
+      {!loading && !error && (
+        <div className="mb-8">
+          <NiftyGrowsectHeatmap />
+        </div>
+      )}
+
       {result && (
         <>
+          {/* Divider */}
+          <div style={{
+            height: '1px',
+            background: 'linear-gradient(90deg, transparent, rgba(0,229,255,0.3), transparent)',
+            margin: '20px 0 30px 0',
+          }} />
+
           {/* Cycle card */}
           <CycleCard cycle={result.cycle} />
 
