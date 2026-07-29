@@ -37,6 +37,7 @@ from backend.api.routes import support_resistance as sr_routes
 from backend.api.routes import version as version_routes
 from backend.api.routes import ml_intraday as ml_intraday_routes
 from backend.api.routes import weekly_income as weekly_income_routes
+from backend.api.routes import growsect_heatmap as growsect_routes
 from backend.ml.paper_trading_engine import get_paper_engine
 # from backend.api.routes import intraday_signals  # TEMPORARILY DISABLED - debugging startup crash
 from backend.auth import verify_token
@@ -894,6 +895,7 @@ app.include_router(sr_routes.router)
 # app.include_router(athena_routes.router)  # ARCHIVED: Athena Options agent
 app.include_router(ml_intraday_routes.router)
 app.include_router(weekly_income_routes.router)
+app.include_router(growsect_routes.router)
 app.include_router(version_routes.router)
 # app.include_router(claude_usage.router)  # REMOVED: Claude API usage tracking
 # app.include_router(intraday_signals.router)  # TEMPORARILY DISABLED - debugging startup crash
