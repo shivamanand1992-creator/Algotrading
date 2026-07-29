@@ -1150,7 +1150,7 @@ async def _nifty_options_trader_loop() -> None:
 
 
 async def _paper_trading_loop() -> None:
-    """Background task: Weekly 5% Income paper trading (continuous scanning & execution)"""
+    """Background task: Weekly 5% Income paper trading (9:15 AM - 3:15 PM IST non-stop)"""
     from backend.ml.weekly_income_trader import get_trader
     from backend.api.routes.market_data import get_market_service
 
@@ -1158,15 +1158,33 @@ async def _paper_trading_loop() -> None:
 
     trader = get_trader()
     engine = get_paper_engine()
-    logger.info("[PaperTrading] Starting continuous paper trading loop (₹100,000 account)")
+    logger.info("[PaperTrading] 🟢 Continuous paper trading enabled (9:15 AM - 3:15 PM IST, weekdays only)")
+    logger.info("[PaperTrading] Account: ₹100,000 | Strategy: Weekly 5% Income | Target: 65%+ win rate")
 
     scan_counter = 0
+    last_hour_logged = None
+
     while True:
         try:
             now = datetime.now(_IST)
-            is_weekday = now.weekday() < 5
+            is_weekday = now.weekday() < 5  # Mon-Fri
             hm_str = now.strftime("%H:%M")
-            in_hours = "09:15" <= hm_str <= "15:30"
+            in_hours = "09:15" <= hm_str <= "15:15"  # 9:15 AM - 3:15 PM IST
+
+            # Log market open/close status once per hour
+            current_hour = now.hour
+            if current_hour != last_hour_logged:
+                last_hour_logged = current_hour
+                if is_weekday:
+                    if in_hours:
+                        if "11:30" <= hm_str <= "14:59":
+                            logger.info(f"[PaperTrading] 🔸 LUNCH BREAK ({hm_str}) - Market closed, monitoring for reopening")
+                        else:
+                            logger.info(f"[PaperTrading] 🟢 ACTIVE ({hm_str} IST) - Scanning for opportunities")
+                    else:
+                        logger.info(f"[PaperTrading] 🔴 CLOSED ({hm_str} IST) - Outside trading hours")
+                else:
+                    logger.info(f"[PaperTrading] 🔴 CLOSED (Weekend) - No trading on weekends")
 
             if is_weekday and in_hours:
                 # Scan every 5 minutes for new opportunities
@@ -1208,14 +1226,38 @@ async def _paper_trading_loop() -> None:
 
                         # Scan for new opportunities
                         setups = await trader.scan_for_opportunities(market_data, cycle)
-                        logger.info(f"[PaperTrading] Scanned: {len(setups)} high-confidence setups found (confidence ≥65%)")
+                        if setups:
+                            logger.info(f"[PaperTrading] ✓ Found {len(setups)} high-confidence setup(s) | Executing...")
+                        else:
+                            logger.debug(f"[PaperTrading] Scan complete: 0 setups found (waiting for setup conditions)")
 
                         # Auto-execute if capital available
                         for setup in setups:
                             # Check if we have enough capital
                             if engine.account.equity >= setup.capital_required * 1.2:  # 20% buffer
                                 trade = await engine.execute_trade(setup)
-                                logger.info(f"[PaperTrading] AUTO-EXECUTED: {setup.strategy} @ ₹{setup.entry_price:.2f}")
+                                logger.info(
+                                    f"[PaperTrading] ✅ EXECUTED: {setup.strategy.upper()} @ ₹{setup.entry_price:.2f} | "
+                                    f"Confidence: {setup.confidence_score:.0f}% | Max P&L: ₹{setup.max_profit:,.0f} | "
+                                    f"Risk: ₹{setup.max_loss:,.0f}"
+                                )
+
+                                # Try to send Telegram notification
+                                try:
+                                    from backend.services.telegram_service import send, is_configured
+                                    if is_configured():
+                                        await asyncio.to_thread(
+                                            send,
+                                            f"📈 **Paper Trade Executed**\n\n"
+                                            f"Strategy: {setup.strategy.upper()}\n"
+                                            f"Entry: ₹{setup.entry_price:.2f}\n"
+                                            f"Confidence: {setup.confidence_score:.0f}%\n"
+                                            f"Max Profit: ₹{setup.max_profit:,.0f}\n"
+                                            f"Max Loss: ₹{setup.max_loss:,.0f}\n"
+                                            f"Account Equity: ₹{engine.account.equity:,.0f}"
+                                        )
+                                except Exception as e:
+                                    logger.debug(f"[PaperTrading] Telegram notification failed: {e}")
 
                                 # Broadcast to connected clients
                                 try:
@@ -1231,15 +1273,14 @@ async def _paper_trading_loop() -> None:
                                 except Exception:
                                     pass
 
-                        # Log account status every 30 mins
-                        if scan_counter % 30 == 0:
-                            status = await engine.get_status()
-                            logger.info(
-                                f"[PaperTrading] Status: Equity=₹{status['equity']:,.0f} | "
-                                f"P&L=₹{status['total_pnl']:,.0f} ({status['return_pct']:.1f}%) | "
-                                f"Trades={status['total_trades']} | Win={status['win_rate']:.0f}% | "
-                                f"Active={status['active_trades']}"
-                            )
+                        # Log account status every scan cycle (every 5 minutes)
+                        status = await engine.get_status()
+                        logger.info(
+                            f"[PaperTrading] 📊 {hm_str} IST | Equity: ₹{status['equity']:,.0f} | "
+                            f"P&L: ₹{status['total_pnl']:,.0f} ({status['return_pct']:.2f}%) | "
+                            f"Trades: {status['total_trades']} | Win Rate: {status['win_rate']:.0f}% | "
+                            f"Active: {status['active_trades']}"
+                        )
 
                     except Exception as e:
                         logger.error(f"[PaperTrading] Scan error: {e}")
