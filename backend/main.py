@@ -1221,6 +1221,14 @@ async def _paper_trading_loop() -> None:
                         # Update prices in engine
                         await engine.update_prices(nifty_price)
 
+                        # Update GROWSECT 15 heatmap data (every 60 seconds during market hours)
+                        try:
+                            from backend.services.growsect_service import get_growsect_service
+                            growsect_svc = get_growsect_service()
+                            await growsect_svc.update_stock_prices(market_svc)
+                        except Exception as e:
+                            logger.debug(f"[GROWSECT] Heatmap update error: {e}")
+
                         # Check for exits
                         closed = await engine.check_exits(nifty_price)
                         if closed:

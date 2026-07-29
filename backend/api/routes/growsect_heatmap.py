@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/growsect", tags=["growsect-heatmap"])
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 # Demo mode
-_DEMO_MODE = True
+_DEMO_MODE = False
 
 
 @router.get("/heatmap")
