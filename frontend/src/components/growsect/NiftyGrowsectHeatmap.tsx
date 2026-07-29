@@ -66,7 +66,12 @@ export function NiftyGrowsectHeatmap() {
 
         setHeatmapData(heatmapRes.data);
         setStocks(stocksRes.data.stocks || []);
-        setSignals(signalsRes.data);
+        setSignals(signalsRes.data.signals || {
+          strong_buy: [],
+          buy: [],
+          sell: [],
+          strong_sell: [],
+        });
       } catch (error) {
         console.error('Failed to fetch GROWSECT data:', error);
       } finally {
@@ -282,12 +287,12 @@ export function NiftyGrowsectHeatmap() {
         <div>
           <div style={{ marginBottom: '20px' }}>
             <p style={{ fontSize: '12px', color: 'rgba(0,229,255,0.7)', fontStyle: 'italic', margin: '0 0 15px 0' }}>
-              {signals.recommendation}
+              {signals.recommendation || '📊 Real-time trade signals based on technical analysis'}
             </p>
           </div>
 
           {['strong_buy', 'buy', 'sell', 'strong_sell'].map((category) => (
-            signals[category].length > 0 && (
+            signals[category] && signals[category].length > 0 && (
               <div key={category} style={{ marginBottom: '20px' }}>
                 <h4 style={{
                   margin: '0 0 10px 0',
