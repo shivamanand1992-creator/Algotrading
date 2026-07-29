@@ -80,6 +80,12 @@ async def get_heatmap():
             }
 
         service = get_growsect_service()
+
+        # Fetch fresh data if stale (data older than 90 seconds)
+        if not service.stocks_data or (datetime.now(_IST) - service.last_update).total_seconds() > 90:
+            market_svc = get_market_service()
+            await service.update_stock_prices(market_svc)
+
         return service.get_heatmap_data()
 
     except Exception as e:
@@ -114,6 +120,12 @@ async def get_stocks():
             }
 
         service = get_growsect_service()
+
+        # Fetch fresh data if stale (data older than 90 seconds)
+        if not service.stocks_data or (datetime.now(_IST) - service.last_update).total_seconds() > 90:
+            market_svc = get_market_service()
+            await service.update_stock_prices(market_svc)
+
         return {"timestamp": datetime.now(_IST).isoformat(), "stocks": service.get_stock_heatmap()}
 
     except Exception as e:
@@ -258,6 +270,12 @@ async def get_signals():
             }
 
         service = get_growsect_service()
+
+        # Fetch fresh data if stale (data older than 90 seconds)
+        if not service.stocks_data or (datetime.now(_IST) - service.last_update).total_seconds() > 90:
+            market_svc = get_market_service()
+            await service.update_stock_prices(market_svc)
+
         return {"timestamp": datetime.now(_IST).isoformat(), "signals": service.get_trend_signals()}
 
     except Exception as e:
@@ -287,6 +305,12 @@ async def get_strongest():
             }
 
         service = get_growsect_service()
+
+        # Fetch fresh data if stale (data older than 90 seconds)
+        if not service.stocks_data or (datetime.now(_IST) - service.last_update).total_seconds() > 90:
+            market_svc = get_market_service()
+            await service.update_stock_prices(market_svc)
+
         stocks = service.get_stock_heatmap()
         if stocks:
             hottest = stocks[0]  # First is highest gainer
