@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Plus, Trash2, Save, RefreshCw } from 'lucide-react';
 
 interface WatchlistItem {
   symbol: string;
@@ -174,7 +173,7 @@ export function IntradayAlertsConfig() {
       {/* Error Alert */}
       {error && (
         <div className="mb-6 p-4 rounded-lg bg-red-500/20 border border-red-500/50 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <span className="text-xl flex-shrink-0">⚠️</span>
           <div>
             <p className="text-red-400 font-medium">Error</p>
             <p className="text-red-300/80 text-sm">{error}</p>
@@ -213,7 +212,7 @@ export function IntradayAlertsConfig() {
           {/* Add New Stock */}
           <div className="bg-jarvis-bg/50 border border-jarvis-primary/20 rounded-lg p-6">
             <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Plus className="w-5 h-5" />
+              <span>➕</span>
               Add Stock to Watchlist
             </h2>
             <div className="flex gap-3">
@@ -257,9 +256,9 @@ export function IntradayAlertsConfig() {
                   </div>
                   <button
                     onClick={() => handleRemoveWatchlistItem(item.symbol)}
-                    className="p-2 hover:bg-red-500/20 rounded-lg text-red-400 transition-colors"
+                    className="p-2 hover:bg-red-500/20 rounded-lg text-red-400 transition-colors text-lg"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    🗑️
                   </button>
                 </div>
               ))}
@@ -271,7 +270,7 @@ export function IntradayAlertsConfig() {
               disabled={savingWatchlist}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/50 rounded-lg text-green-400 font-bold transition-colors disabled:opacity-50"
             >
-              <Save className="w-5 h-5" />
+              <span>💾</span>
               {savingWatchlist ? 'Saving...' : 'Save Watchlist'}
             </button>
           </div>
@@ -282,7 +281,7 @@ export function IntradayAlertsConfig() {
           {/* Add New User */}
           <div className="bg-jarvis-bg/50 border border-jarvis-primary/20 rounded-lg p-6">
             <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Plus className="w-5 h-5" />
+              <span>➕</span>
               Add Telegram User
             </h2>
             <p className="text-jarvis-primary/60 text-sm mb-4">
@@ -326,12 +325,12 @@ export function IntradayAlertsConfig() {
                   <button
                     onClick={() => handleRemoveTelegramUser(chatId)}
                     disabled={removingUser === chatId}
-                    className="p-2 hover:bg-red-500/20 rounded-lg text-red-400 transition-colors disabled:opacity-50"
+                    className="p-2 hover:bg-red-500/20 rounded-lg text-red-400 transition-colors disabled:opacity-50 text-lg"
                   >
                     {removingUser === chatId ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span className="inline-block animate-spin">⟳</span>
                     ) : (
-                      <Trash2 className="w-4 h-4" />
+                      <span>🗑️</span>
                     )}
                   </button>
                 </div>
