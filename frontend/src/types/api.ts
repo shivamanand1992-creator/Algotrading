@@ -151,23 +151,30 @@ export interface NiftyBeesConfig {
 }
 
 export interface NiftyBeesBuyEntry {
-  date:          string;
-  qty:           number;
-  price:         number;
-  nifty_at_buy:  number;
-  nifty_dip_pct: number;
-  order_id:      string;
-  invested:      number;
+  date:           string;
+  qty:            number;
+  price:          number;
+  nifty_at_buy:   number;
+  nifty_dip_pct:  number;
+  dip_level?:     number;  // 1st, 2nd, 3rd dip; 0 for gap-down open
+  trigger_reason?: string; // e.g., "1st dip from day high", "gap-down open"
+  source?:        'system' | 'manual'; // who bought: bot or manual
+  order_id:       string;
+  invested:       number;
 }
 
 export interface NiftyBeesPosition {
   active:          boolean;
   buys:            NiftyBeesBuyEntry[];
+  system_qty?:     number;  // qty bought by system only
+  manual_qty?:     number;  // qty bought manually (not sold by bot)
   total_qty:       number;
   total_invested:  number;
   avg_entry_price: number;
   mode:            'paper' | 'live';
   last_buy_date:   string;
+  day_high?:       number;  // today's NIFTY high
+  day_high_date?:  string;  // date of day high
   current_price:   number;
   unrealized_pnl:  number;
   pnl_pct:         number;
@@ -178,6 +185,8 @@ export interface NiftyBeesPosition {
   gain_pct?:       number;
   realized_pnl?:   number;
   close_reason?:   string;
+  units_sold?:     number;  // units sold by bot
+  units_kept?:     number;  // manual units kept
 }
 
 export interface NiftyBeesStatus {
