@@ -7,12 +7,21 @@ GET  /api/growsect/stocks               — Individual stock performance
 GET  /api/growsect/signals              — Entry signal identification
 GET  /api/growsect/strongest            — Hottest stock today
 POST /api/growsect/update-prices        — Manual price update (admin only)
+
+INTRADAY TRENDING ALERTS:
+GET  /api/growsect/intraday-config      — Get watchlist & telegram users
+POST /api/growsect/intraday-config/watchlist — Update stock watchlist
+POST /api/growsect/intraday-config/telegram-users — Add telegram user
+DELETE /api/growsect/intraday-config/telegram-users/{chat_id} — Remove user
+GET  /api/growsect/intraday-alerts      — Get today's intraday movers (stock + sector trending)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime, timezone, timedelta
+from typing import Dict, List
 
 from backend.services.growsect_service import get_growsect_service
+from backend.services import growsect_intraday_alerts
 from backend.api.routes.market_data import get_market_service
 
 router = APIRouter(prefix="/api/growsect", tags=["growsect-heatmap"])
@@ -337,6 +346,170 @@ async def update_prices():
             return {"status": "success", "message": "Prices updated for all GROWSECT 15 stocks"}
         else:
             return {"status": "partial", "message": "Some stocks failed to update"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── INTRADAY TRENDING ALERTS ────────────────────────────────────────────
+
+
+@router.get("/intraday-config")
+async def get_intraday_config():
+    """Get current intraday alerts config (watchlist + telegram users)"""
+    try:
+        config = growsect_intraday_alerts.get_config()
+        return {
+            "watchlist": config.get("watchlist", {}),
+            "watchlist_count": len(config.get("watchlist", {})),
+            "telegram_ids": config.get("telegram_ids", []),
+            "telegram_count": len(config.get("telegram_ids", [])),
+            "created_at": config.get("created_at"),
+            "watchlist_updated_at": config.get("watchlist_updated_at"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/intraday-config/watchlist")
+async def update_intraday_watchlist(watchlist: Dict[str, str]):
+    """
+    Update the GROWSECT15 watchlist (for index reshuffles)
+
+    Example:
+    {
+        "DIVISLAB": "Pharma",
+        "INFY": "IT",
+        ...
+    }
+    """
+    try:
+        if not watchlist:
+            raise HTTPException(status_code=400, detail="Watchlist cannot be empty")
+
+        success = growsect_intraday_alerts.update_watchlist(watchlist)
+
+        if success:
+            return {
+                "status": "success",
+                "message": f"Watchlist updated with {len(watchlist)} stocks",
+                "watchlist": watchlist
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save watchlist")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/intraday-config/telegram-users")
+async def add_telegram_user(chat_id: int = Query(..., description="Telegram chat ID")):
+    """Add a new Telegram user to receive intraday alerts"""
+    try:
+        if chat_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid chat ID")
+
+        success = growsect_intraday_alerts.add_telegram_user(chat_id)
+
+        if success:
+            users = growsect_intraday_alerts.get_telegram_users()
+            return {
+                "status": "success",
+                "message": f"Added Telegram user {chat_id}",
+                "chat_id": chat_id,
+                "total_users": len(users),
+                "all_users": users
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add user")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/intraday-config/telegram-users/{chat_id}")
+async def remove_telegram_user(chat_id: int):
+    """Remove a Telegram user from intraday alerts"""
+    try:
+        success = growsect_intraday_alerts.remove_telegram_user(chat_id)
+
+        if success:
+            users = growsect_intraday_alerts.get_telegram_users()
+            return {
+                "status": "success",
+                "message": f"Removed Telegram user {chat_id}",
+                "total_users": len(users),
+                "all_users": users
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Chat ID {chat_id} not found")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/intraday-alerts")
+async def get_intraday_alerts():
+    """
+    Get today's GROWSECT15 stocks where BOTH stock and sector are trending (up)
+    Ranked by % gain for intraday trading
+
+    Returns stocks that have:
+    - Stock % change > 0 (stock is up)
+    - Sector % change > 0 (sector is also up)
+    """
+    try:
+        service = get_growsect_service()
+
+        # Fetch fresh data if stale (data older than 90 seconds)
+        if not service.stocks_data or (datetime.now(_IST) - service.last_update).total_seconds() > 90:
+            market_svc = get_market_service()
+            await service.update_stock_prices(market_svc)
+
+        # Get all stocks
+        all_stocks = service.get_stock_heatmap()
+        if not all_stocks:
+            return {
+                "timestamp": datetime.now(_IST).isoformat(),
+                "intraday_movers": [],
+                "message": "No stock data available"
+            }
+
+        # Get sector data
+        heatmap = service.get_heatmap_data()
+        sector_changes = {
+            sector_name: data.get("avg_change_pct", 0)
+            for sector_name, data in heatmap.get("sectors", {}).items()
+        }
+
+        # Filter: stock % > 0 AND sector % > 0, then rank by stock %
+        intraday_movers = []
+        for stock in all_stocks:
+            stock_pct = stock.get("change_pct", 0)
+            sector = stock.get("sector", "")
+            sector_pct = sector_changes.get(sector, 0)
+
+            if stock_pct > 0 and sector_pct > 0:
+                intraday_movers.append({
+                    "symbol": stock.get("symbol"),
+                    "sector": sector,
+                    "price": stock.get("price"),
+                    "stock_change_pct": round(stock_pct, 2),
+                    "sector_change_pct": round(sector_pct, 2),
+                    "combined_momentum": round(stock_pct + sector_pct, 2),
+                    "rsi": stock.get("rsi"),
+                    "trend": stock.get("trend"),
+                })
+
+        # Sort by stock % gain descending
+        intraday_movers.sort(key=lambda x: x["stock_change_pct"], reverse=True)
+
+        return {
+            "timestamp": datetime.now(_IST).isoformat(),
+            "count": len(intraday_movers),
+            "intraday_movers": intraday_movers,
+            "message": f"📈 {len(intraday_movers)} stocks trending with sector support — ideal for intraday trading"
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
