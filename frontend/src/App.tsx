@@ -12,6 +12,7 @@ import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { StockConvictionView } from './components/conviction/StockConvictionView';
 import { WeeklyIncomeTrader } from './components/weekly-income/WeeklyIncomeTrader';
+import { IntradayAlertsConfig } from './components/growsect/IntradayAlertsConfig';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
 import './styles/jarvis-theme.css';
@@ -63,6 +64,7 @@ function App() {
       case 'stocks':     return <StocksView />;
       case 'niftybees':  return <NiftyBeesView />;
       case 'sectors':    return <SectorAnalysisView />;
+      case 'intraday-alerts': return <IntradayAlertsConfig />;
       case 'holdings':   return <ETFHoldingsView />;
       case 'portfolio':  return <PortfolioView />;
       case 'conviction': return <StockConvictionView />;
