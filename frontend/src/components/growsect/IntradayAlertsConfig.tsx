@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../../api/client';
 
 interface WatchlistItem {
   symbol: string;
@@ -38,9 +39,8 @@ export function IntradayAlertsConfig() {
   const loadConfig = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/growsect/intraday-config');
-      if (!response.ok) throw new Error('Failed to load config');
-      const data: Config = await response.json();
+      const response = await api.get<Config>('/api/growsect/intraday-config');
+      const data = response.data;
       setConfig(data);
       setWatchlist(
         Object.entries(data.watchlist).map(([symbol, sector]) => ({
@@ -69,13 +69,7 @@ export function IntradayAlertsConfig() {
         {} as Record<string, string>
       );
 
-      const response = await fetch('/api/growsect/intraday-config/watchlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(watchlistObj),
-      });
-
-      if (!response.ok) throw new Error('Failed to save watchlist');
+      await api.post('/api/growsect/intraday-config/watchlist', watchlistObj);
       await loadConfig();
       setError(null);
     } catch (err) {
@@ -114,14 +108,11 @@ export function IntradayAlertsConfig() {
       }
 
       setAddingUser(true);
-      const response = await fetch(
-        `/api/growsect/intraday-config/telegram-users?chat_id=${chatId}`,
-        { method: 'POST' }
+      const response = await api.post(
+        `/api/growsect/intraday-config/telegram-users?chat_id=${chatId}`
       );
 
-      if (!response.ok) throw new Error('Failed to add user');
-      const data = await response.json();
-      setTelegramUsers(data.all_users);
+      setTelegramUsers(response.data.all_users);
       setNewChatId('');
       setError(null);
     } catch (err) {
@@ -135,14 +126,11 @@ export function IntradayAlertsConfig() {
   const handleRemoveTelegramUser = async (chatId: number) => {
     try {
       setRemovingUser(chatId);
-      const response = await fetch(
-        `/api/growsect/intraday-config/telegram-users/${chatId}`,
-        { method: 'DELETE' }
+      const response = await api.delete(
+        `/api/growsect/intraday-config/telegram-users/${chatId}`
       );
 
-      if (!response.ok) throw new Error('Failed to remove user');
-      const data = await response.json();
-      setTelegramUsers(data.all_users);
+      setTelegramUsers(response.data.all_users);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -350,12 +338,8 @@ export function IntradayAlertsConfig() {
             <button
               onClick={async () => {
                 try {
-                  const response = await fetch('/api/growsect/intraday-alerts/test-telegram', {
-                    method: 'POST',
-                  });
-                  if (!response.ok) throw new Error('Test failed');
-                  const data = await response.json();
-                  alert(`✅ Test alert sent to ${data.all_users?.length || 'all'} users!`);
+                  const response = await api.post('/api/growsect/intraday-alerts/test-telegram');
+                  alert(`✅ Test alert sent to ${telegramUsers.length} users!`);
                 } catch (err) {
                   alert(`❌ Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
                 }
