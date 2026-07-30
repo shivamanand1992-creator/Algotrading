@@ -103,35 +103,69 @@ function ConfigForm({ config, saving, onSave }: ConfigFormProps) {
 function BuysTable({ buys }: { buys: NiftyBeesBuyEntry[] }) {
   const { balVisible } = useBalanceVisibility();
   const M = (v: string) => maskAmount(v, balVisible);
+  const [expandedIdx, setExpandedIdx] = React.useState<number | null>(null);
   if (!buys?.length) return null;
   return (
-    <div className="mt-3 overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-jarvis-primary/40 uppercase tracking-widest border-b border-white/5">
-            <th className="text-left py-1.5 pr-3">#</th>
-            <th className="text-left py-1.5 pr-3">Date</th>
-            <th className="text-right pr-3">Qty</th>
-            <th className="text-right pr-3">Buy Price</th>
-            <th className="text-right pr-3">Invested</th>
-            <th className="text-right pr-3">Nifty Dip</th>
-          </tr>
-        </thead>
-        <tbody>
-          {buys.map((b, i) => (
-            <tr key={i} className="border-b border-white/5 hover:bg-white/5">
-              <td className="py-1.5 pr-3 text-jarvis-primary/50">{i + 1}</td>
-              <td className="pr-3 text-jarvis-text-secondary">{b.date?.slice(0, 10)}</td>
-              <td className="text-right pr-3 font-mono text-white">{b.qty}</td>
-              <td className="text-right pr-3 font-mono text-white">₹{b.price.toFixed(2)}</td>
-              <td className="text-right pr-3 font-mono text-jarvis-text-secondary">{M(`₹${b.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)}</td>
-              <td className="text-right pr-3">
-                <span className="text-orange-400">▼{b.nifty_dip_pct.toFixed(2)}%</span>
-              </td>
+    <div className="mt-3 space-y-2">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-jarvis-primary/40 uppercase tracking-widest border-b border-white/5">
+              <th className="text-left py-1.5 pr-3" style={{ width: 30 }}>#</th>
+              <th className="text-left py-1.5 pr-3">Date / Time</th>
+              <th className="text-right pr-3">Qty</th>
+              <th className="text-right pr-3">Price</th>
+              <th className="text-right pr-3">Invested</th>
+              <th className="text-center pr-3">Trigger</th>
+              <th className="text-center pr-3">Source</th>
+              <th style={{ width: 30 }} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {buys.map((b, i) => (
+              <React.Fragment key={i}>
+                <tr
+                  className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors"
+                  onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                >
+                  <td className="py-1.5 pr-3 text-jarvis-primary/50">{i + 1}</td>
+                  <td className="pr-3 text-jarvis-text-secondary text-[11px]">{b.date}</td>
+                  <td className="text-right pr-3 font-mono text-white font-bold">{b.qty}</td>
+                  <td className="text-right pr-3 font-mono text-white">₹{b.price.toFixed(2)}</td>
+                  <td className="text-right pr-3 font-mono text-jarvis-text-secondary text-[11px]">{M(`₹${b.invested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)}</td>
+                  <td className="text-center pr-3">
+                    <span className="text-orange-400 font-semibold">▼{b.nifty_dip_pct.toFixed(2)}%</span>
+                  </td>
+                  <td className="text-center pr-3">
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{
+                        background: (b.source ?? 'system') === 'system' ? 'rgba(0,230,118,0.15)' : 'rgba(255,193,7,0.15)',
+                        color: (b.source ?? 'system') === 'system' ? '#00e676' : '#ffc107',
+                      }}
+                    >
+                      {(b.source ?? 'system').toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="text-center text-jarvis-primary/50">{expandedIdx === i ? '▴' : '▾'}</td>
+                </tr>
+                {expandedIdx === i && (
+                  <tr className="bg-black/30 border-b border-white/5">
+                    <td colSpan={8} className="py-2 px-3">
+                      <div className="grid grid-cols-2 gap-2 text-[11px] text-jarvis-text-secondary">
+                        <div><span className="text-jarvis-primary/60">Trigger Reason:</span> {b.trigger_reason ?? 'System buy'}</div>
+                        <div><span className="text-jarvis-primary/60">Dip Level:</span> {b.dip_level ?? 1}</div>
+                        <div><span className="text-jarvis-primary/60">NIFTY at Buy:</span> ₹{b.nifty_at_buy?.toFixed(2) ?? '—'}</div>
+                        <div><span className="text-jarvis-primary/60">Order ID:</span> <span className="font-mono text-[10px]">{b.order_id?.slice(-8) ?? '—'}</span></div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -172,9 +206,29 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
         <PnLBadge value={pos.pnl_pct} />
       </div>
 
+      {/* Audit: System vs Manual Units */}
+      <div className="mb-3 p-2 rounded bg-black/40 border border-jarvis-primary/10">
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="text-center">
+            <div className="text-jarvis-primary/50 uppercase text-[9px] tracking-wider mb-1">System Bought</div>
+            <div className="text-lg font-bold text-green-400">{pos.system_qty ?? pos.total_qty}</div>
+          </div>
+          <div className="text-center border-l border-r border-white/10">
+            <div className="text-jarvis-primary/50 uppercase text-[9px] tracking-wider mb-1">Manual Buys</div>
+            <div className="text-lg font-bold text-yellow-400">{(pos.manual_qty ?? 0)}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-jarvis-primary/50 uppercase text-[9px] tracking-wider mb-1">Total Units</div>
+            <div className="text-lg font-bold text-cyan-400">{pos.total_qty}</div>
+          </div>
+        </div>
+        <div className="text-[10px] text-jarvis-primary/40 mt-1.5 border-t border-white/10 pt-1.5">
+          Only system-bought units ({pos.system_qty ?? pos.total_qty}) are sold by the bot. Manual units stay in your demat.
+        </div>
+      </div>
+
       {/* Key metrics */}
       <div className="grid grid-cols-4 gap-4 mb-2">
-        <Stat label="Total Units"    value={`${pos.total_qty}`} />
         <Stat label="Avg Entry"      value={`₹${pos.avg_entry_price.toFixed(2)}`} />
         <Stat label="Current Price"  value={`₹${(pos.current_price ?? pos.avg_entry_price).toFixed(2)}`} />
         <Stat
@@ -195,6 +249,7 @@ function PositionCard({ pos, onClose }: { pos: NiftyBeesPosition; onClose: () =>
           sub="avg × 1.05"
         />
         <Stat label="Last Buy"   value={pos.last_buy_date ?? '—'} />
+        <Stat label="Day High"   value={`₹${(pos.day_high ?? 0).toFixed(2)}`} sub={pos.day_high_date} />
         <Stat label="Checked"    value={pos.last_checked?.slice(11, 16) ?? '—'} sub={pos.last_checked?.slice(0, 10)} />
       </div>
 
