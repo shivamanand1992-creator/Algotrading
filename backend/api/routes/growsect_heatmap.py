@@ -448,6 +448,66 @@ async def remove_telegram_user(chat_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/intraday-alerts/test-telegram")
+async def test_telegram_alert():
+    """
+    TESTING ONLY: Send a test intraday alert to all registered Telegram users
+    This is for verifying Telegram connectivity before 9:30 AM job runs
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+
+        now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+        # Mock test data
+        test_stocks = [
+            growsect_intraday_alerts.IntradayStock(
+                symbol="INFY",
+                sector="IT",
+                price=1155.50,
+                change_pct=3.45,
+                sector_change_pct=2.87,
+                timestamp=now_ist,
+            ),
+            growsect_intraday_alerts.IntradayStock(
+                symbol="TCS",
+                sector="IT",
+                price=2450.00,
+                change_pct=2.15,
+                sector_change_pct=2.87,
+                timestamp=now_ist,
+            ),
+            growsect_intraday_alerts.IntradayStock(
+                symbol="DIVISLAB",
+                sector="Pharma",
+                price=7890.25,
+                change_pct=2.34,
+                sector_change_pct=1.56,
+                timestamp=now_ist,
+            ),
+        ]
+
+        title = f"🧪 <b>TEST — GROWSECT15 INTRADAY MOVERS — {now_ist.strftime('%d %b %H:%M')}</b>"
+        await growsect_intraday_alerts.broadcast_alert(title, test_stocks)
+
+        return {
+            "status": "success",
+            "message": f"Test alert sent to {len(growsect_intraday_alerts.get_telegram_users())} users",
+            "test_data": [
+                {
+                    "symbol": s.symbol,
+                    "sector": s.sector,
+                    "stock_change_pct": s.change_pct,
+                    "sector_change_pct": s.sector_change_pct,
+                }
+                for s in test_stocks
+            ],
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/intraday-alerts")
 async def get_intraday_alerts():
     """
