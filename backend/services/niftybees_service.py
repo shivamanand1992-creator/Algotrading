@@ -481,6 +481,31 @@ class NiftyBeesService:
             f"| total_invested=₹{pos['total_invested']:.0f}"
         )
 
+        # Send Telegram notification
+        try:
+            from backend.services.telegram_service import send, is_configured
+            if is_configured():
+                msg = (
+                    f"🟢 <b>NIFTYBEES BUY #{len(pos['buys'])}</b>\n\n"
+                    f"<b>Buy Details:</b>\n"
+                    f"• Qty: <b>{qty} units</b>\n"
+                    f"• Price: <b>₹{nb_price:.2f}</b>\n"
+                    f"• Invested: ₹{invested:,.0f}\n\n"
+                    f"<b>Trigger:</b>\n"
+                    f"• {trigger_reason}\n"
+                    f"• NIFTY dip: <b>{dip_pct:.2f}%</b>\n"
+                    f"• NIFTY price: ₹{nifty_ltp:,.0f}\n\n"
+                    f"<b>Position Summary:</b>\n"
+                    f"• Total units: {pos['total_qty']}\n"
+                    f"• Avg entry: ₹{pos['avg_entry_price']:.2f}\n"
+                    f"• Total invested: ₹{pos['total_invested']:,.0f}\n"
+                    f"• Mode: {mode.upper()}\n\n"
+                    f"🎯 Target: 5% gain (sell at ₹{pos['avg_entry_price'] * 1.05:.2f})"
+                )
+                send(msg)
+        except Exception as exc:
+            logger.warning(f"[NiftyBees] Telegram notification failed: {exc}")
+
     # -----------------------------------------------------------------------
     # Sell — exit entire position
     # -----------------------------------------------------------------------
@@ -549,6 +574,32 @@ class NiftyBeesService:
             f"| Avg Entry ₹{avg_entry:.2f} | Gain={gain:.2f}% | P&L=₹{pnl:.2f} | "
             f"Manual units kept: {manual_qty}"
         )
+
+        # Send Telegram notification
+        try:
+            from backend.services.telegram_service import send, is_configured
+            if is_configured():
+                emoji = "🟢" if pnl >= 0 else "🔴"
+                msg = (
+                    f"{emoji} <b>NIFTYBEES SOLD</b> — Target Reached! 🎯\n\n"
+                    f"<b>Exit Details:</b>\n"
+                    f"• Units sold: <b>{system_qty}</b>\n"
+                    f"• Exit price: <b>₹{current_price:.2f}</b>\n"
+                    f"• Avg entry: ₹{avg_entry:.2f}\n\n"
+                    f"<b>P&L Summary:</b>\n"
+                    f"• Gain: <b>{gain:.2f}%</b>\n"
+                    f"• Realized P&L: <b>₹{pnl:,.0f}</b>\n"
+                    f"• Total invested: ₹{total_qty * avg_entry:,.0f}\n\n"
+                )
+                if manual_qty > 0:
+                    msg += (
+                        f"<b>Remaining Position:</b>\n"
+                        f"• Manual units: {manual_qty} (kept for manual trading)\n\n"
+                    )
+                msg += f"<b>Trade closed:</b> {reason.replace('_', ' ').title()}"
+                send(msg)
+        except Exception as exc:
+            logger.warning(f"[NiftyBees] Telegram sell notification failed: {exc}")
 
     # -----------------------------------------------------------------------
     # Main monitor — called every 60s from main.py during market hours
