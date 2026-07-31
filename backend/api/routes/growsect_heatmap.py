@@ -22,6 +22,7 @@ from typing import Dict, List
 
 from backend.services.growsect_service import get_growsect_service
 from backend.services import growsect_intraday_alerts
+from backend.services import fo_sector_alerts
 from backend.api.routes.market_data import get_market_service
 
 router = APIRouter(prefix="/api/growsect", tags=["growsect-heatmap"])
@@ -569,6 +570,172 @@ async def get_intraday_alerts():
             "count": len(intraday_movers),
             "intraday_movers": intraday_movers,
             "message": f"📈 {len(intraday_movers)} stocks trending with sector support — ideal for intraday trading"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── F&O SECTOR TRENDING ALERTS ──────────────────────────────────────────
+
+
+@router.get("/fo-alerts-config")
+async def get_fo_alerts_config():
+    """Get current F&O sector alerts config (stocks + telegram users)"""
+    try:
+        config = fo_sector_alerts.get_config()
+        return {
+            "fo_stocks": config.get("fo_stocks", {}),
+            "fo_stocks_count": len(config.get("fo_stocks", {})),
+            "telegram_ids": config.get("telegram_ids", []),
+            "telegram_count": len(config.get("telegram_ids", [])),
+            "top_per_sector": config.get("top_per_sector", 3),
+            "created_at": config.get("created_at"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fo-alerts-config/stocks")
+async def update_fo_stocks(stocks: Dict[str, str]):
+    """
+    Update the F&O stocks watchlist
+
+    Example:
+    {
+        "RELIANCE": "Energy",
+        "TCS": "IT",
+        ...
+    }
+    """
+    try:
+        if not stocks:
+            raise HTTPException(status_code=400, detail="Stocks cannot be empty")
+
+        success = fo_sector_alerts.update_fo_stocks(stocks)
+
+        if success:
+            return {
+                "status": "success",
+                "message": f"F&O stocks updated with {len(stocks)} symbols",
+                "stocks_count": len(stocks)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save stocks")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fo-alerts-config/telegram-users")
+async def add_fo_telegram_user(chat_id: int = Query(..., description="Telegram chat ID")):
+    """Add a new Telegram user to receive F&O alerts"""
+    try:
+        if chat_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid chat ID")
+
+        success = fo_sector_alerts.add_telegram_user(chat_id)
+
+        if success:
+            users = fo_sector_alerts.get_telegram_users()
+            return {
+                "status": "success",
+                "message": f"Added Telegram user {chat_id}",
+                "chat_id": chat_id,
+                "total_users": len(users),
+                "all_users": users
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add user")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/fo-alerts-config/telegram-users/{chat_id}")
+async def remove_fo_telegram_user(chat_id: int):
+    """Remove a Telegram user from F&O alerts"""
+    try:
+        success = fo_sector_alerts.remove_telegram_user(chat_id)
+
+        if success:
+            users = fo_sector_alerts.get_telegram_users()
+            return {
+                "status": "success",
+                "message": f"Removed Telegram user {chat_id}",
+                "total_users": len(users),
+                "all_users": users
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Chat ID {chat_id} not found")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fo-alerts-config/test-telegram")
+async def test_fo_telegram_alert():
+    """
+    TESTING ONLY: Send a test F&O alert to all registered Telegram users
+    """
+    try:
+        now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+        # Mock test data
+        test_stocks_by_sector = {
+            "IT": [
+                fo_sector_alerts.FoStock(
+                    symbol="TCS",
+                    sector="IT",
+                    price=3450.00,
+                    change_pct=2.45,
+                    sector_change_pct=2.87,
+                    timestamp=now_ist,
+                ),
+                fo_sector_alerts.FoStock(
+                    symbol="INFY",
+                    sector="IT",
+                    price=1855.50,
+                    change_pct=1.95,
+                    sector_change_pct=2.87,
+                    timestamp=now_ist,
+                ),
+                fo_sector_alerts.FoStock(
+                    symbol="WIPRO",
+                    sector="IT",
+                    price=425.75,
+                    change_pct=1.65,
+                    sector_change_pct=2.87,
+                    timestamp=now_ist,
+                ),
+            ],
+            "Finance": [
+                fo_sector_alerts.FoStock(
+                    symbol="HDFC BANK",
+                    sector="Finance",
+                    price=1950.00,
+                    change_pct=2.15,
+                    sector_change_pct=1.85,
+                    timestamp=now_ist,
+                ),
+                fo_sector_alerts.FoStock(
+                    symbol="ICICI BANK",
+                    sector="Finance",
+                    price=1095.25,
+                    change_pct=1.85,
+                    sector_change_pct=1.85,
+                    timestamp=now_ist,
+                ),
+            ],
+        }
+
+        title = f"🧪 <b>TEST — F&O SECTOR MOVERS — {now_ist.strftime('%d %b %H:%M')}</b>"
+        await fo_sector_alerts.broadcast_alert(title, test_stocks_by_sector)
+
+        return {
+            "status": "success",
+            "message": f"Test F&O alert sent to {len(fo_sector_alerts.get_telegram_users())} users",
+            "test_sectors": list(test_stocks_by_sector.keys()),
         }
 
     except Exception as e:

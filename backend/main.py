@@ -448,6 +448,103 @@ async def _intraday_alerts_loop() -> None:
         await asyncio.sleep(60)
 
 
+# ---------------------------------------------------------------------------
+# F&O Sector Trending Alerts — runs at 09:30 IST every weekday
+# ---------------------------------------------------------------------------
+
+async def _fo_sector_alerts_loop() -> None:
+    """Background task: send F&O sector trending alert at 09:30 IST on trading days."""
+    last_alert_date: _date | None = None
+
+    while True:
+        try:
+            now_ist = datetime.now(_IST)
+            today   = now_ist.date()
+
+            is_weekday     = today.weekday() < 5
+            past_cutoff    = (now_ist.hour, now_ist.minute) >= (9, 30)
+            not_done_today = last_alert_date != today
+
+            if is_weekday and past_cutoff and not_done_today:
+                last_alert_date = today
+                logger.info("[FOSectorAlerts] 09:30 IST — Sending F&O sector trending alert…")
+                try:
+                    from backend.services.growsect_service import get_growsect_service
+                    from backend.services import fo_sector_alerts
+                    from backend.api.routes.market_data import get_market_service
+
+                    service = get_growsect_service()
+                    market_svc = get_market_service()
+
+                    # Fetch fresh data
+                    await service.update_stock_prices(market_svc)
+
+                    # Get all stocks
+                    all_stocks = service.get_stock_heatmap()
+                    if not all_stocks:
+                        logger.warning("[FOSectorAlerts] No stock data available")
+                        await asyncio.sleep(60)
+                        continue
+
+                    # Get sector data
+                    heatmap = service.get_heatmap_data()
+                    sector_changes = {
+                        sector_name: data.get("avg_change_pct", 0)
+                        for sector_name, data in heatmap.get("sectors", {}).items()
+                    }
+
+                    # Get F&O stocks config
+                    config = fo_sector_alerts.get_config()
+                    fo_stocks_map = config.get("fo_stocks", {})
+                    top_per_sector = config.get("top_per_sector", 3)
+
+                    # Build F&O stocks data
+                    fo_stocks_data = {}
+                    for stock in all_stocks:
+                        symbol = stock.get("symbol", "")
+                        if symbol in fo_stocks_map:
+                            sector = fo_stocks_map[symbol]
+                            sector_pct = sector_changes.get(sector, 0)
+
+                            if sector_pct > 0:  # Only if sector trending
+                                if sector not in fo_stocks_data:
+                                    fo_stocks_data[sector] = []
+
+                                fo_stocks_data[sector].append(
+                                    fo_sector_alerts.FoStock(
+                                        symbol=symbol,
+                                        sector=sector,
+                                        price=stock.get("price"),
+                                        change_pct=round(stock.get("change_pct", 0), 2),
+                                        sector_change_pct=round(sector_pct, 2),
+                                        timestamp=now_ist,
+                                    )
+                                )
+
+                    # Sort each sector by stock % gain and keep top N
+                    stocks_by_sector = {}
+                    for sector, stocks in fo_stocks_data.items():
+                        stocks.sort(key=lambda x: x.change_pct, reverse=True)
+                        stocks_by_sector[sector] = stocks[:top_per_sector]
+
+                    # Send alert
+                    if stocks_by_sector:
+                        title = f"📊 <b>F&O SECTOR MOVERS — {now_ist.strftime('%d %b %H:%M')}</b>"
+                        await fo_sector_alerts.broadcast_alert(title, stocks_by_sector)
+                        total_stocks = sum(len(s) for s in stocks_by_sector.values())
+                        logger.info(f"[FOSectorAlerts] Alert sent: {len(stocks_by_sector)} trending sectors, {total_stocks} F&O stocks")
+                    else:
+                        logger.info("[FOSectorAlerts] No F&O stocks in trending sectors today")
+
+                except Exception as e:
+                    logger.error(f"[FOSectorAlerts] Failed to send alert: {e}")
+
+        except Exception as exc:
+            logger.error(f"_fo_sector_alerts_loop error: {exc}")
+
+        await asyncio.sleep(60)
+
+
 async def _eod_telegram_report_loop() -> None:
     """Send EOD Telegram report at 16:00 IST every weekday."""
     _last_eod_date: _date | None = None
@@ -930,6 +1027,7 @@ async def lifespan(app: FastAPI):
     # asyncio.create_task(_sr_refresh_loop())  # DISABLED
     asyncio.create_task(_paper_trading_loop())  # ONLY: Weekly 5% Income paper trading (continuous)
     asyncio.create_task(_intraday_alerts_loop())  # Daily 09:30: GROWSECT15 intraday movers
+    asyncio.create_task(_fo_sector_alerts_loop())  # Daily 09:30: F&O sector trending stocks
     asyncio.create_task(_eod_telegram_report_loop())  # Keep: Daily reporting
     asyncio.create_task(_balance_check_loop())  # Keep: Account health
     asyncio.create_task(_morning_news_loop())  # Keep: Market news
