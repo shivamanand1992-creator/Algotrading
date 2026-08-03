@@ -13,8 +13,6 @@ const navItems: NavItem[] = [
 
   { id: 'market',     label: 'Market Data',    icon: '⊕', section: 'MARKETS' },
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
-  { id: 'intraday-alerts', label: 'Intraday Alerts', icon: '📈' },
-  { id: 'fo-alerts',  label: 'F&O Sector Alerts', icon: '📊' },
   { id: 'news',       label: 'Market News',    icon: '≡' },
 
   { id: 'weekly-income', label: 'Weekly 5% Income', icon: '💰', section: 'TRADING' },
@@ -28,6 +26,7 @@ const navItems: NavItem[] = [
 ];
 
 const bottomNavItems: NavItem[] = [
+  { id: 'sector-alerts', label: 'Sector Alerts', icon: '📊' },
   { id: 'help', label: 'Help & Guide', icon: '?' },
 ];
 
