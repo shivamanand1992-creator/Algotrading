@@ -1,6 +1,34 @@
 """
 Options Premium Selling Strategy for Nifty50 Intraday.
 
+⚠️ DEAD CODE — THIS FILE IS NOT REACHABLE ⚠️
+═════════════════════════════════════════════
+
+This strategy cannot execute. OrderManager.execute_signal() has a hard block at
+line 149-163 that rejects all SELL_STRADDLE / SELL_STRANGLE signals:
+
+    if signal.action in ("SELL_STRADDLE", "SELL_STRANGLE"):
+        logger.warning("[OrderManager] Trade blocked — option selling is strictly disabled.")
+        return None
+
+The block exists because naked option selling carries undefined losses. The entire
+14.5 KB strategy file is unreachable dead code that generates trading signals rejected
+before any execution logic runs.
+
+WHAT THIS MEANS:
+• All signal generation is wasted CPU
+• Any changes to this file will have ZERO effect on the system
+• If the block is ever removed, leg-2 placement has no atomic protection
+  (see order_manager.py:284-312 for the gap)
+
+RECOMMENDATION:
+Delete this file. If you need covered options strategies, use weekly_income_trader.py,
+which uses defined-risk call spreads with proper Greeks calculation.
+
+────────────────────────────────────────────────────────────────────────────────
+
+Original docstring below (for historical reference):
+
 Sells short straddles (ATM CE + ATM PE) or short strangles (OTM1 CE + OTM1 PE)
 when the market is in a ranging regime, implied volatility is elevated, and the
 Put-Call Ratio is near equilibrium.

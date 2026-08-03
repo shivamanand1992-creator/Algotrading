@@ -223,7 +223,16 @@ class RiskManager:
         """
         max_lots = int(self.config.get("trading", {}).get("max_lots_per_trade", 2))
 
-        premium = signal.price if signal.price > 0 else 50.0  # fallback estimate
+        # CRITICAL FIX: No magic fallback. If price is missing, we cannot size the position.
+        if signal.price <= 0:
+            logger.error(
+                f"[RiskManager] Cannot size position for {signal.symbol} — "
+                f"signal.price is missing or zero. Trade refused. "
+                f"(Previously would have used ₹50.0 fallback — this is now an error.)"
+            )
+            return 0  # Signal refusal by returning 0 lots
+
+        premium = signal.price
 
         # Determine SL percentage based on direction
         if signal.transaction_type == "SELL":

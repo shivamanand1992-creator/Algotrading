@@ -75,14 +75,30 @@ class Backtester:
         self.target_pct = config["risk"]["option_buy_target_pct"]
         self.no_new_trades_after = config["trading"]["no_new_trades_after"]
         self.square_off_time = config["trading"]["square_off_time"]
+        # IV assumptions for backtesting (use configurable or empirical value, NOT hardcoded 15%)
+        self.base_iv = config.get("backtesting", {}).get("base_iv", 0.20)
+        logger.warning(
+            f"[Backtester] WARNING: Using flat IV assumption of {self.base_iv:.1%}. "
+            f"This is a simplification. Real backtests should use option chain data "
+            f"with actual IV term structure, skew, and daily IV changes."
+        )
 
     def _simulate_option_price(
-        self, spot: float, strike: int, option_type: str, days_to_expiry: float, iv: float = 0.15
+        self, spot: float, strike: int, option_type: str, days_to_expiry: float, iv: float = None
     ) -> float:
-        """Black-Scholes approximation for option premium."""
+        """Black-Scholes approximation for option premium.
+
+        WARNING: Uses flat IV assumption. Real backtests should incorporate:
+        - IV term structure (different across expiries)
+        - IV skew (different by strike)
+        - Daily IV changes based on market regime
+        - Bid-ask spreads for realistic fills
+        """
         from scipy.stats import norm
         import math
 
+        if iv is None:
+            iv = self.base_iv
         S, K, T, r, sigma = spot, strike, max(days_to_expiry / 252, 1e-6), 0.065, iv
         d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
@@ -164,7 +180,7 @@ class Backtester:
             if candle_time_str >= self.square_off_time and open_position:
                 exit_price = self._simulate_option_price(
                     spot, open_position["strike"], open_position["option_type"],
-                    open_position["dte"], 0.15
+                    open_position["dte"]
                 )
                 pnl = self._calc_pnl(open_position, exit_price)
                 day_pnl += pnl
@@ -176,7 +192,7 @@ class Backtester:
             if open_position:
                 current_premium = self._simulate_option_price(
                     spot, open_position["strike"], open_position["option_type"],
-                    open_position["dte"], 0.15
+                    open_position["dte"]
                 )
                 entry_p = open_position["entry_price"]
                 sl = entry_p * (1 - self.sl_pct)
@@ -219,7 +235,7 @@ class Backtester:
             strike = signal["strike"]
             opt_type = signal["option_type"]
             dte = signal.get("dte", 7)
-            entry_price = self._simulate_option_price(spot, strike, opt_type, dte, 0.15)
+            entry_price = self._simulate_option_price(spot, strike, opt_type, dte)
             qty = self.lot_size
 
             open_position = {
@@ -238,7 +254,7 @@ class Backtester:
         if open_position and len(feat_df) > 0:
             last_spot = feat_df["close"].iloc[-1]
             exit_price = self._simulate_option_price(
-                last_spot, open_position["strike"], open_position["option_type"], 0.5, 0.15
+                last_spot, open_position["strike"], open_position["option_type"], 0.5
             )
             pnl = self._calc_pnl(open_position, exit_price)
             day_pnl += pnl

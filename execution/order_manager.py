@@ -147,6 +147,9 @@ class OrderManager:
             return None
 
         # ---- Hard rule: never open a short (written) options position ----
+        # CRITICAL: This block prevents naked option sales. Removing it requires atomic leg placement
+        # with full rollback logic for leg-2 failures. See order_manager.py:284-287 for the current gap.
+        # DO NOT REMOVE without implementing automatic leg-1 exit if leg-2 fails to fill.
         _is_sell_entry = (
             signal.action in ("SELL_STRADDLE", "SELL_STRANGLE")
             or (
@@ -177,6 +180,12 @@ class OrderManager:
         lots = self.risk_manager.calculate_position_size(
             signal, available_capital, daily_pnl
         )
+        if lots <= 0:
+            logger.warning(
+                f"[OrderManager] RiskManager refused to size position for {signal.symbol}. "
+                f"Trade rejected."
+            )
+            return None
         qty = lots * self.lot_size
 
         # ---- Determine fill price ----
@@ -187,6 +196,13 @@ class OrderManager:
             order_type = signal.order_type,
             limit_price= signal.price,
         )
+
+        if fill_price is None:
+            logger.warning(
+                f"[OrderManager] Cannot determine fill price for {signal.symbol}. "
+                f"Trade refused."
+            )
+            return None
 
         # ---- Live-only: verify actual cash balance before placing order ----
         if not self.paper_trading:
@@ -290,6 +306,22 @@ class OrderManager:
                         f"[OrderManager] Leg-2 placed: order_id={leg2_order_id} "
                         f"symbol={pe_symbol} fill=₹{leg2_fill:.2f}"
                     )
+                else:
+                    # CRITICAL: Leg-2 failed to fill. Immediately exit leg-1 to avoid naked short.
+                    logger.error(
+                        f"[OrderManager] LEG-2 FAILURE — {pe_symbol} failed to fill. "
+                        f"Exiting leg-1 ({signal.symbol}) immediately to prevent naked option position."
+                    )
+                    self.exit_position(
+                        {"order_id": order_id, "symbol": signal.symbol, "token": signal.token,
+                         "exchange": signal.exchange, "qty": qty, "transaction_type": signal.transaction_type},
+                        reason="Emergency exit — leg-2 fill failure"
+                    )
+                    # Mark the position as having failed leg-2, so the loop doesn't try to manage it
+                    if order_id in self._positions:
+                        pos.status = "CLOSED"
+                        pos.exit_reason = "Leg-2 failed; emergency close"
+                    return None
 
         return order_id
 
@@ -623,11 +655,23 @@ class OrderManager:
         transaction_type: str,
         order_type:       str,
         price:            float,
-    ) -> str:
-        """Simulate a paper-trading fill and return a synthetic order_id."""
+    ) -> Optional[str]:
+        """Simulate a paper-trading fill and return a synthetic order_id.
+
+        CRITICAL FIX: No longer invents prices. If price unavailable, refuses the trade
+        instead of using a magic ₹50 fallback.
+        """
         order_id = f"PAPER-{uuid.uuid4().hex[:10].upper()}"
-        fill     = price if price > 0 else self._get_ltp_safe(token, exchange, symbol)
-        fill     = fill if fill > 0 else 50.0    # hard fallback
+        fill = price if price > 0 else self._get_ltp_safe(token, exchange, symbol)
+
+        if fill <= 0:
+            logger.error(
+                f"[OrderManager][PAPER] Cannot simulate fill for {symbol} — "
+                f"no price provided and LTP unavailable. Trade refused (was silently "
+                f"using ₹50.0 fallback — this is now an error). Check broker connectivity."
+            )
+            return None
+
         logger.info(
             f"[OrderManager][PAPER] Simulated {transaction_type} {qty}x "
             f"{symbol} @ ₹{fill:.2f} [{order_type}] → {order_id}"
@@ -645,16 +689,25 @@ class OrderManager:
         exchange:    str,
         order_type:  str,
         limit_price: float,
-    ) -> float:
+    ) -> Optional[float]:
         """
         Determine the expected fill price for an order.
 
-        LIMIT  → limit_price.
+        LIMIT  → limit_price (required for LIMIT orders).
         MARKET → live LTP from broker (or limit_price as fallback).
-        Paper  → limit_price if given, else LTP if available, else 50.0.
+
+        CRITICAL FIX: Returns None if price is unavailable instead of inventing ₹50.
+        Caller must handle None (refuse the trade).
         """
-        if order_type == "LIMIT" and limit_price > 0:
-            return limit_price
+        if order_type == "LIMIT":
+            if limit_price > 0:
+                return limit_price
+            # LIMIT order requires a limit price
+            logger.error(
+                f"[OrderManager] LIMIT order for {symbol} has no limit_price. "
+                f"Cannot execute."
+            )
+            return None
 
         if self.paper_trading and limit_price > 0:
             return limit_price
@@ -663,11 +716,15 @@ class OrderManager:
         if ltp > 0:
             return ltp
 
-        fallback = limit_price if limit_price > 0 else 50.0
-        logger.warning(
-            f"[OrderManager] Could not get LTP for {symbol}; using ₹{fallback:.2f}"
+        if limit_price > 0:
+            return limit_price
+
+        # All sources exhausted. Return None to signal trade refusal.
+        logger.error(
+            f"[OrderManager] Could not get fill price for {symbol} — "
+            f"no limit price, no LTP available. Trade refused."
         )
-        return fallback
+        return None
 
     def _get_ltp_safe(self, token: str, exchange: str, symbol: str) -> float:
         """Fetch LTP without raising; returns 0.0 on error."""
