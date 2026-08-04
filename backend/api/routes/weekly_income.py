@@ -1,21 +1,26 @@
 """
-Weekly 5% Income Trading API
-=============================
+Option Trading API (formerly Weekly 5% Income)
+===============================================
 
-GET  /api/weekly-income/opportunities  — Scan and generate trade setups
-POST /api/weekly-income/execute        — Execute a setup
-GET  /api/weekly-income/status         — Get trader status & performance
+GET  /api/option-trading/opportunities  — Scan and generate option trade setups
+POST /api/option-trading/execute        — Execute a setup (Paper or Live mode)
+GET  /api/option-trading/status         — Get trader status & performance
+POST /api/option-trading/set-mode       — Switch between Paper and Live trading
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from backend.config import DEMO_MODE
 from backend.ml.weekly_income_trader import get_trader
 from backend.ml.paper_trading_engine import get_paper_engine
 from backend.api.routes.market_data import get_market_service
 
-router = APIRouter(prefix="/api/weekly-income", tags=["weekly-income"])
+router = APIRouter(prefix="/api/option-trading", tags=["option-trading"])
+
+class TradingMode(BaseModel):
+    mode: str  # "paper" or "live"
 
 
 # ── Demo response ────────────────────────────────────────────────────────────
@@ -403,4 +408,46 @@ async def get_strategy_guide():
             "Weekly max loss: 10% of capital",
             "Portfolio delta: Keep neutral (balance calls/puts)",
         ],
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Trading Mode Control
+# ──────────────────────────────────────────────────────────────────────────────
+
+_trading_mode = {"current": "paper"}  # Default to paper trading
+
+
+@router.post("/set-mode")
+async def set_trading_mode(mode_config: TradingMode):
+    """
+    Set trading mode to PAPER or LIVE.
+
+    - Paper: Simulated trades, notifications only
+    - Live: Real trades via Angel One broker
+
+    Default: Paper (safe)
+    """
+    if mode_config.mode.lower() not in ["paper", "live"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Mode must be 'paper' or 'live'"
+        )
+
+    _trading_mode["current"] = mode_config.mode.lower()
+
+    return {
+        "success": True,
+        "mode": _trading_mode["current"],
+        "message": f"Trading mode switched to {_trading_mode['current'].upper()}"
+    }
+
+
+@router.get("/mode")
+async def get_trading_mode():
+    """Get current trading mode (paper or live)"""
+    return {
+        "current_mode": _trading_mode["current"],
+        "paper_active": _trading_mode["current"] == "paper",
+        "live_active": _trading_mode["current"] == "live"
     }

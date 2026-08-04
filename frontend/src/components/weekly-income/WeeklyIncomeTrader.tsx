@@ -65,7 +65,7 @@ interface PaperTradingStatus {
   largest_loss: number;
 }
 
-export function WeeklyIncomeTrader() {
+export function OptionTrader() {
   const [opportunities, setOpportunities] = useState<OpportunitiesResponse | null>(null);
   const [status, setStatus] = useState<TraderStatus | null>(null);
   const [paperStatus, setPaperStatus] = useState<PaperTradingStatus | null>(null);
@@ -78,7 +78,7 @@ export function WeeklyIncomeTrader() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await api.get<OpportunitiesResponse>('/api/weekly-income/opportunities');
+      const resp = await api.get<OpportunitiesResponse>('/api/option-trading/opportunities');
       setOpportunities(resp.data);
     } catch (err: any) {
       setError(err.response?.data?.detail ?? err.message ?? 'Failed to fetch opportunities');
@@ -89,7 +89,7 @@ export function WeeklyIncomeTrader() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const resp = await api.get<TraderStatus>('/api/weekly-income/status');
+      const resp = await api.get<TraderStatus>('/api/option-trading/status');
       setStatus(resp.data);
     } catch (err) {
       // Silent fail for status
@@ -98,7 +98,7 @@ export function WeeklyIncomeTrader() {
 
   const fetchPaperTradingStatus = useCallback(async () => {
     try {
-      const resp = await api.get<PaperTradingStatus>('/api/weekly-income/paper-trading/status');
+      const resp = await api.get<PaperTradingStatus>('/api/option-trading/paper-trading/status');
       setPaperStatus(resp.data);
     } catch (err) {
       // Silent fail for paper trading status
@@ -107,7 +107,7 @@ export function WeeklyIncomeTrader() {
 
   const executeSetup = async (setupId: string) => {
     try {
-      await api.post(`/api/weekly-income/execute?setup_id=${setupId}`);
+      await api.post(`/api/option-trading/execute?setup_id=${setupId}`);
       alert('Trade executed successfully (paper trading)');
       await fetchStatus();
     } catch (err: any) {
@@ -136,7 +136,7 @@ export function WeeklyIncomeTrader() {
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">💰 Weekly 5% Income Trader</h1>
+          <h1 className="text-3xl font-bold text-white">⚙️ Option Trading</h1>
           <p className="text-sm text-jarvis-text-secondary mt-1">
             Intelligent automated system targeting 5% weekly returns (defined-risk options buying only)
           </p>

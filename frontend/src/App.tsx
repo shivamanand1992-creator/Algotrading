@@ -11,7 +11,7 @@ import { SectorAnalysisView } from './components/sectors/SectorAnalysisView';
 import { ETFHoldingsView } from './components/holdings/ETFHoldingsView';
 import { PortfolioView } from './components/portfolio/PortfolioView';
 import { StockConvictionView } from './components/conviction/StockConvictionView';
-import { WeeklyIncomeTrader } from './components/weekly-income/WeeklyIncomeTrader';
+import { OptionTrader } from './components/weekly-income/WeeklyIncomeTrader';
 import { SectorAlertsManager } from './components/growsect/SectorAlertsManager';
 import { LoginView } from './components/auth/LoginView';
 import { api } from './api/client';
@@ -58,7 +58,7 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':  return <DashboardView />;
-      case 'weekly-income': return <WeeklyIncomeTrader />;
+      case 'weekly-income': return <OptionTrader />;
       case 'market':     return <MarketDataView />;
       case 'news':       return <MarketNewsView />;
       case 'stocks':     return <StocksView />;

@@ -65,7 +65,7 @@ def send(text: str, parse_mode: str = "HTML") -> bool:
 def send_eod_report(nb_service, swing_positions: list, balance: dict) -> bool:
     """Compose and send End-of-Day summary."""
     now_ist = datetime.now(_IST).strftime("%d %b %Y")
-    lines   = [f"🤖 *JARVIS EOD Report — {now_ist}*\n"]
+    lines   = [f"🔔 *Vaayu Notification*\n🤖 *JARVIS EOD Report — {now_ist}*\n"]
 
     # ── NiftyBees ──────────────────────────────────────────────────────
     pos = nb_service._position if nb_service else None
@@ -176,6 +176,7 @@ def send_eod_report(nb_service, swing_positions: list, balance: dict) -> bool:
 
 def send_low_balance_alert(available: float, required: float) -> bool:
     text = (
+        f"🔔 *Vaayu Notification*\n"
         f"⚠️ *JARVIS — Low Balance Alert*\n\n"
         f"• Available Cash: ₹{available:,.0f}\n"
         f"• Min Required for next DCA: ₹{required:,.0f}\n\n"
@@ -189,6 +190,7 @@ def send_trade_notification(action: str, symbol: str, qty: int, price: float,
     emoji = "🛒" if action == "BUY" else "💰"
     mode_label = "📝 PAPER" if mode == "paper" else "🔴 LIVE"
     lines = [
+        f"🔔 *Vaayu Notification*\n",
         f"{emoji} *JARVIS {action}* — {mode_label}",
         f"• Symbol: *{symbol}*",
         f"• Qty: {qty} @ ₹{price:.2f}",
@@ -212,6 +214,7 @@ def send_athena_entry(strategy: str, symbol: str, strikes: dict, premium: float,
     strategy_name = strategy_labels.get(strategy, strategy)
 
     lines = [
+        f"🔔 *Vaayu Notification*\n",
         f"🏛️ *ATHENA ENTRY* — {mode_label}",
         f"• Strategy: *{strategy_name}*",
         f"• Symbol: {symbol}",
@@ -264,6 +267,7 @@ def send_athena_exit(strategy: str, symbol: str, exit_reason: str,
     exit_label = exit_labels.get(exit_reason, exit_reason)
 
     lines = [
+        f"🔔 *Vaayu Notification*\n",
         f"🏛️ *ATHENA EXIT* — {mode_label}",
         f"• Strategy: *{strategy_name}*",
         f"• Symbol: {symbol}",

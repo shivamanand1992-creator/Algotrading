@@ -15,7 +15,7 @@ const navItems: NavItem[] = [
   { id: 'sectors',    label: 'Sector Rotation', icon: '↻' },
   { id: 'news',       label: 'Market News',    icon: '≡' },
 
-  { id: 'weekly-income', label: 'Weekly 5% Income', icon: '💰', section: 'TRADING' },
+  { id: 'weekly-income', label: 'Option Trading', icon: '⚙️', section: 'TRADING' },
 
   { id: 'stocks',     label: 'Equity Swing',   icon: '↗', section: 'PORTFOLIOS' },
   { id: 'niftybees',  label: 'NiftyBees ETF',  icon: '⬡' },
